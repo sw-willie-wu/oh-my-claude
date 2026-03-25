@@ -14,5 +14,5 @@ cp -r "$SCRIPT_DIR/layouts" "$OMC_DIR/"
 cp "$SCRIPT_DIR/preview.sh" "$OMC_DIR/"
 cp "$SCRIPT_DIR/generate-preview.sh" "$OMC_DIR/"
 
-# Create config if not exists
-[ -f "$OMC_CONF" ] || cp "$SCRIPT_DIR/oh-my-claude.conf" "$OMC_CONF"
+# Create config if not exists or is empty
+[ -s "$OMC_CONF" ] || cp "$SCRIPT_DIR/oh-my-claude.conf" "$OMC_CONF"
