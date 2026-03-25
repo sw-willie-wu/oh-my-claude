@@ -34,6 +34,7 @@ In Claude Code, run:
 ```
 /plugin marketplace add sw-willie-wu/oh-my-claude
 /plugin install oh-my-claude@oh-my-claude
+/reload-plugins
 ```
 
 Then run setup to configure the statusline:

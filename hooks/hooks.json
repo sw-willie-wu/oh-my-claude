@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "mkdir -p ~/.claude/oh-my-claude && cp \"${CLAUDE_PLUGIN_ROOT}/statusline.sh\" \"${CLAUDE_PLUGIN_ROOT}/preview.sh\" \"${CLAUDE_PLUGIN_ROOT}/generate-preview.sh\" ~/.claude/oh-my-claude/ && cp -r \"${CLAUDE_PLUGIN_ROOT}/themes\" \"${CLAUDE_PLUGIN_ROOT}/layouts\" ~/.claude/oh-my-claude/ && [ -f ~/.claude/oh-my-claude.conf ] || cp \"${CLAUDE_PLUGIN_ROOT}/oh-my-claude.conf\" ~/.claude/oh-my-claude.conf"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/setup.sh"
           }
         ]
       }

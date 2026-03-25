@@ -1,3 +1,7 @@
+---
+description: Preview all available oh-my-claude themes and layouts
+---
+
 Run the oh-my-claude preview script to show the user a visual demo of all available themes and layouts with actual ANSI colors:
 
 ```
