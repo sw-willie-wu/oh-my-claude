@@ -42,8 +42,8 @@ DIR=$(echo "$DIR" | sed 's|\\\\|/|g; s|\\|/|g; s|C:/Users/[^/]*/|~/|i')
 BRANCH="" ADD_FILES=0 MOD_FILES=0 DEL_FILES=0 LINES_ADD=0 LINES_DEL=0
 if git rev-parse --git-dir > /dev/null 2>&1; then
   BRANCH=$(git branch --show-current 2>/dev/null)
-  STATUS=$(git status --porcelain 2>/dev/null)
-  SUB_STATUS=$(git submodule foreach --quiet 'git status --porcelain 2>/dev/null' 2>/dev/null)
+  STATUS=$(git status --porcelain -uall 2>/dev/null)
+  SUB_STATUS=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
   ALL_STATUS=$(printf '%s\n%s' "$STATUS" "$SUB_STATUS")
   ADD_FILES=$(echo "$ALL_STATUS" | grep -c '^A\|^??')
   MOD_FILES=$(echo "$ALL_STATUS" | grep -c '^ M\|^M\|^MM\|^AM')

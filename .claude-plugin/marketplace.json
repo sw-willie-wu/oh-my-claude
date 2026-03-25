@@ -1,7 +1,7 @@
 {
   "name": "oh-my-claude",
   "owner": {
-    "name": "sw.willie.wu",
+    "name": "SW.Willie.Wu",
     "email": "ab30722@gmail.com"
   },
   "metadata": {
@@ -12,7 +12,7 @@
       "name": "oh-my-claude",
       "source": "./",
       "description": "Themeable statusline for Claude Code. 8 color themes and 5 layouts.",
-      "version": "1.0.2"
+      "version": "1.0.3"
     }
   ]
 }
