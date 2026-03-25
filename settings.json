@@ -1,0 +1,7 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/oh-my-claude/statusline.sh",
+    "padding": 1
+  }
+}
