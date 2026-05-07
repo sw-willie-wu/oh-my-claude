@@ -40,7 +40,11 @@ assert_eq() {
 assert_file_contains() {
   local file="$1" pattern="$2" msg="${3:-pattern not found}"
   if ! grep -qF "$pattern" "$file" 2>/dev/null; then
-    printf '    FAIL: %s\n      file: %s\n      pattern: %q\n' "$msg" "$file" "$pattern" >&2
+    if [ ! -f "$file" ]; then
+      printf '    FAIL: %s\n      file does not exist: %s\n' "$msg" "$file" >&2
+    else
+      printf '    FAIL: %s\n      file: %s\n      pattern: %q\n' "$msg" "$file" "$pattern" >&2
+    fi
     [ -f "$file" ] && printf '      contents:\n%s\n' "$(sed 's/^/        /' "$file")" >&2
     TEST_FAILED=1
   fi
@@ -56,8 +60,8 @@ assert_file_not_contains() {
 
 assert_line_count() {
   local file="$1" expected="$2" msg="${3:-line count mismatch}"
-  local actual
-  actual=$(wc -l < "$file" 2>/dev/null | tr -d ' ' || echo 0)
+  local actual=0
+  [ -f "$file" ] && actual=$(wc -l < "$file" | tr -d ' ')
   if [ "$actual" != "$expected" ]; then
     printf '    FAIL: %s\n      expected: %s\n      actual: %s\n      file: %s\n' "$msg" "$expected" "$actual" "$file" >&2
     [ -f "$file" ] && printf '      contents:\n%s\n' "$(sed 's/^/        /' "$file")" >&2
