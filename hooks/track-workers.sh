@@ -112,7 +112,8 @@ case "$ARG" in
       SF="$(state_file_for "$SESSION_ID")"
       : > "$SF"
     fi
-    # 24h cleanup happens in Task 9.
+    # Cleanup: delete sibling state-*.tsv with mtime > 24h.
+    find "$OMC_STATE_DIR" -maxdepth 1 -name 'state-*.tsv' -type f -mmin +1440 -delete 2>/dev/null
     ;;
   pre)
     SESSION_ID="$(get_field session_id || true)"

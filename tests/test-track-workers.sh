@@ -222,4 +222,23 @@ EOF
   end_test
 done
 
+start_test "session-start deletes sibling state files older than 24h"
+# Create three stale files and one fresh.
+OLD_FILE="$OMC_STATE_DIR/state-old-aaa.tsv"
+RECENT_FILE="$OMC_STATE_DIR/state-recent-bbb.tsv"
+printf 'agent\told\t-\told\t1\n' > "$OLD_FILE"
+printf 'agent\trecent\t-\trecent\t1\n' > "$RECENT_FILE"
+# Set OLD_FILE mtime to 25h ago (cross-platform).
+if date -d '25 hours ago' '+%Y%m%d%H%M.%S' >/dev/null 2>&1; then
+  touch -t "$(date -d '25 hours ago' '+%Y%m%d%H%M.%S')" "$OLD_FILE"
+else
+  touch -t "$(date -v-25H '+%Y%m%d%H%M.%S')" "$OLD_FILE"
+fi
+SESSION_ID="test-session-cleanup"
+echo "{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" \
+  | bash "$TRACK_WORKERS" session-start
+[ ! -f "$OLD_FILE" ] || { printf '    FAIL: stale file should have been deleted\n' >&2; TEST_FAILED=1; }
+[ -f "$RECENT_FILE" ] || { printf '    FAIL: recent file unexpectedly deleted\n' >&2; TEST_FAILED=1; }
+end_test
+
 print_summary
