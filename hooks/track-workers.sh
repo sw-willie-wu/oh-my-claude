@@ -54,7 +54,8 @@ with_lock() {
     if [ -d "$LOCK_DIR" ]; then
       local lock_age now mtime
       now=$(date +%s)
-      mtime=$(stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || echo "$now")
+      mtime=$(stat -c %Y "$LOCK_DIR" 2>/dev/null) || mtime=""
+      [ -z "$mtime" ] && mtime="$now"
       lock_age=$((now - mtime))
       if [ "$lock_age" -gt 10 ]; then
         rmdir "$LOCK_DIR" 2>/dev/null
@@ -62,8 +63,8 @@ with_lock() {
       fi
     fi
     tries=$((tries + 1))
-    if [ "$tries" -gt 20 ]; then
-      log "lock acquisition failed after 1s"
+    if [ "$tries" -gt 100 ]; then
+      log "lock acquisition failed after 5s"
       return 1
     fi
     sleep 0.05 2>/dev/null || sleep 1

@@ -241,4 +241,49 @@ echo "{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"SessionStart\",\"sou
 [ -f "$RECENT_FILE" ] || { printf '    FAIL: recent file unexpectedly deleted\n' >&2; TEST_FAILED=1; }
 end_test
 
+start_test "10 concurrent PreToolUse(Task) writers all land"
+SESSION_ID="test-session-concurrent"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+for i in $(seq 1 10); do
+  cat <<EOF | bash "$TRACK_WORKERS" pre &
+{
+  "session_id": "$SESSION_ID",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Task",
+  "tool_use_id": "toolu_c${i}",
+  "tool_input": { "subagent_type": "general-purpose", "description": "task ${i}" }
+}
+EOF
+done
+wait
+assert_line_count "$SF" 10 "expected 10 rows from concurrent writers"
+end_test
+
+start_test "stale lock (>10s) is broken and writer succeeds"
+SESSION_ID="test-session-stale-lock"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+mkdir "$OMC_STATE_DIR/state.lock" 2>/dev/null
+# Set lock dir mtime to 30s ago.
+if date -d '30 seconds ago' '+%Y%m%d%H%M.%S' >/dev/null 2>&1; then
+  touch -t "$(date -d '30 seconds ago' '+%Y%m%d%H%M.%S')" "$OMC_STATE_DIR/state.lock"
+else
+  touch -t "$(date -v-30S '+%Y%m%d%H%M.%S')" "$OMC_STATE_DIR/state.lock"
+fi
+START=$(date +%s)
+cat <<EOF | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "$SESSION_ID",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Task",
+  "tool_use_id": "toolu_stale",
+  "tool_input": { "subagent_type": "Plan", "description": "stale lock victim" }
+}
+EOF
+ELAPSED=$(( $(date +%s) - START ))
+assert_line_count "$SF" 1 "writer should have succeeded after breaking stale lock"
+[ "$ELAPSED" -le 2 ] || { printf '    FAIL: took %ds (>2s)\n' "$ELAPSED" >&2; TEST_FAILED=1; }
+end_test
+
 print_summary
