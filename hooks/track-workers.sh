@@ -106,13 +106,13 @@ append_row() {
   with_lock _do
 }
 
-# Remove rows from $sf where column $col equals $value.
-remove_by() {
-  local sf="$1" col="$2" value="$3"
+# Remove rows from $sf where column 1 (kind) == $kind AND column $col equals $value.
+remove_by_kind() {
+  local sf="$1" kind="$2" col="$3" value="$4"
   _do() {
     [ -f "$sf" ] || return 0
     local tmp="${sf}.tmp.$$"
-    awk -F'\t' -v c="$col" -v v="$value" '$c != v' "$sf" > "$tmp"
+    awk -F'\t' -v k="$kind" -v c="$col" -v v="$value" '!($1 == k && $c == v)' "$sf" > "$tmp"
     mv "$tmp" "$sf"
   }
   with_lock _do
@@ -173,7 +173,7 @@ case "$ARG" in
         ;;
       KillShell)
         ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.task_id // .tool_input.shell_id // empty' 2>/dev/null)
-        [ -n "$ID" ] && remove_by "$SF" 3 "$ID"
+        [ -n "$ID" ] && remove_by_kind "$SF" shell 3 "$ID"
         ;;
     esac
     ;;
@@ -185,7 +185,7 @@ case "$ARG" in
     SF="$(state_file_for "$SESSION_ID")" || exit 0
     case "$TOOL_NAME" in
       Task)
-        [ -n "$TOOL_USE_ID" ] && remove_by "$SF" 2 "$TOOL_USE_ID"
+        [ -n "$TOOL_USE_ID" ] && remove_by_kind "$SF" agent 2 "$TOOL_USE_ID"
         ;;
       Bash)
         BG_TASK_ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.backgroundTaskId // empty' 2>/dev/null)
@@ -199,7 +199,7 @@ case "$ARG" in
         # Terminal statuses (verified primary + defensive fallback set).
         case "$STATUS" in
           completed|failed|killed|exited|stopped|terminated)
-            [ -n "$ID" ] && remove_by "$SF" 3 "$ID"
+            [ -n "$ID" ] && remove_by_kind "$SF" shell 3 "$ID"
             ;;
         esac
         ;;

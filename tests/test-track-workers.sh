@@ -335,4 +335,25 @@ ACTUAL=$(awk -v input="$INPUT" 'BEGIN {
 assert_eq "$EXPECTED" "$ACTUAL" "unescape result must match"
 end_test
 
+start_test "cross-kind ID collision: agent.subagent_type matching shell.bg_task_id is not deleted by KillShell"
+SESSION_ID="test-session-collision"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+# Pathological: agent has subagent_type "bash_xyz9" (column 3), shell has same value as background_task_id.
+printf 'agent\ttoolu_a1\tbash_xyz9\tagent description\t1735000000\n' > "$SF"
+printf 'shell\ttoolu_b1\tbash_xyz9\tshell description\tnpm run dev\t1735000005\n' >> "$SF"
+cat <<EOF | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "$SESSION_ID",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "KillShell",
+  "tool_use_id": "toolu_ks_collision",
+  "tool_input": { "task_id": "bash_xyz9" }
+}
+EOF
+# Only the shell row should be removed; agent row must survive.
+assert_line_count "$SF" 1 "agent row should survive KillShell"
+assert_file_contains "$SF" "agent	toolu_a1	bash_xyz9"
+assert_file_not_contains "$SF" "shell	toolu_b1"
+end_test
+
 print_summary
