@@ -92,6 +92,19 @@ remove_by() {
   with_lock _do
 }
 
+# Update column $target_col of rows where column $key_col == $key_value.
+update_col() {
+  local sf="$1" key_col="$2" key_value="$3" target_col="$4" new_value="$5"
+  _do() {
+    [ -f "$sf" ] || return 0
+    local tmp="${sf}.tmp.$$"
+    awk -F'\t' -v OFS='\t' -v kc="$key_col" -v kv="$key_value" -v tc="$target_col" -v nv="$new_value" \
+      '{ if ($kc == kv) $tc = nv; print }' "$sf" > "$tmp"
+    mv "$tmp" "$sf"
+  }
+  with_lock _do
+}
+
 case "$ARG" in
   session-start)
     SESSION_ID="$(get_field session_id || true)"
@@ -142,6 +155,12 @@ case "$ARG" in
     case "$TOOL_NAME" in
       Task)
         [ -n "$TOOL_USE_ID" ] && remove_by "$SF" 2 "$TOOL_USE_ID"
+        ;;
+      Bash)
+        BG_TASK_ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.backgroundTaskId // empty' 2>/dev/null)
+        if [ -n "$BG_TASK_ID" ] && [ -n "$TOOL_USE_ID" ]; then
+          update_col "$SF" 2 "$TOOL_USE_ID" 3 "$BG_TASK_ID"
+        fi
         ;;
     esac
     ;;

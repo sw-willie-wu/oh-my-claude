@@ -119,4 +119,27 @@ EOF
 assert_line_count "$SF" 0 "expected no rows"
 end_test
 
+start_test "PostToolUse(Bash) patches backgroundTaskId into shell row column 3"
+SESSION_ID="test-session-007"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+printf 'shell\ttoolu_b1\t-\trun dev server\tnpm run dev\t1735000000\n' > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" post
+{
+  "session_id": "test-session-007",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_b1",
+  "tool_input": { "command": "npm run dev", "run_in_background": true },
+  "tool_response": {
+    "stdout": "",
+    "stderr": "",
+    "interrupted": false,
+    "backgroundTaskId": "bash_xyz9"
+  }
+}
+EOF
+assert_file_contains "$SF" "shell	toolu_b1	bash_xyz9	run dev server	npm run dev"
+assert_file_not_contains "$SF" "shell	toolu_b1	-"
+end_test
+
 print_summary
