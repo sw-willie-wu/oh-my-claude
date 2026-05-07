@@ -63,4 +63,60 @@ EOF
 assert_line_count "$SF" 0 "expected row to be removed"
 end_test
 
+start_test "PreToolUse(Bash, run_in_background:true) appends shell row"
+SESSION_ID="test-session-004"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "test-session-004",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_b1",
+  "tool_input": {
+    "command": "npm run dev",
+    "description": "run dev server",
+    "run_in_background": true
+  }
+}
+EOF
+assert_line_count "$SF" 1 "expected one shell row"
+assert_file_contains "$SF" "shell	toolu_b1	-	run dev server	npm run dev"
+end_test
+
+start_test "PreToolUse(Bash, run_in_background:false) is no-op"
+SESSION_ID="test-session-005"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "test-session-005",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_b2",
+  "tool_input": {
+    "command": "ls",
+    "run_in_background": false
+  }
+}
+EOF
+assert_line_count "$SF" 0 "expected no rows"
+end_test
+
+start_test "PreToolUse(Bash, no run_in_background field) is no-op"
+SESSION_ID="test-session-006"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "test-session-006",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_b3",
+  "tool_input": { "command": "ls" }
+}
+EOF
+assert_line_count "$SF" 0 "expected no rows"
+end_test
+
 print_summary

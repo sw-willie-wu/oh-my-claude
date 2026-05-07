@@ -118,6 +118,19 @@ case "$ARG" in
           "$(now_unix)")
         append_row "$SF" "$ROW"
         ;;
+      Bash)
+        BG=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.run_in_background // false' 2>/dev/null)
+        if [ "$BG" = "true" ]; then
+          DESCRIPTION="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.description // empty' 2>/dev/null)"
+          COMMAND="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.command // empty' 2>/dev/null)"
+          ROW=$(printf 'shell\t%s\t-\t%s\t%s\t%s' \
+            "$TOOL_USE_ID" \
+            "$(escape_field "$DESCRIPTION")" \
+            "$(escape_field "$COMMAND")" \
+            "$(now_unix)")
+          append_row "$SF" "$ROW"
+        fi
+        ;;
     esac
     ;;
   post)
