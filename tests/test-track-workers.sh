@@ -204,4 +204,22 @@ EOF
 assert_line_count "$SF" 0 "row should be removed on killed status"
 end_test
 
+for ALIAS in task_id shell_id; do
+  start_test "PreToolUse(KillShell) with $ALIAS alias removes shell row"
+  SESSION_ID="test-session-ks-$ALIAS"
+  SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+  seed_shell_row "$SESSION_ID"
+  cat <<EOF | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "$SESSION_ID",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "KillShell",
+  "tool_use_id": "toolu_ks1",
+  "tool_input": { "$ALIAS": "bash_xyz9" }
+}
+EOF
+  assert_line_count "$SF" 0 "row should be removed for $ALIAS alias"
+  end_test
+done
+
 print_summary

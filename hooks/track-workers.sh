@@ -144,6 +144,10 @@ case "$ARG" in
           append_row "$SF" "$ROW"
         fi
         ;;
+      KillShell)
+        ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.task_id // .tool_input.shell_id // empty' 2>/dev/null)
+        [ -n "$ID" ] && remove_by "$SF" 3 "$ID"
+        ;;
     esac
     ;;
   post)
