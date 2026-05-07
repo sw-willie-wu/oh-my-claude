@@ -80,6 +80,18 @@ append_row() {
   with_lock _do
 }
 
+# Remove rows from $sf where column $col equals $value.
+remove_by() {
+  local sf="$1" col="$2" value="$3"
+  _do() {
+    [ -f "$sf" ] || return 0
+    local tmp="${sf}.tmp.$$"
+    awk -F'\t' -v c="$col" -v v="$value" '$c != v' "$sf" > "$tmp"
+    mv "$tmp" "$sf"
+  }
+  with_lock _do
+}
+
 case "$ARG" in
   session-start)
     SESSION_ID="$(get_field session_id || true)"
@@ -109,7 +121,16 @@ case "$ARG" in
     esac
     ;;
   post)
-    : # Implemented in subsequent tasks.
+    SESSION_ID="$(get_field session_id || true)"
+    TOOL_NAME="$(get_field tool_name || true)"
+    TOOL_USE_ID="$(get_field tool_use_id || true)"
+    [ -z "$SESSION_ID" ] && exit 0
+    SF="$(state_file_for "$SESSION_ID")" || exit 0
+    case "$TOOL_NAME" in
+      Task)
+        [ -n "$TOOL_USE_ID" ] && remove_by "$SF" 2 "$TOOL_USE_ID"
+        ;;
+    esac
     ;;
   *)
     log "unknown arg: $ARG"

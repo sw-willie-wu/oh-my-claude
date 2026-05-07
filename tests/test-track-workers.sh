@@ -46,4 +46,21 @@ assert_line_count "$SF" 1 "expected one agent row"
 assert_file_contains "$SF" "agent	toolu_a1	claude-code-guide	research statusline feature"
 end_test
 
+start_test "PostToolUse(Task) removes agent row"
+SESSION_ID="test-session-003"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+printf 'agent\ttoolu_a1\tgeneral-purpose\ttest description\t1735000000\n' > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" post
+{
+  "session_id": "test-session-003",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Task",
+  "tool_use_id": "toolu_a1",
+  "tool_input": {},
+  "tool_response": {}
+}
+EOF
+assert_line_count "$SF" 0 "expected row to be removed"
+end_test
+
 print_summary
