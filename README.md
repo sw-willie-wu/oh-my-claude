@@ -1,6 +1,6 @@
 # oh-my-claude
 
-Themeable statusline plugin for [Claude Code](https://claude.com/claude-code). Mix and match **8 color themes** with **5 layouts**.
+Themeable statusline plugin for [Claude Code](https://claude.com/claude-code). Mix and match **9 color themes** with **6 layouts**.
 
 ## Themes
 
@@ -14,6 +14,7 @@ Themeable statusline plugin for [Claude Code](https://claude.com/claude-code). M
 | **onedark** | Atom-inspired balanced palette |
 | **solarized** | Ethan Schoonover's classic |
 | **rosepine** | Soft rose and pine tones |
+| **mygo** | BanG Dream! MyGO!!!!! band colors |
 
 ## Layouts
 
@@ -24,6 +25,42 @@ Themeable statusline plugin for [Claude Code](https://claude.com/claude-code). M
 | **powerline** | Arrow separators (requires Nerd Font) |
 | **pure** | Clean text, no icons or special characters |
 | **fancy** | Three lines with detailed info and box drawing |
+| **mygo** | Band-inspired two-line with musical separators |
+
+## Workers
+
+When subagents (Task tool) or background shells (Bash with `run_in_background: true`) are running, they appear as dedicated lines at the top of the statusline:
+
+```
+ claude-code-guide: research-statusline-feature              12s
+ run-dev-server: npm run dev                              4m32s
+◇ opus  ~/oh-my-claude  main +2 ~1
+████░░░ 23%   ██░░░░░ 15%   █░░░░░ 8%
+```
+
+Each line shows: nerd-font icon, optional `subagent_type` prefix, description, optional command (shells only), and elapsed time. Long lines are tail-truncated.
+
+### Configuration
+
+Add to `~/.claude/oh-my-claude.conf`:
+
+```bash
+WORKERS_ENABLED=true              # master toggle
+WORKERS_SHOW_AGENTS=true          # show subagent lines
+WORKERS_SHOW_SHELLS=true          # show background bash lines
+WORKERS_SHOW_TYPE=true            # show subagent_type prefix on agent lines
+WORKERS_SHOW_ELAPSED=true         # show elapsed time
+WORKERS_MAX=5                     # 0 = unlimited
+WORKERS_AGENT_ICON=""           # nf-fa-cogs
+WORKERS_SHELL_ICON=""           # nf-cod-terminal
+WORKERS_SHELL_MAX_AGE=3600        # seconds; older shells are dimmed and marked '?'
+```
+
+### Limitations
+
+- Background shells that crash without being polled (`BashOutput`) may continue to show as running. After `WORKERS_SHELL_MAX_AGE` (default 1h) they are visually dimmed and marked with `?`. Use Claude Code's built-in `/bashes` command for the true running state.
+- Requires `jq` for hook side. Without it, the hook silently no-ops and no worker lines appear; the rest of the statusline is unaffected.
+- For elapsed time to keep updating while the main agent waits on subagents, set `"refreshInterval": 1` in your `statusLine` settings (the `/oh-my-claude:setup` command does this automatically).
 
 ## Install
 
