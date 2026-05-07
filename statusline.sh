@@ -170,6 +170,10 @@ emit_workers() {
       *) continue ;;
     esac
 
+    # Skip corrupt rows where start_unix is missing or non-numeric.
+    if [ -z "$start" ] || ! [[ "$start" =~ ^[0-9]+$ ]]; then
+      continue
+    fi
     local age=$((now - start))
     if [ "$kind" = "shell" ] && [ "$age" -gt "$WORKERS_SHELL_MAX_AGE" ]; then
       color="$C_SUBTEXT"

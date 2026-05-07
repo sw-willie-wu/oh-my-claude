@@ -88,5 +88,15 @@ echo "$OUT" | grep -qF 'should not appear' \
   && { printf '    FAIL: worker line emitted despite WORKERS_ENABLED=false\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 end_test
 
+start_test "corrupt row (missing start_unix) is skipped silently"
+SID="render-test-005"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+# Row missing the trailing start_unix column.
+printf 'agent\ttoolu_a5\tgeneral-purpose\tcorrupt row no timestamp\n' > "$SF"
+OUT="$(run_workers "$SID" 120 | strip_ansi)"
+echo "$OUT" | grep -qF 'corrupt row no timestamp' \
+  && { printf '    FAIL: corrupt row should not render\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+end_test
+
 cleanup_render_state
 print_summary
