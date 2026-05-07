@@ -25,4 +25,25 @@ STATE_FILE="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
 assert_line_count "$STATE_FILE" 0 "fresh state file should be empty"
 end_test
 
+start_test "PreToolUse(Task) appends agent row"
+SESSION_ID="test-session-002"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"  # ensure empty start
+cat <<'EOF' | OMC_STATE_DIR="$OMC_STATE_DIR" bash "$TRACK_WORKERS" pre
+{
+  "session_id": "test-session-002",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Task",
+  "tool_use_id": "toolu_a1",
+  "tool_input": {
+    "subagent_type": "claude-code-guide",
+    "description": "research statusline feature",
+    "prompt": "..."
+  }
+}
+EOF
+assert_line_count "$SF" 1 "expected one agent row"
+assert_file_contains "$SF" "agent	toolu_a1	claude-code-guide	research statusline feature"
+end_test
+
 print_summary

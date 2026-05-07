@@ -41,6 +41,45 @@ state_file_for() {
   printf '%s/state-%s.tsv' "$OMC_STATE_DIR" "$sid"
 }
 
+# Escape tabs/newlines/backslashes for safe TSV storage.
+escape_field() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/	/\\t/g' -e 's/$/\\n/' | tr -d '\n' | sed 's/\\n$//'
+}
+
+now_unix() { date +%s; }
+
+with_lock() {
+  local fn="$1" tries=0
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if [ -d "$LOCK_DIR" ]; then
+      local lock_age now mtime
+      now=$(date +%s)
+      mtime=$(stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || echo "$now")
+      lock_age=$((now - mtime))
+      if [ "$lock_age" -gt 10 ]; then
+        rmdir "$LOCK_DIR" 2>/dev/null
+        continue
+      fi
+    fi
+    tries=$((tries + 1))
+    if [ "$tries" -gt 20 ]; then
+      log "lock acquisition failed after 1s"
+      return 1
+    fi
+    sleep 0.05 2>/dev/null || sleep 1
+  done
+  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' RETURN INT TERM EXIT
+  "$fn"
+  rmdir "$LOCK_DIR" 2>/dev/null
+  trap - RETURN INT TERM EXIT
+}
+
+append_row() {
+  local sf="$1" row="$2"
+  _do() { printf '%s\n' "$row" >> "$sf"; }
+  with_lock _do
+}
+
 case "$ARG" in
   session-start)
     SESSION_ID="$(get_field session_id || true)"
@@ -51,7 +90,23 @@ case "$ARG" in
     # 24h cleanup happens in Task 9.
     ;;
   pre)
-    : # Implemented in subsequent tasks.
+    SESSION_ID="$(get_field session_id || true)"
+    TOOL_NAME="$(get_field tool_name || true)"
+    TOOL_USE_ID="$(get_field tool_use_id || true)"
+    [ -z "$SESSION_ID" ] && exit 0
+    SF="$(state_file_for "$SESSION_ID")" || exit 0
+    case "$TOOL_NAME" in
+      Task)
+        SUBAGENT_TYPE="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)"
+        DESCRIPTION="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.description // empty' 2>/dev/null)"
+        ROW=$(printf 'agent\t%s\t%s\t%s\t%s' \
+          "$TOOL_USE_ID" \
+          "$(escape_field "$SUBAGENT_TYPE")" \
+          "$(escape_field "$DESCRIPTION")" \
+          "$(now_unix)")
+        append_row "$SF" "$ROW"
+        ;;
+    esac
     ;;
   post)
     : # Implemented in subsequent tasks.
