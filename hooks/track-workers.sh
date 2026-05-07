@@ -46,6 +46,20 @@ escape_field() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/	/\\t/g' -e 's/$/\\n/' | tr -d '\n' | sed 's/\\n$//'
 }
 
+unescape_field() {
+  # Reverse of escape_field: \t → tab, \n → newline, \\ → backslash.
+  # Order matters: handle \\ first via a sentinel byte (0x01), then \t and \n,
+  # then restore the sentinel back to a single backslash. Bytes/escapes are
+  # injected by bash ($'...' / ${s}) so neither GNU nor BSD sed needs to
+  # interpret \x escapes — portable to macOS.
+  local s=$'\x01'
+  printf '%s' "$1" | sed \
+    -e "s/\\\\\\\\/${s}/g" \
+    -e $'s/\\\\t/\t/g' \
+    -e $'s/\\\\n/\n/g' \
+    -e "s/${s}/\\\\/g"
+}
+
 now_unix() { date +%s; }
 
 with_lock() {

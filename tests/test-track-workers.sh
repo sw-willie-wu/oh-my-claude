@@ -286,4 +286,28 @@ assert_line_count "$SF" 1 "writer should have succeeded after breaking stale loc
 [ "$ELAPSED" -le 2 ] || { printf '    FAIL: took %ds (>2s)\n' "$ELAPSED" >&2; TEST_FAILED=1; }
 end_test
 
+start_test "description with tab/newline/backslash round-trips through state file"
+SESSION_ID="test-session-escape"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+# Description contains a literal tab, a newline, and backslashes.
+cat <<'EOF' | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "test-session-escape",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Task",
+  "tool_use_id": "toolu_esc",
+  "tool_input": {
+    "subagent_type": "general-purpose",
+    "description": "a\tb\nc\\d"
+  }
+}
+EOF
+# After escape, the row stays one line (no embedded raw newlines/tabs in description column).
+assert_line_count "$SF" 1 "escape must keep row to single line"
+# State file should NOT contain a raw embedded newline inside the description (it'd split the row).
+RAW_LINES=$(awk 'END {print NR}' "$SF")
+assert_eq "1" "$RAW_LINES" "row must be one TSV line after escaping"
+end_test
+
 print_summary
