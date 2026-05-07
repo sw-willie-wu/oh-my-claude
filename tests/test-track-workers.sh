@@ -142,4 +142,66 @@ assert_file_contains "$SF" "shell	toolu_b1	bash_xyz9	run dev server	npm run dev"
 assert_file_not_contains "$SF" "shell	toolu_b1	-"
 end_test
 
+# Helper to seed a shell row before each BashOutput test.
+seed_shell_row() {
+  local sid="$1"
+  local sf="$OMC_STATE_DIR/state-${sid}.tsv"
+  printf 'shell\ttoolu_b1\tbash_xyz9\trun dev server\tnpm run dev\t1735000000\n' > "$sf"
+}
+
+for ALIAS in task_id agentId bash_id; do
+  start_test "PostToolUse(BashOutput) terminal status with $ALIAS alias removes row"
+  SESSION_ID="test-session-bo-$ALIAS"
+  SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+  seed_shell_row "$SESSION_ID"
+  CURR_ALIAS="$ALIAS"
+  CURR_SESSION_ID="$SESSION_ID"
+  cat <<EOF | bash "$TRACK_WORKERS" post
+{
+  "session_id": "$CURR_SESSION_ID",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "BashOutput",
+  "tool_use_id": "toolu_bo1",
+  "tool_input": { "$CURR_ALIAS": "bash_xyz9" },
+  "tool_response": { "status": "completed" }
+}
+EOF
+  assert_line_count "$SF" 0 "row should be removed for $ALIAS alias"
+  end_test
+done
+
+start_test "PostToolUse(BashOutput) status=running is no-op"
+SESSION_ID="test-session-bo-running"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+seed_shell_row "$SESSION_ID"
+cat <<'EOF' | bash "$TRACK_WORKERS" post
+{
+  "session_id": "test-session-bo-running",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "BashOutput",
+  "tool_use_id": "toolu_bo2",
+  "tool_input": { "task_id": "bash_xyz9" },
+  "tool_response": { "status": "running" }
+}
+EOF
+assert_line_count "$SF" 1 "row should remain (status not terminal)"
+end_test
+
+start_test "PostToolUse(BashOutput) status=killed removes row"
+SESSION_ID="test-session-bo-killed"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+seed_shell_row "$SESSION_ID"
+cat <<'EOF' | bash "$TRACK_WORKERS" post
+{
+  "session_id": "test-session-bo-killed",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "BashOutput",
+  "tool_use_id": "toolu_bo3",
+  "tool_input": { "task_id": "bash_xyz9" },
+  "tool_response": { "status": "killed" }
+}
+EOF
+assert_line_count "$SF" 0 "row should be removed on killed status"
+end_test
+
 print_summary

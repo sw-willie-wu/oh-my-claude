@@ -162,6 +162,16 @@ case "$ARG" in
           update_col "$SF" 2 "$TOOL_USE_ID" 3 "$BG_TASK_ID"
         fi
         ;;
+      BashOutput)
+        ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.task_id // .tool_input.agentId // .tool_input.bash_id // empty' 2>/dev/null)
+        STATUS=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.status // empty' 2>/dev/null)
+        # Terminal statuses (verified primary + defensive fallback set).
+        case "$STATUS" in
+          completed|failed|killed|exited|stopped|terminated)
+            [ -n "$ID" ] && remove_by "$SF" 3 "$ID"
+            ;;
+        esac
+        ;;
     esac
     ;;
   *)
