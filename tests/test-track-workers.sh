@@ -310,4 +310,29 @@ RAW_LINES=$(awk 'END {print NR}' "$SF")
 assert_eq "1" "$RAW_LINES" "row must be one TSV line after escaping"
 end_test
 
+start_test "unescape_field reverses escape_field"
+INPUT='a\tb\nc\\d'
+EXPECTED=$(printf 'a\tb\nc\\d')
+ACTUAL=$(awk -v input="$INPUT" 'BEGIN {
+  s = input
+  n = length(s)
+  out = ""
+  i = 1
+  while (i <= n) {
+    c = substr(s, i, 1)
+    if (c == "\\" && i < n) {
+      nc = substr(s, i + 1, 1)
+      if (nc == "t") { out = out "\t"; i += 2; continue }
+      if (nc == "n") { out = out "\n"; i += 2; continue }
+      if (nc == "\\") { out = out "\\"; i += 2; continue }
+    }
+    out = out c
+    i += 1
+  }
+  printf "%s", out
+  exit
+}')
+assert_eq "$EXPECTED" "$ACTUAL" "unescape result must match"
+end_test
+
 print_summary

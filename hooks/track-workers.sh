@@ -48,16 +48,27 @@ escape_field() {
 
 unescape_field() {
   # Reverse of escape_field: \t → tab, \n → newline, \\ → backslash.
-  # Order matters: handle \\ first via a sentinel byte (0x01), then \t and \n,
-  # then restore the sentinel back to a single backslash. Bytes/escapes are
-  # injected by bash ($'...' / ${s}) so neither GNU nor BSD sed needs to
-  # interpret \x escapes — portable to macOS.
-  local s=$'\x01'
-  printf '%s' "$1" | sed \
-    -e "s/\\\\\\\\/${s}/g" \
-    -e $'s/\\\\t/\t/g' \
-    -e $'s/\\\\n/\n/g' \
-    -e "s/${s}/\\\\/g"
+  # Implemented in awk because sed replacement strings can't portably
+  # contain literal newlines.
+  awk 'BEGIN {
+    s = ARGV[1]
+    n = length(s)
+    out = ""
+    i = 1
+    while (i <= n) {
+      c = substr(s, i, 1)
+      if (c == "\\" && i < n) {
+        nc = substr(s, i + 1, 1)
+        if (nc == "t") { out = out "\t"; i += 2; continue }
+        if (nc == "n") { out = out "\n"; i += 2; continue }
+        if (nc == "\\") { out = out "\\"; i += 2; continue }
+      }
+      out = out c
+      i += 1
+    }
+    printf "%s", out
+    exit
+  }' "$1"
 }
 
 now_unix() { date +%s; }
