@@ -22,8 +22,8 @@ LAYOUT="default"
 : "${WORKERS_SHOW_TYPE:=true}"
 : "${WORKERS_SHOW_ELAPSED:=true}"
 : "${WORKERS_MAX:=5}"
-: "${WORKERS_AGENT_ICON:=}"
-: "${WORKERS_SHELL_ICON:=}"
+# WORKERS_AGENT_ICON / WORKERS_SHELL_ICON default in each theme;
+# user conf overrides (use empty string to disable an icon).
 : "${WORKERS_SHELL_MAX_AGE:=3600}"
 : "${WORKERS_OUTPUT_FALLBACK_ENABLED:=true}"
 
