@@ -1,7 +1,7 @@
 {
   "name": "oh-my-claude",
   "description": "Themeable statusline for Claude Code. 9 color themes (catppuccin, dracula, nord, gruvbox, tokyonight, onedark, solarized, rosepine, mygo) and 6 layouts (default, minimal, powerline, pure, fancy, mygo).",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": {
     "name": "SW.Willie.Wu"
   },

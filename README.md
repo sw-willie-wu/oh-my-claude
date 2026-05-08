@@ -54,7 +54,14 @@ WORKERS_MAX=5                     # 0 = unlimited
 WORKERS_AGENT_ICON=""           # nf-fa-cogs
 WORKERS_SHELL_ICON=""           # nf-cod-terminal
 WORKERS_SHELL_MAX_AGE=3600        # seconds; older shells are dimmed and marked '?'
+WORKERS_OUTPUT_FALLBACK_ENABLED=true  # use Claude Code's bg-task output file as fallback liveness check when PID acquisition fails; disable if Claude Code's temp layout changes upstream
 ```
+
+### Known limits
+
+- Two simultaneous bg commands sharing the first 60 chars of their command bind to a single PID. When one completes, both rows prune together.
+- PID reuse: a recycled PID for a long-dead bg row may falsely report "alive". Bounded by `WORKERS_SHELL_MAX_AGE` greying behavior.
+- Output-file fallback path depends on Claude Code's `$TEMP/claude/<wd_id>/<session>/tasks/<bash_id>.output` layout. Set `WORKERS_OUTPUT_FALLBACK_ENABLED=false` to disable if the layout changes.
 
 ### Limitations
 
