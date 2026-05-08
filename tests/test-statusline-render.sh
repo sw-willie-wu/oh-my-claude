@@ -199,5 +199,55 @@ RESULT=$(bash -c "
 assert_line_count "$SF" 0 "dead row should be removed by prune"
 end_test
 
+start_test "prune drops shell row with dead PID, keeps alive shell + agent"
+SID="render-test-prune-1"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+sleep 30 &
+LIVE_PID=$!
+DEAD_PID=99999999
+{
+  printf 'agent\ttoolu_a1\tgeneral-purpose\talive agent\t%s\n' "$NOW"
+  printf 'shell\ttoolu_b_dead\tbash_dead\tdead bash\tsleep 99\t%s\t%s\n' "$NOW" "$DEAD_PID"
+  printf 'shell\ttoolu_b_live\tbash_live\tlive bash\tsleep 99\t%s\t%s\n' "$NOW" "$LIVE_PID"
+} > "$SF"
+OUT=$(run_workers "$SID" 200 | strip_ansi)
+kill "$LIVE_PID" 2>/dev/null
+wait "$LIVE_PID" 2>/dev/null
+echo "$OUT" | grep -qF 'alive agent' \
+  || { printf '    FAIL: agent missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF 'live bash' \
+  || { printf '    FAIL: alive shell missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qvF 'dead bash' \
+  || { printf '    FAIL: dead shell still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+grep -qF 'bash_dead' "$SF" \
+  && { printf '    FAIL: dead row not removed from state\n' >&2; TEST_FAILED=1; }
+end_test
+
+start_test "prune preserves agent row at exactly 5 columns (N-C1 regression)"
+SID="render-test-prune-2"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+printf 'agent\ttoolu_a1\tgeneral-purpose\tagent only\t%s\n' "$NOW" > "$SF"
+run_workers "$SID" 200 >/dev/null
+COLCOUNT=$(awk -F'\t' '{print NF}' "$SF" | head -1)
+assert_eq "5" "$COLCOUNT" "agent row should remain 5 cols after prune"
+end_test
+
+start_test "prune uses output-file fallback for legacy 6-col shell row"
+SID="render-test-prune-3"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+TMPROOT=$(mktemp -d)
+WD_ID='-tmp'
+mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
+touch "$TMPROOT/claude/$WD_ID/$SID/tasks/bash_legacy.output"
+printf 'shell\ttoolu_legacy\tbash_legacy\tlegacy\tsleep 99\t%s\n' "$NOW" > "$SF"
+OUT=$(TEMP="$TMPROOT" run_workers "$SID" 200 | strip_ansi)
+echo "$OUT" | grep -qF 'legacy' \
+  || { printf '    FAIL: legacy row pruned despite present output file\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+rm -rf "$TMPROOT"
+end_test
+
 cleanup_render_state
 print_summary

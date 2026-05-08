@@ -146,11 +146,15 @@ emit_workers() {
   [ -z "$SESSION_ID" ] && return 0
   [ -f "$WORKERS_STATE_FILE" ] || return 0
 
+  local rendered
+  rendered="$(omc_with_lock prune_state_and_emit)"
+  [ -z "$rendered" ] && return 0
+
   local now count=0
   now=$(date +%s)
   local width="${COLUMNS:-120}"
 
-  while IFS=$'\t' read -r kind tool_use_id col3 desc col5 col6; do
+  printf '%s\n' "$rendered" | while IFS=$'\t' read -r kind tool_use_id col3 desc col5 col6 col7; do
     [ -z "$kind" ] && continue
     [ "$WORKERS_MAX" != "0" ] && [ "$count" -ge "$WORKERS_MAX" ] && break
 
@@ -188,7 +192,6 @@ emit_workers() {
       *) continue ;;
     esac
 
-    # Skip corrupt rows where start_unix is missing or non-numeric.
     if [ -z "$start" ] || ! [[ "$start" =~ ^[0-9]+$ ]]; then
       continue
     fi
@@ -225,7 +228,7 @@ emit_workers() {
     fi
 
     count=$((count + 1))
-  done < "$WORKERS_STATE_FILE"
+  done
 }
 
 # ---------------------------------------------------------------------------
