@@ -11,4 +11,4 @@ C_SURFACE='\033[38;2;7;54;66m'
 
 # Worker row icons (set to "" in oh-my-claude.conf to disable).
 WORKERS_AGENT_ICON=${WORKERS_AGENT_ICON-$'\xf0\x9f\xa4\x96'}
-WORKERS_SHELL_ICON=${WORKERS_SHELL_ICON-$'\xf0\x9f\x90\x9a'}
+WORKERS_SHELL_ICON=${WORKERS_SHELL_ICON-$'\xe2\x8f\xb3'}
