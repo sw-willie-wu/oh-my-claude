@@ -31,7 +31,9 @@ strip_ansi() {
 # bars, etc.) follows but doesn't interfere with these tests.
 run_workers() {
   local sid="$1" cols="${2:-120}"
-  COLUMNS="$cols" bash -c "
+  # Isolate from user's oh-my-claude.conf so tests don't depend on
+  # whichever LAYOUT/THEME the developer happens to use locally.
+  COLUMNS="$cols" OMC_CONF=/dev/null bash -c "
     echo '{\"session_id\":\"$sid\",\"model\":{\"display_name\":\"X\"},\"workspace\":{\"current_dir\":\"/tmp\"}}' \
       | bash $STATUSLINE 2>/dev/null
   "

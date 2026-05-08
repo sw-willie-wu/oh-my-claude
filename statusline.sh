@@ -297,7 +297,9 @@ if [ "${RATE7_PCT:-0}" -gt 80 ] && [ -n "$RATE7_RESET" ]; then
   RATE7_SUFFIX=" (${RATE7_DATE})"
 fi
 
-emit_workers
+# Layouts can set WORKERS_LAYOUT_CONTROLLED=true and call emit_workers
+# themselves at a custom position inside their render function.
+[ "${WORKERS_LAYOUT_CONTROLLED:-false}" = "true" ] || emit_workers
 
 # Call the layout's render function
 render
