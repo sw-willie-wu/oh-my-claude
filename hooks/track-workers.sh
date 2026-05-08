@@ -8,9 +8,11 @@ ARG="${1:-}"
 # Override-able for tests.
 OMC_STATE_DIR="${OMC_STATE_DIR:-$HOME/.claude/oh-my-claude/state}"
 OMC_LOG_FILE="${OMC_LOG_FILE:-$OMC_STATE_DIR/track-workers.log}"
-LOCK_DIR="$OMC_STATE_DIR/state.lock"
 
-mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="$(dirname "$SCRIPT_DIR")/lib"
+# shellcheck source=../lib/state-lock.sh
+. "$LIB_DIR/state-lock.sh"
 
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$OMC_LOG_FILE" 2>/dev/null || true
@@ -73,37 +75,10 @@ unescape_field() {
 
 now_unix() { date +%s; }
 
-with_lock() {
-  local fn="$1" tries=0
-  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
-    if [ -d "$LOCK_DIR" ]; then
-      local lock_age now mtime
-      now=$(date +%s)
-      mtime=$(stat -c %Y "$LOCK_DIR" 2>/dev/null) || mtime=""
-      [ -z "$mtime" ] && mtime="$now"
-      lock_age=$((now - mtime))
-      if [ "$lock_age" -gt 10 ]; then
-        rmdir "$LOCK_DIR" 2>/dev/null
-        continue
-      fi
-    fi
-    tries=$((tries + 1))
-    if [ "$tries" -gt 100 ]; then
-      log "lock acquisition failed after 5s"
-      return 1
-    fi
-    sleep 0.05 2>/dev/null || sleep 1
-  done
-  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' RETURN INT TERM EXIT
-  "$fn"
-  rmdir "$LOCK_DIR" 2>/dev/null
-  trap - RETURN INT TERM EXIT
-}
-
 append_row() {
   local sf="$1" row="$2"
   _do() { printf '%s\n' "$row" >> "$sf"; }
-  with_lock _do
+  omc_with_lock _do
 }
 
 # Remove rows from $sf where column 1 (kind) == $kind AND column $col equals $value.
@@ -115,7 +90,7 @@ remove_by_kind() {
     awk -F'\t' -v k="$kind" -v c="$col" -v v="$value" '!($1 == k && $c == v)' "$sf" > "$tmp"
     mv "$tmp" "$sf"
   }
-  with_lock _do
+  omc_with_lock _do
 }
 
 # Update column $target_col of rows where column $key_col == $key_value.
@@ -128,7 +103,7 @@ update_col() {
       '{ if ($kc == kv) $tc = nv; print }' "$sf" > "$tmp"
     mv "$tmp" "$sf"
   }
-  with_lock _do
+  omc_with_lock _do
 }
 
 case "$ARG" in
