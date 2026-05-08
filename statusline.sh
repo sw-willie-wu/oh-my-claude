@@ -57,6 +57,10 @@ RATE5_RESET=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"resets_at
 RATE7_PCT=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
 RATE7_RESET=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
 
+# Capture raw cwd before destructive normalization below — used by output-file
+# fallback in is_bash_output_present. JSON-extracted via grep leaves backslashes
+# doubled, so collapse \\\\ -> \\ here. (TODO: switch JSON extraction to jq for
+# robustness against \", \uXXXX, etc.)
 WORKDIR_RAW=$(printf '%s' "$DIR" | sed 's|\\\\|\\|g')
 [ -n "${OMC_DEBUG_DUMP_WORKDIR_RAW:-}" ] && printf 'WORKDIR_RAW=%s\n' "$WORKDIR_RAW" >&2
 
