@@ -236,7 +236,7 @@ COLCOUNT=$(awk -F'\t' '{print NF}' "$SF" | head -1)
 assert_eq "5" "$COLCOUNT" "agent row should remain 5 cols after prune"
 end_test
 
-start_test "prune uses output-file fallback for legacy 6-col shell row"
+start_test "prune uses output-file fallback for legacy 6-col shell row (beyond grace)"
 SID="render-test-prune-3"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 NOW=$(date +%s)
@@ -244,11 +244,69 @@ TMPROOT=$(mktemp -d)
 WD_ID='-tmp'
 mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
 touch "$TMPROOT/claude/$WD_ID/$SID/tasks/bash_legacy.output"
-printf 'shell\ttoolu_legacy\tbash_legacy\tlegacy\tsleep 99\t%s\n' "$NOW" > "$SF"
-OUT=$(TEMP="$TMPROOT" run_workers "$SID" 200 | strip_ansi)
+# Force age > grace so the grace short-circuit is bypassed and fallback runs.
+printf 'shell\ttoolu_legacy\tbash_legacy\tlegacy\tsleep 99\t%s\n' "$((NOW - 120))" > "$SF"
+OUT=$(TEMP="$TMPROOT" WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
 echo "$OUT" | grep -qF 'legacy' \
   || { printf '    FAIL: legacy row pruned despite present output file\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+grep -qF 'toolu_legacy' "$SF" \
+  || { printf '    FAIL: legacy row removed from state file despite present output file\n' >&2; TEST_FAILED=1; }
 rm -rf "$TMPROOT"
+end_test
+
+start_test "row with valid col3 but col7 empty (post inter-update gap) is kept within grace"
+SID="render-test-prune-postgap"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+# Simulates the window between post's first update_col (col3=bg id) and the
+# second (col7=PID). No output file present; only grace should keep it.
+printf 'shell\ttoolu_postgap\tbash_realid\tinflight\tsleep 99\t%s\n' "$NOW" > "$SF"
+OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
+echo "$OUT" | grep -qF 'inflight' \
+  || { printf '    FAIL: post-gap row pruned during grace\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+grep -qF 'toolu_postgap' "$SF" \
+  || { printf '    FAIL: post-gap row removed from state file during grace\n' >&2; TEST_FAILED=1; }
+end_test
+
+start_test "row with valid col3 but col7 empty beyond grace falls through to output-file fallback"
+SID="render-test-prune-postgap-stale"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+TMPROOT=$(mktemp -d)
+WD_ID='-tmp'
+mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
+# No output file → fallback returns false → row pruned.
+printf 'shell\ttoolu_postgap2\tbash_missing\tdead\tsleep 99\t%s\n' "$((NOW - 120))" > "$SF"
+OUT=$(TEMP="$TMPROOT" WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
+echo "$OUT" | grep -qvF 'dead' \
+  || { printf '    FAIL: stale row with missing output file still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+grep -qF 'toolu_postgap2' "$SF" \
+  && { printf '    FAIL: stale row not pruned from state file\n' >&2; TEST_FAILED=1; }
+rm -rf "$TMPROOT"
+end_test
+
+start_test "placeholder shell row (col3=- col7 missing) survives prune within grace"
+SID="render-test-prune-placeholder-1"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+printf 'shell\ttoolu_pre1\t-\tjust started\tsleep 999\t%s\n' "$NOW" > "$SF"
+OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
+echo "$OUT" | grep -qF 'just started' \
+  || { printf '    FAIL: placeholder row pruned during grace window\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+grep -qF 'toolu_pre1' "$SF" \
+  || { printf '    FAIL: placeholder row removed from state file during grace\n' >&2; TEST_FAILED=1; }
+end_test
+
+start_test "stale placeholder row is reaped after grace window"
+SID="render-test-prune-placeholder-2"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+printf 'shell\ttoolu_pre2\t-\torphaned\tsleep 999\t%s\n' "$((NOW - 120))" > "$SF"
+OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
+echo "$OUT" | grep -qvF 'orphaned' \
+  || { printf '    FAIL: stale placeholder still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+grep -qF 'toolu_pre2' "$SF" \
+  && { printf '    FAIL: stale placeholder row not pruned from state file\n' >&2; TEST_FAILED=1; }
 end_test
 
 cleanup_render_state

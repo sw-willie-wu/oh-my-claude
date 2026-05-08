@@ -26,6 +26,12 @@ LAYOUT="default"
 # user conf overrides (use empty string to disable an icon).
 : "${WORKERS_SHELL_MAX_AGE:=3600}"
 : "${WORKERS_OUTPUT_FALLBACK_ENABLED:=true}"
+# Grace window for shell rows whose col7 (PID) hasn't been filled yet by
+# PostToolUse — covers both the placeholder gap (col3="-") and the brief
+# sub-window between the two `update_col` writes inside post (col3 set,
+# col7 still empty). Without it, a statusline tick inside either gap
+# false-prunes the row.
+: "${WORKERS_PLACEHOLDER_GRACE_SEC:=60}"
 
 LIB_DIR="${OMC_DIR}/lib"
 [ -d "$LIB_DIR" ] || LIB_DIR="$SCRIPT_DIR/lib"
@@ -125,7 +131,25 @@ prune_state_and_emit() {
       if [ -n "$col7" ] && [ "$col7" -gt 0 ] 2>/dev/null; then
         is_alive "$col7" || keep=false
       else
-        is_bash_output_present "$col3" || keep=false
+        # col7 missing/0: row is either the PreToolUse placeholder, the
+        # gap between post's two update_col writes, a legacy 6-col row,
+        # or a row whose PID acquisition failed (PID=0).
+        # Within grace: always keep — covers the hook race window.
+        # Beyond grace: if col3 still "-", PostToolUse never ran → reap;
+        # otherwise fall through to output-file fallback.
+        local now_ts age within_grace=false
+        now_ts=$(date +%s)
+        if [ -n "$col6" ] && [ "$col6" -gt 0 ] 2>/dev/null; then
+          age=$((now_ts - col6))
+          [ "$age" -le "$WORKERS_PLACEHOLDER_GRACE_SEC" ] && within_grace=true
+        fi
+        if [ "$within_grace" = "true" ]; then
+          : # keep
+        elif [ "$col3" = "-" ]; then
+          keep=false
+        else
+          is_bash_output_present "$col3" || keep=false
+        fi
       fi
     fi
     [ "$keep" = "true" ] || continue
