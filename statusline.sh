@@ -25,6 +25,7 @@ LAYOUT="default"
 : "${WORKERS_AGENT_ICON:=}"
 : "${WORKERS_SHELL_ICON:=}"
 : "${WORKERS_SHELL_MAX_AGE:=3600}"
+: "${WORKERS_OUTPUT_FALLBACK_ENABLED:=true}"
 
 # Load theme and layout
 THEME_FILE="${OMC_DIR}/themes/${THEME}.sh"
@@ -95,6 +96,16 @@ is_alive() {
       kill -0 "$pid" 2>/dev/null
       ;;
   esac
+}
+
+is_bash_output_present() {
+  [ "${WORKERS_OUTPUT_FALLBACK_ENABLED:-true}" = "true" ] || return 1
+  local bash_id="$1" tmp wd_id
+  [ -z "$bash_id" ] && return 1
+  tmp="${TEMP:-${TMPDIR:-/tmp}}"
+  tmp="${tmp//\\//}"
+  wd_id=$(printf '%s' "$WORKDIR_RAW" | sed 's|[:\\/]|-|g')
+  [ -f "${tmp}/claude/${wd_id}/${SESSION_ID}/tasks/${bash_id}.output" ]
 }
 
 emit_workers() {

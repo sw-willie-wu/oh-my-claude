@@ -130,5 +130,57 @@ assert_eq "ALIVE" "$ALIVE_OUT" "running PID should be alive"
 assert_eq "DEAD" "$DEAD_OUT" "nonexistent PID should be dead"
 end_test
 
+start_test "is_bash_output_present returns true when output file exists"
+SID="render-test-output-fb-1"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+TMPROOT=$(mktemp -d)
+WD_RAW='C:\Users\test\proj'
+WD_ID='C--Users-test-proj'
+mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
+touch "$TMPROOT/claude/$WD_ID/$SID/tasks/bash_xyz.output"
+RESULT=$(TEMP="$TMPROOT" bash -c "
+  OMC_TEST_LIB_ONLY=1
+  source '$STATUSLINE'
+  WORKDIR_RAW='$WD_RAW'
+  SESSION_ID='$SID'
+  is_bash_output_present bash_xyz && echo YES || echo NO
+")
+assert_eq "YES" "$RESULT" "output file existed but helper returned false"
+rm -rf "$TMPROOT"
+end_test
+
+start_test "is_bash_output_present returns false when file missing"
+SID="render-test-output-fb-2"
+TMPROOT=$(mktemp -d)
+WD_RAW='C:\Users\test\proj'
+RESULT=$(TEMP="$TMPROOT" bash -c "
+  OMC_TEST_LIB_ONLY=1
+  source '$STATUSLINE'
+  WORKDIR_RAW='$WD_RAW'
+  SESSION_ID='$SID'
+  is_bash_output_present bash_missing && echo YES || echo NO
+")
+assert_eq "NO" "$RESULT" "missing output file should return false"
+rm -rf "$TMPROOT"
+end_test
+
+start_test "is_bash_output_present returns false when fallback disabled"
+SID="render-test-output-fb-3"
+TMPROOT=$(mktemp -d)
+WD_RAW='C:\Users\test\proj'
+WD_ID='C--Users-test-proj'
+mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
+touch "$TMPROOT/claude/$WD_ID/$SID/tasks/bash_xyz.output"
+RESULT=$(TEMP="$TMPROOT" WORKERS_OUTPUT_FALLBACK_ENABLED=false bash -c "
+  OMC_TEST_LIB_ONLY=1
+  source '$STATUSLINE'
+  WORKDIR_RAW='$WD_RAW'
+  SESSION_ID='$SID'
+  is_bash_output_present bash_xyz && echo YES || echo NO
+")
+assert_eq "NO" "$RESULT" "disabled flag should suppress fallback"
+rm -rf "$TMPROOT"
+end_test
+
 cleanup_render_state
 print_summary
