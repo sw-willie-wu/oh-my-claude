@@ -182,5 +182,22 @@ assert_eq "NO" "$RESULT" "disabled flag should suppress fallback"
 rm -rf "$TMPROOT"
 end_test
 
+start_test "prune_state_and_emit drops dead shell row from file (unit)"
+SID="render-test-prune-unit"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+DEAD_PID=99999999
+printf 'shell\ttoolu_b\tbash_x\tdesc\tcmd\t%s\t%s\n' "$NOW" "$DEAD_PID" > "$SF"
+RESULT=$(bash -c "
+  OMC_TEST_LIB_ONLY=1
+  source '$STATUSLINE'
+  WORKERS_STATE_FILE='$SF'
+  WORKDIR_RAW='/tmp'
+  SESSION_ID='$SID'
+  prune_state_and_emit
+")
+assert_line_count "$SF" 0 "dead row should be removed by prune"
+end_test
+
 cleanup_render_state
 print_summary

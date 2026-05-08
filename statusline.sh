@@ -27,6 +27,11 @@ LAYOUT="default"
 : "${WORKERS_SHELL_MAX_AGE:=3600}"
 : "${WORKERS_OUTPUT_FALLBACK_ENABLED:=true}"
 
+LIB_DIR="${OMC_DIR}/lib"
+[ -d "$LIB_DIR" ] || LIB_DIR="$SCRIPT_DIR/lib"
+# shellcheck source=lib/state-lock.sh
+. "$LIB_DIR/state-lock.sh"
+
 # Load theme and layout
 THEME_FILE="${OMC_DIR}/themes/${THEME}.sh"
 LAYOUT_FILE="${OMC_DIR}/layouts/${LAYOUT}.sh"
@@ -106,6 +111,34 @@ is_bash_output_present() {
   tmp="${tmp//\\//}"
   wd_id=$(printf '%s' "$WORKDIR_RAW" | sed 's|[:\\/]|-|g')
   [ -f "${tmp}/claude/${wd_id}/${SESSION_ID}/tasks/${bash_id}.output" ]
+}
+
+prune_state_and_emit() {
+  local sf="$WORKERS_STATE_FILE"
+  [ -f "$sf" ] || return 0
+  local tmp="${sf}.prune.$$"
+  : > "$tmp"
+  while IFS=$'\t' read -r kind tool_use_id col3 desc col5 col6 col7 || [ -n "$kind" ]; do
+    [ -z "$kind" ] && continue
+    local keep=true
+    if [ "$kind" = "shell" ]; then
+      if [ -n "$col7" ] && [ "$col7" -gt 0 ] 2>/dev/null; then
+        is_alive "$col7" || keep=false
+      else
+        is_bash_output_present "$col3" || keep=false
+      fi
+    fi
+    [ "$keep" = "true" ] || continue
+    if [ "$kind" = "agent" ]; then
+      printf '%s\t%s\t%s\t%s\t%s\n' "$kind" "$tool_use_id" "$col3" "$desc" "$col5" >> "$tmp"
+    else
+      printf '%s\t%s\t%s\t%s\t%s\t%s' "$kind" "$tool_use_id" "$col3" "$desc" "$col5" "$col6" >> "$tmp"
+      [ -n "$col7" ] && printf '\t%s' "$col7" >> "$tmp"
+      printf '\n' >> "$tmp"
+    fi
+  done < "$sf"
+  mv "$tmp" "$sf"
+  cat "$sf"
 }
 
 emit_workers() {
