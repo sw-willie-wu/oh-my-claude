@@ -11,6 +11,7 @@ mkdir -p "$OMC_DIR"
 cp "$SCRIPT_DIR/statusline.sh" "$OMC_DIR/"
 cp -r "$SCRIPT_DIR/themes" "$OMC_DIR/"
 cp -r "$SCRIPT_DIR/layouts" "$OMC_DIR/"
+cp -r "$SCRIPT_DIR/lib" "$OMC_DIR/"
 cp "$SCRIPT_DIR/preview.sh" "$OMC_DIR/"
 cp "$SCRIPT_DIR/generate-preview.sh" "$OMC_DIR/"
 
