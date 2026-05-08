@@ -98,5 +98,16 @@ echo "$OUT" | grep -qF 'corrupt row no timestamp' \
   && { printf '    FAIL: corrupt row should not render\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 end_test
 
+start_test "WORKDIR_RAW preserves raw current_dir for output-file fallback path"
+SID="render-test-workdir-raw"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+: > "$SF"
+# Inject a debug echo via env override (we'll add WORKDIR_RAW capture in statusline).
+OUT=$(echo "{\"session_id\":\"$SID\",\"model\":{\"display_name\":\"X\"},\"workspace\":{\"current_dir\":\"C:\\\\Users\\\\test\\\\proj\"}}" \
+  | OMC_DEBUG_DUMP_WORKDIR_RAW=1 bash "$STATUSLINE" 2>&1)
+echo "$OUT" | grep -qF 'WORKDIR_RAW=C:\Users\test\proj' \
+  || { printf '    FAIL: WORKDIR_RAW not captured pre-normalization\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+end_test
+
 cleanup_render_state
 print_summary
