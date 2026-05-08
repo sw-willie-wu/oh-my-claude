@@ -34,65 +34,14 @@ LAYOUT_FILE="${OMC_DIR}/layouts/${LAYOUT}.sh"
 source "$THEME_FILE"
 source "$LAYOUT_FILE"
 
-# Read JSON input from stdin
-input=$(cat)
+# RESET fallback (themes usually define it).
+: "${RESET:=$'\033[0m'}"
 
-# Extract session_id (jq preferred; grep fallback for jq-less systems).
-SESSION_ID=""
-if command -v jq >/dev/null 2>&1; then
-  SESSION_ID=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)
-fi
-if [ -z "$SESSION_ID" ]; then
-  SESSION_ID=$(printf '%s' "$input" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
-fi
-SANITIZED_SID=$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9-_' '_')
-WORKERS_STATE_FILE="$HOME/.claude/oh-my-claude/state/state-${SANITIZED_SID}.tsv"
-
-# Parse JSON fields
-MODEL=$(echo "$input" | grep -o '"display_name":"[^"]*"' | cut -d'"' -f4 | sed 's/ (.*//')
-DIR=$(echo "$input" | grep -o '"current_dir":"[^"]*"' | head -1 | cut -d'"' -f4)
-CTX_PCT=$(echo "$input" | grep -o '"used_percentage":[0-9]*' | head -1 | grep -o '[0-9]*')
-RATE5_PCT=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
-RATE5_RESET=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
-RATE7_PCT=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
-RATE7_RESET=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
-
-# Capture raw cwd before destructive normalization below — used by output-file
-# fallback in is_bash_output_present. JSON-extracted via grep leaves backslashes
-# doubled, so collapse \\\\ -> \\ here. (TODO: switch JSON extraction to jq for
-# robustness against \", \uXXXX, etc.)
-WORKDIR_RAW=$(printf '%s' "$DIR" | sed 's|\\\\|\\|g')
-[ -n "${OMC_DEBUG_DUMP_WORKDIR_RAW:-}" ] && printf 'WORKDIR_RAW=%s\n' "$WORKDIR_RAW" >&2
-
-# Convert Windows path to ~/relative
-DIR=$(echo "$DIR" | sed 's|\\\\|/|g; s|\\|/|g; s|C:/Users/[^/]*/|~/|i')
-
-# Git info (if in a repo)
-BRANCH="" ADD_FILES=0 MOD_FILES=0 DEL_FILES=0 LINES_ADD=0 LINES_DEL=0
-if git rev-parse --git-dir > /dev/null 2>&1; then
-  BRANCH=$(git branch --show-current 2>/dev/null)
-  STATUS=$(git status --porcelain -uall 2>/dev/null)
-  SUB_STATUS=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
-  ALL_STATUS=$(printf '%s\n%s' "$STATUS" "$SUB_STATUS")
-  ADD_FILES=$(echo "$ALL_STATUS" | grep -c '^A\|^??')
-  MOD_FILES=$(echo "$ALL_STATUS" | grep -c '^ M\|^M\|^MM\|^AM')
-  DEL_FILES=$(echo "$ALL_STATUS" | grep -c '^ D\|^D')
-  DIFF_STATS=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
-  LINES_ADD=$(echo "$DIFF_STATS" | awk '{s+=$1} END {print s+0}')
-  LINES_DEL=$(echo "$DIFF_STATS" | awk '{s+=$2} END {print s+0}')
-fi
-
-# Rate limit reset info
-RATE5_SUFFIX=""
-if [ "${RATE5_PCT:-0}" -gt 80 ] && [ -n "$RATE5_RESET" ]; then
-  RATE5_HOUR=$(date -d "@$RATE5_RESET" '+%H:%M' 2>/dev/null || date -r "$RATE5_RESET" '+%H:%M' 2>/dev/null)
-  RATE5_SUFFIX=" (${RATE5_HOUR})"
-fi
-RATE7_SUFFIX=""
-if [ "${RATE7_PCT:-0}" -gt 80 ] && [ -n "$RATE7_RESET" ]; then
-  RATE7_DATE=$(date -d "@$RATE7_RESET" '+%m/%d' 2>/dev/null || date -r "$RATE7_RESET" '+%m/%d' 2>/dev/null)
-  RATE7_SUFFIX=" (${RATE7_DATE})"
-fi
+# ---------------------------------------------------------------------------
+# Helper functions — defined before the render gate so test loaders can
+# source this file (with OMC_TEST_LIB_ONLY=1) and access them without
+# triggering JSON parsing or the render pipeline.
+# ---------------------------------------------------------------------------
 
 unescape_field() {
   # Reverse of escape_field: \t → tab, \n → newline, \\ → backslash.
@@ -128,6 +77,22 @@ format_elapsed() {
   else
     printf '%dh%dm' $((s / 3600)) $(((s % 3600) / 60))
   fi
+}
+
+is_alive() {
+  local pid="$1"
+  [ -z "$pid" ] && return 1
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      # MSYS bash's kill -0 doesn't recognize native Windows PIDs (the kind ps -W returns).
+      # ps -W col1 is the MSYS/cygwin PID, col4 is the native WINPID; match either.
+      ps -W 2>/dev/null | awk -v p="$pid" '$1==p || $4==p {f=1} END {exit !f}'
+      ;;
+    *)
+      command -v kill >/dev/null 2>&1 || return 0
+      kill -0 "$pid" 2>/dev/null
+      ;;
+  esac
 }
 
 emit_workers() {
@@ -217,10 +182,75 @@ emit_workers() {
   done < "$WORKERS_STATE_FILE"
 }
 
-# RESET fallback (themes usually define it).
-: "${RESET:=$'\033[0m'}"
+# ---------------------------------------------------------------------------
+# Render pipeline — gated so test loaders can source this file without
+# blocking on stdin or triggering side-effects.
+# ---------------------------------------------------------------------------
+if [ -z "${OMC_TEST_LIB_ONLY:-}" ]; then
+
+# Read JSON input from stdin
+input=$(cat)
+
+# Extract session_id (jq preferred; grep fallback for jq-less systems).
+SESSION_ID=""
+if command -v jq >/dev/null 2>&1; then
+  SESSION_ID=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)
+fi
+if [ -z "$SESSION_ID" ]; then
+  SESSION_ID=$(printf '%s' "$input" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+fi
+SANITIZED_SID=$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9-_' '_')
+WORKERS_STATE_FILE="$HOME/.claude/oh-my-claude/state/state-${SANITIZED_SID}.tsv"
+
+# Parse JSON fields
+MODEL=$(echo "$input" | grep -o '"display_name":"[^"]*"' | cut -d'"' -f4 | sed 's/ (.*//')
+DIR=$(echo "$input" | grep -o '"current_dir":"[^"]*"' | head -1 | cut -d'"' -f4)
+CTX_PCT=$(echo "$input" | grep -o '"used_percentage":[0-9]*' | head -1 | grep -o '[0-9]*')
+RATE5_PCT=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
+RATE5_RESET=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
+RATE7_PCT=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
+RATE7_RESET=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
+
+# Capture raw cwd before destructive normalization below — used by output-file
+# fallback in is_bash_output_present. JSON-extracted via grep leaves backslashes
+# doubled, so collapse \\\\ -> \\ here. (TODO: switch JSON extraction to jq for
+# robustness against \", \uXXXX, etc.)
+WORKDIR_RAW=$(printf '%s' "$DIR" | sed 's|\\\\|\\|g')
+[ -n "${OMC_DEBUG_DUMP_WORKDIR_RAW:-}" ] && printf 'WORKDIR_RAW=%s\n' "$WORKDIR_RAW" >&2
+
+# Convert Windows path to ~/relative
+DIR=$(echo "$DIR" | sed 's|\\\\|/|g; s|\\|/|g; s|C:/Users/[^/]*/|~/|i')
+
+# Git info (if in a repo)
+BRANCH="" ADD_FILES=0 MOD_FILES=0 DEL_FILES=0 LINES_ADD=0 LINES_DEL=0
+if git rev-parse --git-dir > /dev/null 2>&1; then
+  BRANCH=$(git branch --show-current 2>/dev/null)
+  STATUS=$(git status --porcelain -uall 2>/dev/null)
+  SUB_STATUS=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
+  ALL_STATUS=$(printf '%s\n%s' "$STATUS" "$SUB_STATUS")
+  ADD_FILES=$(echo "$ALL_STATUS" | grep -c '^A\|^??')
+  MOD_FILES=$(echo "$ALL_STATUS" | grep -c '^ M\|^M\|^MM\|^AM')
+  DEL_FILES=$(echo "$ALL_STATUS" | grep -c '^ D\|^D')
+  DIFF_STATS=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
+  LINES_ADD=$(echo "$DIFF_STATS" | awk '{s+=$1} END {print s+0}')
+  LINES_DEL=$(echo "$DIFF_STATS" | awk '{s+=$2} END {print s+0}')
+fi
+
+# Rate limit reset info
+RATE5_SUFFIX=""
+if [ "${RATE5_PCT:-0}" -gt 80 ] && [ -n "$RATE5_RESET" ]; then
+  RATE5_HOUR=$(date -d "@$RATE5_RESET" '+%H:%M' 2>/dev/null || date -r "$RATE5_RESET" '+%H:%M' 2>/dev/null)
+  RATE5_SUFFIX=" (${RATE5_HOUR})"
+fi
+RATE7_SUFFIX=""
+if [ "${RATE7_PCT:-0}" -gt 80 ] && [ -n "$RATE7_RESET" ]; then
+  RATE7_DATE=$(date -d "@$RATE7_RESET" '+%m/%d' 2>/dev/null || date -r "$RATE7_RESET" '+%m/%d' 2>/dev/null)
+  RATE7_SUFFIX=" (${RATE7_DATE})"
+fi
 
 emit_workers
 
 # Call the layout's render function
 render
+
+fi # end OMC_TEST_LIB_ONLY gate

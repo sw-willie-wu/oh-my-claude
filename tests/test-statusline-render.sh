@@ -109,5 +109,26 @@ echo "$OUT" | grep -qF 'WORKDIR_RAW=C:\Users\test\proj' \
   || { printf '    FAIL: WORKDIR_RAW not captured pre-normalization\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 end_test
 
+start_test "is_alive returns true for running PID, false for dead PID"
+SID="render-test-isalive"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+sleep 30 &
+LIVE_PID=$!
+DEAD_PID=99999999
+ALIVE_OUT=$(bash -c "
+  source '$STATUSLINE.lib_test_loader.sh' 2>/dev/null || true
+  is_alive $LIVE_PID && echo ALIVE || echo DEAD
+")
+DEAD_OUT=$(bash -c "
+  source '$STATUSLINE.lib_test_loader.sh' 2>/dev/null || true
+  is_alive $DEAD_PID && echo ALIVE || echo DEAD
+")
+kill "$LIVE_PID" 2>/dev/null
+wait "$LIVE_PID" 2>/dev/null
+assert_eq "ALIVE" "$ALIVE_OUT" "running PID should be alive"
+assert_eq "DEAD" "$DEAD_OUT" "nonexistent PID should be dead"
+end_test
+
 cleanup_render_state
 print_summary
