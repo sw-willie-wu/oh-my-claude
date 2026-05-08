@@ -2,7 +2,9 @@
 # oh-my-claude - Themeable statusline for Claude Code
 # https://github.com/anthropics/claude-code
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Use BASH_SOURCE so this resolves correctly whether the file is executed
+# directly or sourced (e.g. by statusline.sh.lib_test_loader.sh).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OMC_DIR="${OMC_DIR:-$SCRIPT_DIR}"
 OMC_CONF="${OMC_CONF:-$HOME/.claude/oh-my-claude.conf}"
 
