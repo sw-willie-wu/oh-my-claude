@@ -4,8 +4,6 @@
 # Line 3: worker rows (agent / shell), if any
 # Line 4: usage meters with labels
 
-WORKERS_LAYOUT_CONTROLLED=true
-
 RESET='\033[0m'
 
 meter() {
