@@ -459,6 +459,40 @@ kill "$SPAWNED_PID" 2>/dev/null
 wait "$SPAWNED_PID" 2>/dev/null
 end_test
 
+start_test "PostToolUse(Bash, bg) captures PID when command is wrapped in 'eval'"
+# Claude Code on MSYS bash wraps user commands as:
+#   /bin/bash -c "source <snapshot>.sh && eval '<user_command>' && pwd ..."
+# Strict prefix match on the user command never hits because cmd starts with
+# `/bin/bash -c source ...`. Hook must also match the `eval '<user_command>'`
+# substring.
+SESSION_ID="test-session-pid-eval"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+# Use a unique-string + short sleep so the spawned tree self-terminates
+# regardless of whether explicit cleanup reaches the orphaned grandchild.
+EVAL_TAG="omc_evalprobe_$$"
+printf 'shell\ttoolu_eval\t-\teval probe\tsleep 5 && echo %s\t1735000000\n' "$EVAL_TAG" > "$SF"
+( /usr/bin/bash -c "eval 'sleep 5 && echo $EVAL_TAG' < /dev/null" ) &
+SPAWNED_PID=$!
+sleep 0.3
+cat <<EOF | bash "$TRACK_WORKERS" post
+{
+  "session_id": "$SESSION_ID",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_eval",
+  "tool_input": {"command": "sleep 5 && echo $EVAL_TAG", "run_in_background": true},
+  "tool_response": {"backgroundTaskId": "bash_eval"}
+}
+EOF
+COL7=$(awk -F'\t' '{print $7}' "$SF")
+[ -n "$COL7" ] && [ "$COL7" -gt 0 ] 2>/dev/null \
+  || { printf '    FAIL: col7 not a positive PID for eval-wrapped command, got=%q\n' "$COL7" >&2; TEST_FAILED=1; }
+# Best-effort cleanup; the 5s sleep will self-terminate even if these miss.
+kill "$SPAWNED_PID" 2>/dev/null
+pkill -f "$EVAL_TAG" 2>/dev/null
+wait "$SPAWNED_PID" 2>/dev/null
+end_test
+
 start_test "PostToolUse(Bash, bg) sets PID=0 when no process matches fingerprint"
 SESSION_ID="test-session-pid-2"
 SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"

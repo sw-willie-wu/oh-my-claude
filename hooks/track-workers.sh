@@ -193,9 +193,17 @@ case "$ARG" in
             # Prefer -ww (no COMMAND truncation, needed for the 60-char
             # fingerprint match on long commands). Fall back to plain
             # variants on platforms whose ps doesn't accept -w (e.g. MSYS).
+            # MSYS bash wraps the user command as `bash -c "... && eval '<cmd>' ..."`,
+            # so also match the `eval '<fp>` substring; POSIX direct-spawn paths
+            # still hit via the prefix match.
             PID=$( { ps -Wefww 2>/dev/null || ps -efww 2>/dev/null \
                   || ps -Wef 2>/dev/null   || ps -ef 2>/dev/null; } \
-              | awk -v fp="$FP" 'NR>1 { cmd=""; for(i=6;i<=NF;i++) cmd=cmd (i>6?" ":"") $i; if (index(cmd, fp)==1) print $2, $5 }' \
+              | awk -v fp="$FP" 'NR>1 {
+                  cmd=""
+                  for(i=6;i<=NF;i++) cmd=cmd (i>6?" ":"") $i
+                  needle="eval \047" fp
+                  if (index(cmd, fp)==1 || index(cmd, needle)>0) print $2, $5
+                }' \
               | sort -k2 | tail -1 | awk '{print $1}' )
             [ -z "$PID" ] && PID=0
           fi
