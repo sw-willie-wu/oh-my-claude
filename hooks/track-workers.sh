@@ -166,6 +166,17 @@ case "$ARG" in
         BG_TASK_ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.backgroundTaskId // empty' 2>/dev/null)
         if [ -n "$BG_TASK_ID" ] && [ -n "$TOOL_USE_ID" ]; then
           update_col "$SF" 2 "$TOOL_USE_ID" 3 "$BG_TASK_ID"
+          # Acquire PID by ps fingerprint. Failure -> PID=0; render side falls back to output-file check.
+          COMMAND="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.command // empty' 2>/dev/null)"
+          FP="${COMMAND:0:60}"
+          PID=0
+          if command -v ps >/dev/null 2>&1 && [ -n "$FP" ]; then
+            PID=$( { ps -Wef 2>/dev/null || ps -ef 2>/dev/null; } \
+              | awk -v fp="$FP" 'NR>1 { cmd=""; for(i=6;i<=NF;i++) cmd=cmd (i>6?" ":"") $i; if (index(cmd, fp)==1) print $2, $5 }' \
+              | sort -k2 | tail -1 | awk '{print $1}' )
+            [ -z "$PID" ] && PID=0
+          fi
+          update_col "$SF" 2 "$TOOL_USE_ID" 7 "$PID"
         fi
         ;;
       BashOutput)

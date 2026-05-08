@@ -356,4 +356,48 @@ assert_file_contains "$SF" "agent	toolu_a1	bash_xyz9"
 assert_file_not_contains "$SF" "shell	toolu_b1"
 end_test
 
+start_test "PostToolUse(Bash, bg) stores PID in col7"
+SESSION_ID="test-session-pid-1"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+# Pre-state: row already added by PreToolUse, col3=- placeholder.
+printf 'shell\ttoolu_b1\t-\trun forever\tsleep 9999\t1735000000\n' > "$SF"
+# Spawn a real bash that matches the fingerprint.
+( exec -a bash bash -c 'sleep 9999' ) &
+SPAWNED_PID=$!
+sleep 0.2  # let ps see it
+cat <<EOF | bash "$TRACK_WORKERS" post
+{
+  "session_id": "$SESSION_ID",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_b1",
+  "tool_input": {"command": "sleep 9999", "run_in_background": true},
+  "tool_response": {"backgroundTaskId": "bash_xyz"}
+}
+EOF
+COL7=$(awk -F'\t' '{print $7}' "$SF")
+[ -n "$COL7" ] && [ "$COL7" -gt 0 ] 2>/dev/null \
+  || { printf '    FAIL: col7 not a positive PID, got=%q\n' "$COL7" >&2; TEST_FAILED=1; }
+kill "$SPAWNED_PID" 2>/dev/null
+wait "$SPAWNED_PID" 2>/dev/null
+end_test
+
+start_test "PostToolUse(Bash, bg) sets PID=0 when no process matches fingerprint"
+SESSION_ID="test-session-pid-2"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+printf 'shell\ttoolu_b2\t-\tno match\toxqz_uniqueprefix_neverseen_1234567890_aaaaaaaaaaaaaaaaaaaaaaaa\t1735000000\n' > "$SF"
+cat <<EOF | bash "$TRACK_WORKERS" post
+{
+  "session_id": "$SESSION_ID",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_b2",
+  "tool_input": {"command": "oxqz_uniqueprefix_neverseen_1234567890_aaaaaaaaaaaaaaaaaaaaaaaa", "run_in_background": true},
+  "tool_response": {"backgroundTaskId": "bash_xyz2"}
+}
+EOF
+COL7=$(awk -F'\t' '{print $7}' "$SF")
+assert_eq "0" "$COL7" "expected col7=0 when no fingerprint match"
+end_test
+
 print_summary
