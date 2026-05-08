@@ -77,7 +77,21 @@ now_unix() { date +%s; }
 
 append_row() {
   local sf="$1" row="$2"
-  _do() { printf '%s\n' "$row" >> "$sf"; }
+  _do() {
+    # Idempotency guard: Claude Code on Windows invokes the matched hook
+    # twice for the same tool call. Skip when (kind, tool_use_id) already
+    # matches an existing row.
+    if [ -f "$sf" ]; then
+      local kind tuid
+      kind="$(printf '%s' "$row" | awk -F'\t' '{print $1}')"
+      tuid="$(printf '%s' "$row" | awk -F'\t' '{print $2}')"
+      if awk -F'\t' -v k="$kind" -v t="$tuid" \
+        '$1 == k && $2 == t {found=1; exit} END {exit !found}' "$sf"; then
+        return 0
+      fi
+    fi
+    printf '%s\n' "$row" >> "$sf"
+  }
   omc_with_lock _do
 }
 
@@ -123,7 +137,7 @@ case "$ARG" in
     [ -z "$SESSION_ID" ] && exit 0
     SF="$(state_file_for "$SESSION_ID")" || exit 0
     case "$TOOL_NAME" in
-      Task)
+      Task|Agent)
         SUBAGENT_TYPE="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)"
         DESCRIPTION="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.description // empty' 2>/dev/null)"
         ROW=$(printf 'agent\t%s\t%s\t%s\t%s' \
@@ -159,8 +173,13 @@ case "$ARG" in
     [ -z "$SESSION_ID" ] && exit 0
     SF="$(state_file_for "$SESSION_ID")" || exit 0
     case "$TOOL_NAME" in
-      Task)
-        [ -n "$TOOL_USE_ID" ] && remove_by_kind "$SF" agent 2 "$TOOL_USE_ID"
+      Task|Agent)
+        # Async Task fires PostToolUse at launch (not subagent completion);
+        # removing here would hide the still-running subagent from the statusline.
+        BG=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.run_in_background // false' 2>/dev/null)
+        if [ "$BG" != "true" ] && [ -n "$TOOL_USE_ID" ]; then
+          remove_by_kind "$SF" agent 2 "$TOOL_USE_ID"
+        fi
         ;;
       Bash)
         BG_TASK_ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.backgroundTaskId // empty' 2>/dev/null)
@@ -171,7 +190,11 @@ case "$ARG" in
           FP="${COMMAND:0:60}"
           PID=0
           if command -v ps >/dev/null 2>&1 && [ -n "$FP" ]; then
-            PID=$( { ps -Wef 2>/dev/null || ps -ef 2>/dev/null; } \
+            # Prefer -ww (no COMMAND truncation, needed for the 60-char
+            # fingerprint match on long commands). Fall back to plain
+            # variants on platforms whose ps doesn't accept -w (e.g. MSYS).
+            PID=$( { ps -Wefww 2>/dev/null || ps -efww 2>/dev/null \
+                  || ps -Wef 2>/dev/null   || ps -ef 2>/dev/null; } \
               | awk -v fp="$FP" 'NR>1 { cmd=""; for(i=6;i<=NF;i++) cmd=cmd (i>6?" ":"") $i; if (index(cmd, fp)==1) print $2, $5 }' \
               | sort -k2 | tail -1 | awk '{print $1}' )
             [ -z "$PID" ] && PID=0

@@ -63,6 +63,83 @@ EOF
 assert_line_count "$SF" 0 "expected row to be removed"
 end_test
 
+start_test "PostToolUse(Task, run_in_background:true) keeps agent row (async launch)"
+SESSION_ID="test-session-003-async"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+printf 'agent\ttoolu_a2\tgeneral-purpose\tasync description\t1735000000\n' > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" post
+{
+  "session_id": "test-session-003-async",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Task",
+  "tool_use_id": "toolu_a2",
+  "tool_input": { "run_in_background": true },
+  "tool_response": {}
+}
+EOF
+assert_line_count "$SF" 1 "async Task post must not remove the row (subagent still running in background)"
+assert_file_contains "$SF" "agent	toolu_a2	general-purpose	async description"
+end_test
+
+# Claude Code renamed the Task tool to Agent at some point after the original
+# spec was written (verified live: tool_name="Agent" arrives at the hook even
+# though the legacy matcher still says "Task").
+start_test "PreToolUse(Agent) appends agent row (current tool_name)"
+SESSION_ID="test-session-agent-pre"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "test-session-agent-pre",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Agent",
+  "tool_use_id": "toolu_ag1",
+  "tool_input": {
+    "subagent_type": "Explore",
+    "description": "agent rename probe",
+    "prompt": "..."
+  }
+}
+EOF
+assert_line_count "$SF" 1 "expected one agent row for tool_name=Agent"
+assert_file_contains "$SF" "agent	toolu_ag1	Explore	agent rename probe"
+end_test
+
+start_test "PostToolUse(Agent) sync removes agent row"
+SESSION_ID="test-session-agent-post-sync"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+printf 'agent\ttoolu_ag2\tgeneral-purpose\tsync agent\t1735000000\n' > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" post
+{
+  "session_id": "test-session-agent-post-sync",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Agent",
+  "tool_use_id": "toolu_ag2",
+  "tool_input": {},
+  "tool_response": {}
+}
+EOF
+assert_line_count "$SF" 0 "sync Agent post should remove the row"
+end_test
+
+start_test "PostToolUse(Agent, run_in_background:true) keeps agent row"
+SESSION_ID="test-session-agent-post-async"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+printf 'agent\ttoolu_ag3\tExplore\tasync agent\t1735000000\n' > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" post
+{
+  "session_id": "test-session-agent-post-async",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Agent",
+  "tool_use_id": "toolu_ag3",
+  "tool_input": { "run_in_background": true },
+  "tool_response": {}
+}
+EOF
+assert_line_count "$SF" 1 "async Agent post must not remove the row"
+assert_file_contains "$SF" "agent	toolu_ag3	Explore	async agent"
+end_test
+
 start_test "PreToolUse(Bash, run_in_background:true) appends shell row"
 SESSION_ID="test-session-004"
 SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
@@ -398,6 +475,40 @@ cat <<EOF | bash "$TRACK_WORKERS" post
 EOF
 COL7=$(awk -F'\t' '{print $7}' "$SF")
 assert_eq "0" "$COL7" "expected col7=0 when no fingerprint match"
+end_test
+
+# Bug A: Claude Code on Windows fires PreToolUse hooks twice for the same
+# tool_use_id (verified live via instrumented hook). The dispatcher must
+# absorb duplicates without emitting a second row.
+start_test "PreToolUse(Agent) fired twice for same tool_use_id appends only one row (dedup)"
+SESSION_ID="test-session-dedup-agent"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+PAYLOAD='{"session_id":"test-session-dedup-agent","hook_event_name":"PreToolUse","tool_name":"Agent","tool_use_id":"toolu_dedup1","tool_input":{"subagent_type":"Explore","description":"d","prompt":"x","run_in_background":true}}'
+printf '%s' "$PAYLOAD" | bash "$TRACK_WORKERS" pre
+printf '%s' "$PAYLOAD" | bash "$TRACK_WORKERS" pre
+assert_line_count "$SF" 1 "second identical Pre must not append a second row"
+end_test
+
+start_test "PreToolUse(Bash bg) fired twice for same tool_use_id appends only one row (dedup)"
+SESSION_ID="test-session-dedup-bash"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+PAYLOAD='{"session_id":"test-session-dedup-bash","hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_dedup2","tool_input":{"command":"sleep 1","run_in_background":true}}'
+printf '%s' "$PAYLOAD" | bash "$TRACK_WORKERS" pre
+printf '%s' "$PAYLOAD" | bash "$TRACK_WORKERS" pre
+assert_line_count "$SF" 1 "second identical bg-Bash Pre must not append a second row"
+end_test
+
+start_test "PreToolUse(Agent) different tool_use_id appends both rows (regression guard)"
+SESSION_ID="test-session-dedup-distinct"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+printf '%s' '{"session_id":"test-session-dedup-distinct","hook_event_name":"PreToolUse","tool_name":"Agent","tool_use_id":"toolu_d1","tool_input":{"subagent_type":"Explore","description":"a","prompt":"x","run_in_background":true}}' \
+  | bash "$TRACK_WORKERS" pre
+printf '%s' '{"session_id":"test-session-dedup-distinct","hook_event_name":"PreToolUse","tool_name":"Agent","tool_use_id":"toolu_d2","tool_input":{"subagent_type":"Explore","description":"b","prompt":"x","run_in_background":true}}' \
+  | bash "$TRACK_WORKERS" pre
+assert_line_count "$SF" 2 "distinct tool_use_ids must each append"
 end_test
 
 print_summary
