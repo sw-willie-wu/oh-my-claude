@@ -236,24 +236,6 @@ COLCOUNT=$(awk -F'\t' '{print NF}' "$SF" | head -1)
 assert_eq "5" "$COLCOUNT" "agent row should remain 5 cols after prune"
 end_test
 
-start_test "prune uses output-file fallback for legacy 6-col shell row (beyond grace)"
-SID="render-test-prune-3"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-TMPROOT=$(mktemp -d)
-WD_ID='-tmp'
-mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
-touch "$TMPROOT/claude/$WD_ID/$SID/tasks/bash_legacy.output"
-# Force age > grace so the grace short-circuit is bypassed and fallback runs.
-printf 'shell\ttoolu_legacy\tbash_legacy\tlegacy\tsleep 99\t%s\n' "$((NOW - 120))" > "$SF"
-OUT=$(TEMP="$TMPROOT" WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-echo "$OUT" | grep -qF 'legacy' \
-  || { printf '    FAIL: legacy row pruned despite present output file\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'toolu_legacy' "$SF" \
-  || { printf '    FAIL: legacy row removed from state file despite present output file\n' >&2; TEST_FAILED=1; }
-rm -rf "$TMPROOT"
-end_test
-
 start_test "row with valid col3 but col7 empty (post inter-update gap) is kept within grace"
 SID="render-test-prune-postgap"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
@@ -531,6 +513,37 @@ end_test
 start_test "is_shell_alive: NO for empty command"
 RESULT=$(call_is_shell_alive "")
 assert_eq "NO" "$RESULT" "empty command fingerprint must be dead"
+end_test
+
+# --- Task 2: prune shell branch uses is_shell_alive (not sticky output file) ---
+start_test "prune drops stale shell row when process dead despite sticky .output file"
+SID="render-test-shell-sticky-dead"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+TMPROOT=$(mktemp -d)
+WD_ID='-tmp'
+mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
+touch "$TMPROOT/claude/$WD_ID/$SID/tasks/bash_sticky.output"   # sticky file exists
+DEADCMD="omc_dead_cmd_$$_$RANDOM noproc"
+printf 'shell\ttoolu_sticky\tbash_sticky\tdesc\t%s\t%s\t0\n' "$DEADCMD" "$((NOW - 9999))" > "$SF"
+OUT=$(TEMP="$TMPROOT" WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
+grep -qF 'toolu_sticky' "$SF" \
+  && { printf '    FAIL: dead shell kept because sticky .output still present (the bug)\n' >&2; TEST_FAILED=1; }
+rm -rf "$TMPROOT"
+end_test
+
+start_test "prune keeps shell row when matching process alive (col7=0, beyond grace)"
+SID="render-test-shell-live-noproc-pid"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+sleep 8 &
+LIVEPID=$!
+sleep 0.3
+printf 'shell\ttoolu_livecmd\tbash_live\tdesc\tsleep 8\t%s\t0\n' "$((NOW - 9999))" > "$SF"
+OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
+kill "$LIVEPID" 2>/dev/null; wait "$LIVEPID" 2>/dev/null
+grep -qF 'toolu_livecmd' "$SF" \
+  || { printf '    FAIL: live-process shell row pruned (col7=0 fingerprint path)\n' >&2; TEST_FAILED=1; }
 end_test
 
 cleanup_render_state

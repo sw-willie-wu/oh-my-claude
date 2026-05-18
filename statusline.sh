@@ -217,9 +217,12 @@ prune_state_and_emit() {
         # col7 missing/0: row is either the PreToolUse placeholder, the
         # gap between post's two update_col writes, a legacy 6-col row,
         # or a row whose PID acquisition failed (PID=0).
-        # Within grace: always keep — covers the hook race window.
+        # Within grace: always keep — covers the hook race window AND the
+        # brief post-launch window before the child is in the process table.
         # Beyond grace: if col3 still "-", PostToolUse never ran → reap;
-        # otherwise fall through to output-file fallback.
+        # otherwise fingerprint-match the stored command against ps
+        # (bg-Bash has no on-disk completion marker; the .output file is
+        # sticky so existence is useless).
         local now_ts age within_grace=false
         now_ts=$(date +%s)
         if [ -n "$col6" ] && [ "$col6" -gt 0 ] 2>/dev/null; then
@@ -231,7 +234,7 @@ prune_state_and_emit() {
         elif [ "$col3" = "-" ]; then
           keep=false
         else
-          is_bash_output_present "$col3" || keep=false
+          is_shell_alive "$col5" || keep=false
         fi
       fi
     elif [ "$kind" = "agent" ]; then
