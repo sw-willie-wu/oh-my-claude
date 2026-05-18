@@ -154,7 +154,11 @@ prune_state_and_emit() {
     fi
     [ "$keep" = "true" ] || continue
     if [ "$kind" = "agent" ]; then
-      printf '%s\t%s\t%s\t%s\t%s\n' "$kind" "$tool_use_id" "$col3" "$desc" "$col5" >> "$tmp"
+      # Preserve col6 (agentId / '-' placeholder) when present; legacy
+      # 5-col rows have no col6 and stay 5-col.
+      printf '%s\t%s\t%s\t%s\t%s' "$kind" "$tool_use_id" "$col3" "$desc" "$col5" >> "$tmp"
+      [ -n "$col6" ] && printf '\t%s' "$col6" >> "$tmp"
+      printf '\n' >> "$tmp"
     else
       printf '%s\t%s\t%s\t%s\t%s\t%s' "$kind" "$tool_use_id" "$col3" "$desc" "$col5" "$col6" >> "$tmp"
       [ -n "$col7" ] && printf '\t%s' "$col7" >> "$tmp"

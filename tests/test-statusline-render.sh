@@ -309,5 +309,40 @@ grep -qF 'toolu_pre2' "$SF" \
   && { printf '    FAIL: stale placeholder row not pruned from state file\n' >&2; TEST_FAILED=1; }
 end_test
 
+# --- Task 4: prune writeback preserves agent col6 ---
+start_test "prune preserves agent col6 (agentId) on writeback"
+SID="render-test-agent-col6"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+printf 'agent\ttoolu_pre\tExplore\tdesc\t%s\t-\n' "$NOW" > "$SF"
+RESULT=$(bash -c "
+  OMC_TEST_LIB_ONLY=1
+  source '$STATUSLINE'
+  WORKERS_STATE_FILE='$SF'
+  WORKDIR_RAW='/tmp'
+  SESSION_ID='$SID'
+  prune_state_and_emit >/dev/null
+")
+assert_eq "6" "$(awk -F'\t' '{print NF}' "$SF" | head -1)" "agent row must stay 6 cols after prune"
+assert_eq "-" "$(awk -F'\t' '{print $6}' "$SF" | head -1)" "col6 must survive writeback"
+end_test
+
+start_test "prune still emits legacy 5-col agent row as 5 cols (back-compat)"
+SID="render-test-agent-5col-bc"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+printf 'agent\ttoolu_legacy\tgeneral-purpose\tlegacy\t%s\n' "$NOW" > "$SF"
+bash -c "
+  OMC_TEST_LIB_ONLY=1
+  source '$STATUSLINE'
+  WORKERS_STATE_FILE='$SF'
+  WORKDIR_RAW='/tmp'
+  SESSION_ID='$SID'
+  prune_state_and_emit >/dev/null
+"
+assert_eq "5" "$(awk -F'\t' '{print NF}' "$SF" | head -1)" "legacy 5-col agent row must not grow a column"
+assert_line_count "$SF" 1 "legacy 5-col agent row must be kept"
+end_test
+
 cleanup_render_state
 print_summary
