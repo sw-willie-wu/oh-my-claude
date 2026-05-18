@@ -40,6 +40,10 @@ LAYOUT="default"
 # agent.
 : "${WORKERS_AGENT_QUIET_SEC:=60}"
 : "${WORKERS_AGENT_TRANSCRIPT_ROOT:=$HOME/.claude/projects}"
+# git_info() result cache TTL (seconds). Makes statusLine refreshInterval:1
+# affordable by not running git every tick. 0 = disable caching (always
+# recompute = exact legacy behavior). Non-numeric/negative → 3.
+: "${GIT_CACHE_TTL:=3}"
 
 LIB_DIR="${OMC_DIR}/lib"
 [ -d "$LIB_DIR" ] || LIB_DIR="$SCRIPT_DIR/lib"
@@ -379,6 +383,49 @@ git_info() {
     ldel=$(echo "$diff_stats" | awk '{s+=$2} END {print s+0}')
   fi
   printf '%s\t%s\t%s\t%s\t%s\t%s' "$branch" "$add" "$mod" "$del" "$ladd" "$ldel"
+}
+
+# Short-TTL on-disk cache around git_info(), keyed by $PWD (the dir git runs
+# in — NOT $WORKDIR_RAW/current_dir, which are display-only and differ from
+# $PWD under MSYS). Makes statusLine refreshInterval:1 affordable. OMC_STATE_DIR
+# is already in scope (set by lib/state-lock.sh, sourced above). Stale-write
+# safety: per-cwd file + atomic tmp+mv (no lock — independent of worker state;
+# worst case is N concurrent dupes, self-healing).
+cached_git_info() {
+  local ttl="$GIT_CACHE_TTL"
+  # empty / negative / decimal / non-integer → 3; "0" (disabled) preserved.
+  case "$ttl" in ''|*[!0-9]*) ttl=3 ;; esac
+  if [ "$ttl" = "0" ]; then
+    git_info
+    return
+  fi
+  local key file content now mtime age out
+  key=$(printf '%s' "$PWD" | sed 's/[^A-Za-z0-9]/-/g')
+  file="$OMC_STATE_DIR/gitcache-${key}"
+  if [ -f "$file" ]; then
+    now=$(date +%s)
+    mtime=$(stat -c %Y "$file" 2>/dev/null)
+    [ -z "$mtime" ] && mtime=$(date -r "$file" +%s 2>/dev/null)
+    if [ -n "$mtime" ]; then
+      age=$((now - mtime))
+      if [ "$age" -le "$ttl" ]; then
+        content=$(cat "$file")          # $() strips trailing \n (none written)
+        local TAB; TAB=$'\t'
+        # Well-formed = exactly one line, 6 fields, fields 2–6 integers. The
+        # anchored bash regex (no /m) also enforces single-line: a 0-byte,
+        # truncated, or multi-line file fails. $re MUST stay unquoted.
+        local re="^[^${TAB}]*${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+$"
+        if [[ "$content" =~ $re ]]; then
+          printf '%s' "$content"
+          return
+        fi
+      fi
+    fi
+  fi
+  out=$(git_info)                                                  # MISS
+  mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+  printf '%s' "$out" > "$file.tmp.$$" && mv "$file.tmp.$$" "$file"  # atomic
+  printf '%s' "$out"
 }
 
 # ---------------------------------------------------------------------------
