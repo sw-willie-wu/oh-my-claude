@@ -16,7 +16,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Task|Bash|KillShell",
+        "matcher": "Agent|Task|Bash|KillShell",
         "hooks": [
           {
             "type": "command",
@@ -27,7 +27,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Task|Bash|BashOutput",
+        "matcher": "Agent|Task|Bash|BashOutput",
         "hooks": [
           {
             "type": "command",
