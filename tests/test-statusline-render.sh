@@ -345,7 +345,8 @@ assert_line_count "$SF" 1 "legacy 5-col agent row must be kept"
 end_test
 
 # --- Task 5: render-side liveness check for async agent rows ---
-# wd_id transform mirrors statusline.sh: WORKDIR_RAW with :,\,/ -> '-'.
+# wd_id transform mirrors statusline.sh: every non-alnum char in
+# WORKDIR_RAW -> '-' (per-char, not collapsed; Claude Code's slug rule).
 # WORKDIR_RAW='/tmp' => wd_id='-tmp'.
 agent_prune() {
   # $1=state file  $2=session id  $3=transcript root  $4=WORKDIR_RAW(default /tmp)
