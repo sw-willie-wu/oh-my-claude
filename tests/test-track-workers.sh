@@ -545,4 +545,47 @@ printf '%s' '{"session_id":"test-session-dedup-distinct","hook_event_name":"PreT
 assert_line_count "$SF" 2 "distinct tool_use_ids must each append"
 end_test
 
+# --- Task 2: Pre Task|Agent writes a 6-col row with col6=- placeholder ---
+start_test "PreToolUse(Agent) writes 6-col row with col6=- placeholder"
+SESSION_ID="test-session-agent-6col"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "test-session-agent-6col",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Agent",
+  "tool_use_id": "toolu_6c1",
+  "tool_input": {
+    "subagent_type": "Explore",
+    "description": "six col probe",
+    "prompt": "x",
+    "run_in_background": true
+  }
+}
+EOF
+COL_COUNT=$(awk -F'\t' '{print NF}' "$SF")
+assert_eq "6" "$COL_COUNT" "Pre Agent row must have 6 columns"
+COL6=$(awk -F'\t' '{print $6}' "$SF")
+assert_eq "-" "$COL6" "col6 must be the '-' placeholder"
+assert_file_contains "$SF" "agent	toolu_6c1	Explore	six col probe"
+end_test
+
+start_test "PreToolUse(Task) legacy tool_name also writes 6-col row"
+SESSION_ID="test-session-task-6col"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "test-session-task-6col",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Task",
+  "tool_use_id": "toolu_6c2",
+  "tool_input": { "subagent_type": "general-purpose", "description": "legacy probe", "prompt": "x" }
+}
+EOF
+assert_eq "6" "$(awk -F'\t' '{print NF}' "$SF")" "Pre Task row must have 6 columns"
+assert_eq "-" "$(awk -F'\t' '{print $6}' "$SF")" "col6 must be the '-' placeholder"
+end_test
+
 print_summary

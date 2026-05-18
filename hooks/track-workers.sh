@@ -140,7 +140,10 @@ case "$ARG" in
       Task|Agent)
         SUBAGENT_TYPE="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)"
         DESCRIPTION="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.description // empty' 2>/dev/null)"
-        ROW=$(printf 'agent\t%s\t%s\t%s\t%s' \
+        # col6 is a placeholder ('-') reserved for the agentId, which the
+        # Post hook patches in for async launches. Sync calls are removed
+        # wholesale by Post and never see col6 patched.
+        ROW=$(printf 'agent\t%s\t%s\t%s\t%s\t-' \
           "$TOOL_USE_ID" \
           "$(escape_field "$SUBAGENT_TYPE")" \
           "$(escape_field "$DESCRIPTION")" \
