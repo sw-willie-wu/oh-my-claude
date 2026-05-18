@@ -715,9 +715,9 @@ end_test
 start_test "render: second render within TTL serves STALE cached git state (cache wired in)"
 ST=$(mktemp -d); WD=$(mktemp -d)
 gi_mkrepo "$WD" branchbefore
-run_workers_in "$WD" "render-gc-2" "$ST" 300 >/dev/null      # caches branchbefore
-( cd "$WD" && git branch -m branchafter )                     # git state changes
-OUT=$(run_workers_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)
+run_workers_in "$WD" "render-gc-2" "$ST" 300 >/dev/null  # arg4=GIT_CACHE_TTL (300=large so 2nd render HITs); caches branchbefore
+( cd "$WD" && git branch -m branchafter )                # git state changes
+OUT=$(run_workers_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)  # arg4=GIT_CACHE_TTL=300
 echo "$OUT" | grep -qF 'branchbefore' \
   || { printf '    FAIL: render bypassed cache (expected stale branchbefore)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 echo "$OUT" | grep -qF 'branchafter' \
@@ -728,9 +728,9 @@ end_test
 start_test "render: GIT_CACHE_TTL=0 serves fresh git state and writes no cache file"
 ST=$(mktemp -d); WD=$(mktemp -d)
 gi_mkrepo "$WD" freshbefore
-run_workers_in "$WD" "render-gc-3" "$ST" 0 >/dev/null
+run_workers_in "$WD" "render-gc-3" "$ST" 0 >/dev/null  # arg4=GIT_CACHE_TTL=0 (cache disabled)
 ( cd "$WD" && git branch -m freshafter )
-OUT=$(run_workers_in "$WD" "render-gc-3" "$ST" 0 | strip_ansi)
+OUT=$(run_workers_in "$WD" "render-gc-3" "$ST" 0 | strip_ansi)  # arg4=GIT_CACHE_TTL=0
 echo "$OUT" | grep -qF 'freshafter' \
   || { printf '    FAIL: TTL=0 must show fresh state\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 ls "$ST"/gitcache-* >/dev/null 2>&1 \
