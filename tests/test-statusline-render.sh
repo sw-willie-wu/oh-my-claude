@@ -680,5 +680,63 @@ ls "$ST"/gitcache-*.tmp.* >/dev/null 2>&1 \
 rm -rf "$ST" "$WD"
 end_test
 
+# --- Task C: cached_git_info() wired into the render path ---
+# run_workers cannot steer the git cwd (it hardcodes current_dir:/tmp but git
+# runs against $PWD) nor isolate the cache. This helper cd's into the target
+# repo and passes OMC_STATE_DIR (and optional GIT_CACHE_TTL) into the render.
+run_workers_in() {
+  # $1=dir(cd → git cwd + cache key)  $2=sid  $3=OMC_STATE_DIR
+  # $4=GIT_CACHE_TTL(optional)  $5=cols(default 200)
+  local d="$1" sid="$2" sd="$3" ttl="${4:-}" cols="${5:-200}"
+  (
+    cd "$d" || exit 1
+    export COLUMNS="$cols" OMC_CONF=/dev/null OMC_STATE_DIR="$sd"
+    [ -n "$ttl" ] && export GIT_CACHE_TTL="$ttl"
+    printf '{"session_id":"%s","model":{"display_name":"X"},"workspace":{"current_dir":"/tmp"}}' "$sid" \
+      | bash "$STATUSLINE" 2>/dev/null
+  )
+}
+gi_mkrepo() {  # $1=dir $2=initial branch name
+  ( cd "$1" && git init -q . && git config user.email t@t.t && git config user.name t \
+      && echo a > f.txt && git add f.txt && git commit -qm i && git branch -m "$2" )
+}
+
+start_test "render: git repo output shows the branch AND a gitcache file is written"
+ST=$(mktemp -d); WD=$(mktemp -d)
+gi_mkrepo "$WD" omcbranch
+OUT=$(run_workers_in "$WD" "render-gc-1" "$ST" | strip_ansi)
+echo "$OUT" | grep -qF 'omcbranch' \
+  || { printf '    FAIL: branch not in render output\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+ls "$ST"/gitcache-* >/dev/null 2>&1 \
+  || { printf '    FAIL: render wrote no gitcache file (cache not wired into render)\n' >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "render: second render within TTL serves STALE cached git state (cache wired in)"
+ST=$(mktemp -d); WD=$(mktemp -d)
+gi_mkrepo "$WD" branchbefore
+run_workers_in "$WD" "render-gc-2" "$ST" 300 >/dev/null      # caches branchbefore
+( cd "$WD" && git branch -m branchafter )                     # git state changes
+OUT=$(run_workers_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)
+echo "$OUT" | grep -qF 'branchbefore' \
+  || { printf '    FAIL: render bypassed cache (expected stale branchbefore)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF 'branchafter' \
+  && { printf '    FAIL: render showed fresh state (cache not consulted)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "render: GIT_CACHE_TTL=0 serves fresh git state and writes no cache file"
+ST=$(mktemp -d); WD=$(mktemp -d)
+gi_mkrepo "$WD" freshbefore
+run_workers_in "$WD" "render-gc-3" "$ST" 0 >/dev/null
+( cd "$WD" && git branch -m freshafter )
+OUT=$(run_workers_in "$WD" "render-gc-3" "$ST" 0 | strip_ansi)
+echo "$OUT" | grep -qF 'freshafter' \
+  || { printf '    FAIL: TTL=0 must show fresh state\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+ls "$ST"/gitcache-* >/dev/null 2>&1 \
+  && { printf '    FAIL: TTL=0 must not write a cache file via render\n' >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$WD"
+end_test
+
 cleanup_render_state
 print_summary

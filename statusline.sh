@@ -467,11 +467,11 @@ WORKDIR_RAW=$(printf '%s' "$DIR" | sed 's|\\\\|\\|g')
 # Convert Windows path to ~/relative
 DIR=$(echo "$DIR" | sed 's|\\\\|/|g; s|\\|/|g; s|C:/Users/[^/]*/|~/|i')
 
-# Git info — extracted into git_info() (Task A; Task B adds caching). Parsed
-# with cut: `IFS=$'\t' read` would treat the leading TAB of a non-repo /
+# Git info via the TTL cache (cached_git_info → git_info on miss). Parsed with
+# cut: `IFS=$'\t' read` would treat the leading TAB of a non-repo /
 # detached-HEAD line (empty field 1) as IFS-whitespace and drop the field,
 # shifting every value. cut -f keeps empty fields verbatim.
-GI_LINE=$(git_info)
+GI_LINE=$(cached_git_info)
 BRANCH=$(printf '%s' "$GI_LINE" | cut -f1)
 ADD_FILES=$(printf '%s' "$GI_LINE" | cut -f2)
 MOD_FILES=$(printf '%s' "$GI_LINE" | cut -f3)
