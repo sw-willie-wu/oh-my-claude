@@ -561,7 +561,8 @@ end_test
 # $4=stub output (default well-formed 6-field line)
 cgi() {
   local out="${4:-$(printf 'stub\t1\t2\t3\t4\t5')}"
-  ( cd "$1" && OMC_STATE_DIR="$2" GIT_CACHE_TTL="$3" STUB_OUT="$out" OMC_CONF=/dev/null bash -c '
+  ( cd "$1" && OMC_STATE_DIR="$2" GIT_CACHE_TTL="$3" STUB_OUT="$out" OMC_CONF=/dev/null \
+       OMC_NOW_OVERRIDE="${OMC_NOW_OVERRIDE:-}" bash -c '
       OMC_TEST_LIB_ONLY=1
       source "'"$STATUSLINE"'"
       CNT="$OMC_STATE_DIR/.gitcnt"
@@ -591,13 +592,20 @@ assert_eq "$STUB_LINE" "$OUT2" "HIT returns cached content"
 rm -rf "$ST" "$WD"
 end_test
 
-start_test "cached_git_info: age exactly == TTL is a HIT"
+start_test "cached_git_info: TTL boundary is <= (age==TTL HIT, age==TTL+1 MISS)"
+# Deterministic: pin the cache mtime to a fixed epoch E and drive cached_git_info's
+# clock via OMC_NOW_OVERRIDE, so age = NOW-E is exact regardless of how slow the
+# box is. (The old form raced wall-clock between `touch` and the 2nd call's own
+# date+%s; on a loaded MSYS box age slipped to TTL+1 → false MISS → flaky.)
 ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" 3 >/dev/null
+E=1000000000
+cgi "$WD" "$ST" 3 >/dev/null               # miss → counter=1, cache written
 CF=$(ls "$ST"/gitcache-*)
-touch -d "@$(( $(date +%s) - 3 ))" "$CF"   # exactly TTL seconds old
-cgi "$WD" "$ST" 3 >/dev/null
-assert_eq "1" "$(cat "$ST/.gitcnt")" "age==TTL must be HIT (<= comparison)"
+touch -d "@$E" "$CF"                        # mtime = E (fixed)
+OMC_NOW_OVERRIDE=$((E + 3)) cgi "$WD" "$ST" 3 >/dev/null   # age == TTL(3)
+assert_eq "1" "$(cat "$ST/.gitcnt")" "age == TTL must be a HIT (<= boundary, not <)"
+OMC_NOW_OVERRIDE=$((E + 4)) cgi "$WD" "$ST" 3 >/dev/null   # age == TTL+1
+assert_eq "2" "$(cat "$ST/.gitcnt")" "age == TTL+1 must MISS (boundary excludes above)"
 rm -rf "$ST" "$WD"
 end_test
 

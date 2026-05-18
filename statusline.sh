@@ -414,7 +414,10 @@ cached_git_info() {
   key=$(printf '%s' "$wd" | sed 's/[^A-Za-z0-9]/-/g')
   file="$OMC_STATE_DIR/gitcache-${key}"
   if [ -f "$file" ]; then
-    now=$(date +%s)
+    # OMC_NOW_OVERRIDE: test-only clock seam so the TTL-boundary tests are
+    # deterministic instead of racing wall-clock on a slow box. Unset in
+    # production → identical behaviour (date +%s).
+    now=${OMC_NOW_OVERRIDE:-$(date +%s)}
     mtime=$(stat -c %Y "$file" 2>/dev/null)
     [ -z "$mtime" ] && mtime=$(date -r "$file" +%s 2>/dev/null)
     if [ -n "$mtime" ]; then
