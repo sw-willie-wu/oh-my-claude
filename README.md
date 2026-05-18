@@ -55,6 +55,7 @@ WORKERS_AGENT_ICON=""           # nf-fa-cogs
 WORKERS_SHELL_ICON=""           # nf-cod-terminal
 WORKERS_SHELL_MAX_AGE=3600        # seconds; older shells are dimmed and marked '?'
 WORKERS_AGENT_QUIET_SEC=60        # async-agent transcript idle window: within this, the agent is treated as alive (fast path) before the last-line check decides
+GIT_CACHE_TTL=3                   # git-info cache TTL (s); 0 = disable (always run git). See note below.
 ```
 
 ### Known limits
@@ -67,7 +68,7 @@ WORKERS_AGENT_QUIET_SEC=60        # async-agent transcript idle window: within t
 
 - Background shells that crash without being polled (`BashOutput`) may continue to show as running. After `WORKERS_SHELL_MAX_AGE` (default 1h) they are visually dimmed and marked with `?`. Use Claude Code's built-in `/bashes` command for the true running state.
 - Requires `jq` for hook side. Without it, the hook silently no-ops and no worker lines appear; the rest of the statusline is unaffected.
-- For elapsed time to keep updating while the main agent waits on subagents, set `"refreshInterval": 1` in your `statusLine` settings (the `/oh-my-claude:setup` command does this automatically).
+- For elapsed time to keep updating while the main agent waits on subagents, set `"refreshInterval": 1` in your `statusLine` settings (the `/oh-my-claude:setup` command does this automatically). To keep that affordable, git info is cached for `GIT_CACHE_TTL` seconds (default 3) instead of running git on every tick. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
 
 ## Install
 
