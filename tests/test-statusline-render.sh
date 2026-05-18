@@ -100,7 +100,7 @@ echo "$OUT" | grep -qF 'corrupt row no timestamp' \
   && { printf '    FAIL: corrupt row should not render\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 end_test
 
-start_test "WORKDIR_RAW preserves raw current_dir for output-file fallback path"
+start_test "WORKDIR_RAW preserves raw current_dir for is_agent_alive slug"
 SID="render-test-workdir-raw"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 : > "$SF"
@@ -132,57 +132,6 @@ assert_eq "ALIVE" "$ALIVE_OUT" "running PID should be alive"
 assert_eq "DEAD" "$DEAD_OUT" "nonexistent PID should be dead"
 end_test
 
-start_test "is_bash_output_present returns true when output file exists"
-SID="render-test-output-fb-1"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-TMPROOT=$(mktemp -d)
-WD_RAW='C:\Users\test\proj'
-WD_ID='C--Users-test-proj'
-mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
-touch "$TMPROOT/claude/$WD_ID/$SID/tasks/bash_xyz.output"
-RESULT=$(TEMP="$TMPROOT" bash -c "
-  OMC_TEST_LIB_ONLY=1
-  source '$STATUSLINE'
-  WORKDIR_RAW='$WD_RAW'
-  SESSION_ID='$SID'
-  is_bash_output_present bash_xyz && echo YES || echo NO
-")
-assert_eq "YES" "$RESULT" "output file existed but helper returned false"
-rm -rf "$TMPROOT"
-end_test
-
-start_test "is_bash_output_present returns false when file missing"
-SID="render-test-output-fb-2"
-TMPROOT=$(mktemp -d)
-WD_RAW='C:\Users\test\proj'
-RESULT=$(TEMP="$TMPROOT" bash -c "
-  OMC_TEST_LIB_ONLY=1
-  source '$STATUSLINE'
-  WORKDIR_RAW='$WD_RAW'
-  SESSION_ID='$SID'
-  is_bash_output_present bash_missing && echo YES || echo NO
-")
-assert_eq "NO" "$RESULT" "missing output file should return false"
-rm -rf "$TMPROOT"
-end_test
-
-start_test "is_bash_output_present returns false when fallback disabled"
-SID="render-test-output-fb-3"
-TMPROOT=$(mktemp -d)
-WD_RAW='C:\Users\test\proj'
-WD_ID='C--Users-test-proj'
-mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
-touch "$TMPROOT/claude/$WD_ID/$SID/tasks/bash_xyz.output"
-RESULT=$(TEMP="$TMPROOT" WORKERS_OUTPUT_FALLBACK_ENABLED=false bash -c "
-  OMC_TEST_LIB_ONLY=1
-  source '$STATUSLINE'
-  WORKDIR_RAW='$WD_RAW'
-  SESSION_ID='$SID'
-  is_bash_output_present bash_xyz && echo YES || echo NO
-")
-assert_eq "NO" "$RESULT" "disabled flag should suppress fallback"
-rm -rf "$TMPROOT"
-end_test
 
 start_test "prune_state_and_emit drops dead shell row from file (unit)"
 SID="render-test-prune-unit"
@@ -250,21 +199,18 @@ grep -qF 'toolu_postgap' "$SF" \
   || { printf '    FAIL: post-gap row removed from state file during grace\n' >&2; TEST_FAILED=1; }
 end_test
 
-start_test "row with valid col3 but col7 empty beyond grace falls through to output-file fallback"
+start_test "row with valid col3 but col7 empty beyond grace pruned when no live process"
 SID="render-test-prune-postgap-stale"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 NOW=$(date +%s)
-TMPROOT=$(mktemp -d)
-WD_ID='-tmp'
-mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
-# No output file → fallback returns false → row pruned.
-printf 'shell\ttoolu_postgap2\tbash_missing\tdead\tsleep 99\t%s\n' "$((NOW - 120))" > "$SF"
-OUT=$(TEMP="$TMPROOT" WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
+# col7 empty, beyond grace, no process matches the command → is_shell_alive
+# false → row pruned.
+printf 'shell\ttoolu_postgap2\tbash_missing\tdead\tomc_no_proc_%s_%s\t%s\n' "$$" "$RANDOM" "$((NOW - 120))" > "$SF"
+OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
 echo "$OUT" | grep -qvF 'dead' \
-  || { printf '    FAIL: stale row with missing output file still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+  || { printf '    FAIL: stale row with no live process still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 grep -qF 'toolu_postgap2' "$SF" \
   && { printf '    FAIL: stale row not pruned from state file\n' >&2; TEST_FAILED=1; }
-rm -rf "$TMPROOT"
 end_test
 
 start_test "placeholder shell row (col3=- col7 missing) survives prune within grace"

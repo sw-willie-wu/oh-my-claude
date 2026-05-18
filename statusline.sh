@@ -25,7 +25,6 @@ LAYOUT="default"
 # WORKERS_AGENT_ICON / WORKERS_SHELL_ICON default in each theme;
 # user conf overrides (use empty string to disable an icon).
 : "${WORKERS_SHELL_MAX_AGE:=3600}"
-: "${WORKERS_OUTPUT_FALLBACK_ENABLED:=true}"
 # Grace window for shell rows whose col7 (PID) hasn't been filled yet by
 # PostToolUse — covers both the placeholder gap (col3="-") and the brief
 # sub-window between the two `update_col` writes inside post (col3 set,
@@ -116,16 +115,6 @@ is_alive() {
       kill -0 "$pid" 2>/dev/null
       ;;
   esac
-}
-
-is_bash_output_present() {
-  [ "${WORKERS_OUTPUT_FALLBACK_ENABLED:-true}" = "true" ] || return 1
-  local bash_id="$1" tmp wd_id
-  [ -z "$bash_id" ] && return 1
-  tmp="${TEMP:-${TMPDIR:-/tmp}}"
-  tmp="${tmp//\\//}"
-  wd_id=$(printf '%s' "$WORKDIR_RAW" | sed 's/[^A-Za-z0-9]/-/g')
-  [ -f "${tmp}/claude/${wd_id}/${SESSION_ID}/tasks/${bash_id}.output" ]
 }
 
 # Liveness for bg-Bash shell rows. The Post-hook PID fingerprint is racy at
@@ -397,10 +386,10 @@ RATE5_RESET=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"resets_at
 RATE7_PCT=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
 RATE7_RESET=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
 
-# Capture raw cwd before destructive normalization below — used by output-file
-# fallback in is_bash_output_present. JSON-extracted via grep leaves backslashes
-# doubled, so collapse \\\\ -> \\ here. (TODO: switch JSON extraction to jq for
-# robustness against \", \uXXXX, etc.)
+# Capture raw cwd before destructive normalization below — used by
+# is_agent_alive to derive the subagent-transcript project slug. JSON-extracted
+# via grep leaves backslashes doubled, so collapse \\\\ -> \\ here. (TODO:
+# switch JSON extraction to jq for robustness against \", \uXXXX, etc.)
 WORKDIR_RAW=$(printf '%s' "$DIR" | sed 's|\\\\|\\|g')
 [ -n "${OMC_DEBUG_DUMP_WORKDIR_RAW:-}" ] && printf 'WORKDIR_RAW=%s\n' "$WORKDIR_RAW" >&2
 
