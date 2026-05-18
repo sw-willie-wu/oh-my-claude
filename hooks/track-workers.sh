@@ -127,8 +127,13 @@ case "$ARG" in
       SF="$(state_file_for "$SESSION_ID")"
       : > "$SF"
     fi
-    # Cleanup: delete sibling state-*.tsv with mtime > 24h.
+    # Cleanup: delete sibling state-*.tsv with mtime > 24h. Also reap stale
+    # gitcache-* files (statusline.sh's git-info cache, keyed per cwd) and any
+    # crashed-write gitcache-*.tmp.<pid> leftovers — same dir, same age policy.
+    # An actively-used cache is mtime-bumped on every miss, so only caches for
+    # dirs not visited in 24h are swept.
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'state-*.tsv' -type f -mmin +1440 -delete 2>/dev/null
+    find "$OMC_STATE_DIR" -maxdepth 1 -name 'gitcache-*' -type f -mmin +1440 -delete 2>/dev/null
     ;;
   pre)
     SESSION_ID="$(get_field session_id || true)"

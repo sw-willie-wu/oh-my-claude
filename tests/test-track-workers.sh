@@ -318,6 +318,27 @@ echo "{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"SessionStart\",\"sou
 [ -f "$RECENT_FILE" ] || { printf '    FAIL: recent file unexpectedly deleted\n' >&2; TEST_FAILED=1; }
 end_test
 
+start_test "session-start deletes stale gitcache files (incl .tmp leftovers) older than 24h"
+GC_OLD="$OMC_STATE_DIR/gitcache-some-dir-slug"
+GC_TMP_OLD="$OMC_STATE_DIR/gitcache-some-dir-slug.tmp.9999"
+GC_FRESH="$OMC_STATE_DIR/gitcache-fresh-slug"
+printf 'main\t0\t0\t0\t0\t0' > "$GC_OLD"
+printf 'main\t0\t0\t0\t0\t0' > "$GC_TMP_OLD"
+printf 'main\t0\t0\t0\t0\t0' > "$GC_FRESH"
+if date -d '25 hours ago' '+%Y%m%d%H%M.%S' >/dev/null 2>&1; then
+  GC_STALE_TS=$(date -d '25 hours ago' '+%Y%m%d%H%M.%S')
+else
+  GC_STALE_TS=$(date -v-25H '+%Y%m%d%H%M.%S')
+fi
+touch -t "$GC_STALE_TS" "$GC_OLD" "$GC_TMP_OLD"
+SESSION_ID="test-session-gitcache-cleanup"
+echo "{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" \
+  | bash "$TRACK_WORKERS" session-start
+[ ! -f "$GC_OLD" ] || { printf '    FAIL: stale gitcache file should have been deleted\n' >&2; TEST_FAILED=1; }
+[ ! -f "$GC_TMP_OLD" ] || { printf '    FAIL: stale gitcache .tmp leftover should have been deleted\n' >&2; TEST_FAILED=1; }
+[ -f "$GC_FRESH" ] || { printf '    FAIL: fresh gitcache file unexpectedly deleted\n' >&2; TEST_FAILED=1; }
+end_test
+
 start_test "10 concurrent PreToolUse(Task) writers all land"
 SESSION_ID="test-session-concurrent"
 SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
