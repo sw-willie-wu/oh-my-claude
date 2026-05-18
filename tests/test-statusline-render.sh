@@ -738,5 +738,32 @@ ls "$ST"/gitcache-* >/dev/null 2>&1 \
 rm -rf "$ST" "$WD"
 end_test
 
+# --- Bugfix: empty $PWD must not collapse the cache key (cross-repo collision)
+# Real Claude Code can invoke the statusLine command with $PWD empty; the
+# original key=slug($PWD) then became "" so every repo shared one
+# "gitcache-" file → wrong repo's git info served. Key must come from the
+# actual cwd (pwd -P = getcwd), robust to an empty $PWD variable.
+cgi_emptypwd() {  # $1=repo dir  $2=OMC_STATE_DIR ; REAL git_info, $PWD forced empty
+  ( cd "$1" && OMC_STATE_DIR="$2" OMC_CONF=/dev/null GIT_CACHE_TTL=300 bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "'"$STATUSLINE"'"
+      PWD=""
+      cached_git_info
+  ' )
+}
+
+start_test "cached_git_info: empty \$PWD does not collide the cache across repos"
+ST=$(mktemp -d); RA=$(mktemp -d); RB=$(mktemp -d)
+gi_mkrepo "$RA" alpha
+gi_mkrepo "$RB" beta
+OA=$(cgi_emptypwd "$RA" "$ST" | cut -f1)
+OB=$(cgi_emptypwd "$RB" "$ST" | cut -f1)
+assert_eq "alpha" "$OA" "repoA with empty \$PWD must report its own branch"
+assert_eq "beta"  "$OB" "repoB must NOT be served repoA's cached line (collision bug)"
+ls "$ST"/gitcache- >/dev/null 2>&1 \
+  && { printf '    FAIL: an empty-key gitcache- file was created (key collapsed)\n' >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$RA" "$RB"
+end_test
+
 cleanup_render_state
 print_summary

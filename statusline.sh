@@ -399,8 +399,19 @@ cached_git_info() {
     git_info
     return
   fi
-  local key file content now mtime age out
-  key=$(printf '%s' "$PWD" | sed 's/[^A-Za-z0-9]/-/g')
+  local wd key file content now mtime age out
+  # Key off the ACTUAL cwd (getcwd via `pwd -P`), not the $PWD variable:
+  # Claude Code can invoke the statusLine command with $PWD empty, which
+  # collapsed key="" so every repo shared one "gitcache-" file and got
+  # served another repo's git info. If even getcwd is unavailable (cwd
+  # deleted), bypass the cache entirely — compute fresh, write nothing —
+  # so a missing cwd can never poison a shared key.
+  wd=$(pwd -P 2>/dev/null)
+  if [ -z "$wd" ]; then
+    git_info
+    return
+  fi
+  key=$(printf '%s' "$wd" | sed 's/[^A-Za-z0-9]/-/g')
   file="$OMC_STATE_DIR/gitcache-${key}"
   if [ -f "$file" ]; then
     now=$(date +%s)
