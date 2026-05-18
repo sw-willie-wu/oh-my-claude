@@ -31,5 +31,6 @@ render() {
   LINE+="  $(pct_indicator "${RATE5_PCT:-0}" 5h)"
   LINE+="  $(pct_indicator "${RATE7_PCT:-0}" 7d)"
 
+  emit_workers
   echo -e "$LINE"
 }

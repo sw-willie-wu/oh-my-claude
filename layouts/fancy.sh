@@ -1,7 +1,8 @@
-# Fancy layout - three lines, detailed info with box drawing
+# Fancy layout - three lines + worker rows inserted between git and usage
 # Line 1: model and directory
 # Line 2: git details with line stats
-# Line 3: usage meters with labels
+# Line 3: worker rows (agent / shell), if any
+# Line 4: usage meters with labels
 
 RESET='\033[0m'
 
@@ -51,5 +52,6 @@ render() {
 
   echo -e "$LINE1"
   [ -n "$LINE2" ] && echo -e "$LINE2"
+  emit_workers
   echo -e "$LINE3"
 }
