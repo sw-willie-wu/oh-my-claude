@@ -357,6 +357,30 @@ emit_workers() {
   done
 }
 
+# Git working-tree summary. Pure: runs git in the caller's $PWD, mutates no
+# globals. stdout = exactly one line, 6 TAB-joined fields (NO trailing newline):
+#   <BRANCH>\t<ADD>\t<MOD>\t<DEL>\t<LINES_ADD>\t<LINES_DEL>
+# not-a-repo and detached HEAD → field 1 empty; fields 2–6 are integers.
+# Logic is the verbatim former inline block (statusline.sh git section) so
+# downstream values are byte-identical; only the plumbing changed.
+git_info() {
+  local branch="" add=0 mod=0 del=0 ladd=0 ldel=0
+  if git rev-parse --git-dir > /dev/null 2>&1; then
+    branch=$(git branch --show-current 2>/dev/null)
+    local status sub_status all_status diff_stats
+    status=$(git status --porcelain -uall 2>/dev/null)
+    sub_status=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
+    all_status=$(printf '%s\n%s' "$status" "$sub_status")
+    add=$(echo "$all_status" | grep -c '^A\|^??')
+    mod=$(echo "$all_status" | grep -c '^ M\|^M\|^MM\|^AM')
+    del=$(echo "$all_status" | grep -c '^ D\|^D')
+    diff_stats=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
+    ladd=$(echo "$diff_stats" | awk '{s+=$1} END {print s+0}')
+    ldel=$(echo "$diff_stats" | awk '{s+=$2} END {print s+0}')
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s' "$branch" "$add" "$mod" "$del" "$ladd" "$ldel"
+}
+
 # ---------------------------------------------------------------------------
 # Render pipeline — gated so test loaders can source this file without
 # blocking on stdin or triggering side-effects.
@@ -396,20 +420,17 @@ WORKDIR_RAW=$(printf '%s' "$DIR" | sed 's|\\\\|\\|g')
 # Convert Windows path to ~/relative
 DIR=$(echo "$DIR" | sed 's|\\\\|/|g; s|\\|/|g; s|C:/Users/[^/]*/|~/|i')
 
-# Git info (if in a repo)
-BRANCH="" ADD_FILES=0 MOD_FILES=0 DEL_FILES=0 LINES_ADD=0 LINES_DEL=0
-if git rev-parse --git-dir > /dev/null 2>&1; then
-  BRANCH=$(git branch --show-current 2>/dev/null)
-  STATUS=$(git status --porcelain -uall 2>/dev/null)
-  SUB_STATUS=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
-  ALL_STATUS=$(printf '%s\n%s' "$STATUS" "$SUB_STATUS")
-  ADD_FILES=$(echo "$ALL_STATUS" | grep -c '^A\|^??')
-  MOD_FILES=$(echo "$ALL_STATUS" | grep -c '^ M\|^M\|^MM\|^AM')
-  DEL_FILES=$(echo "$ALL_STATUS" | grep -c '^ D\|^D')
-  DIFF_STATS=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
-  LINES_ADD=$(echo "$DIFF_STATS" | awk '{s+=$1} END {print s+0}')
-  LINES_DEL=$(echo "$DIFF_STATS" | awk '{s+=$2} END {print s+0}')
-fi
+# Git info — extracted into git_info() (Task A; Task B adds caching). Parsed
+# with cut: `IFS=$'\t' read` would treat the leading TAB of a non-repo /
+# detached-HEAD line (empty field 1) as IFS-whitespace and drop the field,
+# shifting every value. cut -f keeps empty fields verbatim.
+GI_LINE=$(git_info)
+BRANCH=$(printf '%s' "$GI_LINE" | cut -f1)
+ADD_FILES=$(printf '%s' "$GI_LINE" | cut -f2)
+MOD_FILES=$(printf '%s' "$GI_LINE" | cut -f3)
+DEL_FILES=$(printf '%s' "$GI_LINE" | cut -f4)
+LINES_ADD=$(printf '%s' "$GI_LINE" | cut -f5)
+LINES_DEL=$(printf '%s' "$GI_LINE" | cut -f6)
 
 # Rate limit reset info
 RATE5_SUFFIX=""

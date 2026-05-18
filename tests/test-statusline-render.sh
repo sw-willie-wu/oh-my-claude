@@ -492,5 +492,64 @@ grep -qF 'toolu_livecmd' "$SF" \
   || { printf '    FAIL: live-process shell row pruned (col7=0 fingerprint path)\n' >&2; TEST_FAILED=1; }
 end_test
 
+# --- Task A: git_info() extracted, pure, 6 TAB-joined fields ---
+call_git_info() {
+  # $1 = directory to cd into before running git_info (git uses ambient $PWD)
+  ( cd "$1" && bash -c "
+    OMC_TEST_LIB_ONLY=1
+    source '$STATUSLINE'
+    git_info
+  " )
+}
+
+start_test "git_info: in a git repo, field 1 is the current branch and there are 6 TAB fields"
+GI_REPO=$(mktemp -d)
+(
+  cd "$GI_REPO"
+  git init -q .
+  git config user.email t@t.t
+  git config user.name t
+  echo a > tracked.txt
+  git add tracked.txt
+  git commit -qm init
+  git branch -m omcbranch
+  echo b >> tracked.txt          # modified tracked file
+  echo c > untracked.txt         # untracked file
+)
+GI_OUT=$(call_git_info "$GI_REPO")
+GI_NF=$(printf '%s' "$GI_OUT" | awk -F'\t' '{print NF}')
+assert_eq "6" "$GI_NF" "git_info must emit exactly 6 TAB-separated fields"
+GI_BRANCH=$(printf '%s' "$GI_OUT" | cut -f1)
+assert_eq "omcbranch" "$GI_BRANCH" "field 1 must be the current branch"
+rm -rf "$GI_REPO"
+end_test
+
+start_test "git_info: outside a git repo emits empty branch and five zeros"
+GI_NONREPO=$(mktemp -d)
+GI_OUT=$(call_git_info "$GI_NONREPO")
+GI_EXPECT=$(printf '\t0\t0\t0\t0\t0')
+assert_eq "$GI_EXPECT" "$GI_OUT" "non-repo must be empty-branch + five zero counts"
+rm -rf "$GI_NONREPO"
+end_test
+
+start_test "git_info: detached HEAD emits empty branch field but still 6 fields"
+GI_DET=$(mktemp -d)
+(
+  cd "$GI_DET"
+  git init -q .
+  git config user.email t@t.t
+  git config user.name t
+  echo a > f.txt; git add f.txt; git commit -qm c1
+  echo b > f.txt; git add f.txt; git commit -qm c2
+  git checkout -q HEAD~1          # detached HEAD
+)
+GI_OUT=$(call_git_info "$GI_DET")
+GI_BRANCH=$(printf '%s' "$GI_OUT" | cut -f1)
+assert_eq "" "$GI_BRANCH" "detached HEAD must yield empty branch field 1"
+GI_NF=$(printf '%s' "$GI_OUT" | awk -F'\t' '{print NF}')
+assert_eq "6" "$GI_NF" "detached HEAD still emits 6 fields"
+rm -rf "$GI_DET"
+end_test
+
 cleanup_render_state
 print_summary
