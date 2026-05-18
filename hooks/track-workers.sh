@@ -177,10 +177,17 @@ case "$ARG" in
     SF="$(state_file_for "$SESSION_ID")" || exit 0
     case "$TOOL_NAME" in
       Task|Agent)
-        # Async Task fires PostToolUse at launch (not subagent completion);
-        # removing here would hide the still-running subagent from the statusline.
+        # Async Task|Agent fires PostToolUse at launch (not subagent
+        # completion). Patch col6 with tool_response.agentId so the render
+        # side can liveness-check the subagent; sync calls complete here and
+        # are removed outright.
         BG=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.run_in_background // false' 2>/dev/null)
-        if [ "$BG" != "true" ] && [ -n "$TOOL_USE_ID" ]; then
+        if [ "$BG" = "true" ]; then
+          AGENT_ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.agentId // empty' 2>/dev/null)
+          if [ -n "$AGENT_ID" ] && [ -n "$TOOL_USE_ID" ]; then
+            update_col "$SF" 2 "$TOOL_USE_ID" 6 "$AGENT_ID"
+          fi
+        elif [ -n "$TOOL_USE_ID" ]; then
           remove_by_kind "$SF" agent 2 "$TOOL_USE_ID"
         fi
         ;;

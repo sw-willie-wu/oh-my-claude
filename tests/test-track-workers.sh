@@ -588,4 +588,46 @@ assert_eq "6" "$(awk -F'\t' '{print NF}' "$SF")" "Pre Task row must have 6 colum
 assert_eq "-" "$(awk -F'\t' '{print $6}' "$SF")" "col6 must be the '-' placeholder"
 end_test
 
+# --- Task 3: Post Task|Agent async patches col6 with tool_response.agentId ---
+start_test "PostToolUse(Agent, run_in_background:true) patches col6 with agentId"
+SESSION_ID="test-session-agent-patch"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+printf 'agent\ttoolu_p1\tExplore\tasync probe\t1735000000\t-\n' > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" post
+{
+  "session_id": "test-session-agent-patch",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Agent",
+  "tool_use_id": "toolu_p1",
+  "tool_input": { "run_in_background": true },
+  "tool_response": {
+    "isAsync": true,
+    "status": "async_launched",
+    "agentId": "a_PATCH_ME",
+    "outputFile": "/dev/null",
+    "canReadOutputFile": true
+  }
+}
+EOF
+assert_eq "a_PATCH_ME" "$(awk -F'\t' '{print $6}' "$SF")" "col6 must be patched to the agentId"
+assert_line_count "$SF" 1 "async post must keep the row"
+end_test
+
+start_test "PostToolUse(Agent) sync still removes the 6-col row"
+SESSION_ID="test-session-agent-sync6"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+printf 'agent\ttoolu_s6\tExplore\tsync probe\t1735000000\t-\n' > "$SF"
+cat <<'EOF' | bash "$TRACK_WORKERS" post
+{
+  "session_id": "test-session-agent-sync6",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Agent",
+  "tool_use_id": "toolu_s6",
+  "tool_input": {},
+  "tool_response": { "status": "completed", "agentId": "a_ignored" }
+}
+EOF
+assert_line_count "$SF" 0 "sync Agent post must still remove the row"
+end_test
+
 print_summary
