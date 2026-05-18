@@ -201,7 +201,9 @@ case "$ARG" in
         BG_TASK_ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.backgroundTaskId // empty' 2>/dev/null)
         if [ -n "$BG_TASK_ID" ] && [ -n "$TOOL_USE_ID" ]; then
           update_col "$SF" 2 "$TOOL_USE_ID" 3 "$BG_TASK_ID"
-          # Acquire PID by ps fingerprint. Failure -> PID=0; render side falls back to output-file check.
+          # Acquire PID by ps fingerprint (best-effort fast path). Failure
+          # -> PID=0; render side (is_shell_alive) re-checks liveness by
+          # command fingerprint at draw time.
           COMMAND="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.command // empty' 2>/dev/null)"
           FP="${COMMAND:0:60}"
           PID=0

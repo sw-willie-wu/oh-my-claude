@@ -54,14 +54,14 @@ WORKERS_MAX=5                     # 0 = unlimited
 WORKERS_AGENT_ICON=""           # nf-fa-cogs
 WORKERS_SHELL_ICON=""           # nf-cod-terminal
 WORKERS_SHELL_MAX_AGE=3600        # seconds; older shells are dimmed and marked '?'
-WORKERS_OUTPUT_FALLBACK_ENABLED=true  # use Claude Code's bg-task output file as fallback liveness check when PID acquisition fails; disable if Claude Code's temp layout changes upstream
+WORKERS_AGENT_QUIET_SEC=60        # async-agent transcript idle window: within this, the agent is treated as alive (fast path) before the last-line check decides
 ```
 
 ### Known limits
 
 - Two simultaneous bg commands sharing the first 60 chars of their command bind to a single PID. When one completes, both rows prune together.
 - PID reuse: a recycled PID for a long-dead bg row may falsely report "alive". Bounded by `WORKERS_SHELL_MAX_AGE` greying behavior.
-- Output-file fallback path depends on Claude Code's `$TEMP/claude/<wd_id>/<session>/tasks/<bash_id>.output` layout. Set `WORKERS_OUTPUT_FALLBACK_ENABLED=false` to disable if the layout changes.
+- bg-Bash liveness (when PID acquisition fails) and async-agent liveness are read at draw time by fingerprint/transcript inspection. A `ps` that doesn't list the process (or a non-MSYS `ps -ef` column layout) can false-prune a still-running worker; the grace window mitigates the common case. Primary target is git-bash/MSYS on Windows.
 
 ### Limitations
 
