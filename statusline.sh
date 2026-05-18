@@ -32,6 +32,12 @@ LAYOUT="default"
 # col7 still empty). Without it, a statusline tick inside either gap
 # false-prunes the row.
 : "${WORKERS_PLACEHOLDER_GRACE_SEC:=60}"
+# Async subagents have no completion hook. Liveness is read off the
+# subagent transcript JSONL: if its mtime is within this many seconds the
+# agent is treated as actively running (fast path); otherwise the last
+# assistant line's stop_reason decides.
+: "${WORKERS_AGENT_QUIET_SEC:=30}"
+: "${WORKERS_AGENT_TRANSCRIPT_ROOT:=$HOME/.claude/projects}"
 
 LIB_DIR="${OMC_DIR}/lib"
 [ -d "$LIB_DIR" ] || LIB_DIR="$SCRIPT_DIR/lib"
@@ -119,6 +125,35 @@ is_bash_output_present() {
   [ -f "${tmp}/claude/${wd_id}/${SESSION_ID}/tasks/${bash_id}.output" ]
 }
 
+# Liveness for async subagents. Their transcript lives at
+#   $WORKERS_AGENT_TRANSCRIPT_ROOT/<wd_id>/<session_id>/subagents/agent-<id>.jsonl
+# (wd_id = WORKDIR_RAW with :,\,/ collapsed to '-', same transform as the
+# tasks/ output path). Fast path: mtime within WORKERS_AGENT_QUIET_SEC means
+# the agent is still emitting → alive. Stale mtime: the last
+# `"type":"assistant"` line's stop_reason == "tool_use" means more turns are
+# coming (alive); any terminal reason (end_turn/max_tokens/stop_sequence)
+# means done. Missing JSONL → cannot prove alive → treat as done (the
+# render-side grace window covers the brief pre-creation launch gap).
+is_agent_alive() {
+  local agent_id="$1"
+  [ -z "$agent_id" ] && return 1
+  local wd_id jsonl
+  wd_id=$(printf '%s' "$WORKDIR_RAW" | sed 's|[:\\/]|-|g')
+  jsonl="${WORKERS_AGENT_TRANSCRIPT_ROOT}/${wd_id}/${SESSION_ID}/subagents/agent-${agent_id}.jsonl"
+  [ -f "$jsonl" ] || return 1
+  local now_ts mtime
+  now_ts=$(date +%s)
+  mtime=$(stat -c %Y "$jsonl" 2>/dev/null)
+  [ -z "$mtime" ] && mtime=$(date -r "$jsonl" +%s 2>/dev/null)
+  if [ -n "$mtime" ] && [ $((now_ts - mtime)) -le "$WORKERS_AGENT_QUIET_SEC" ]; then
+    return 0
+  fi
+  local sr
+  sr=$(grep '"type":"assistant"' "$jsonl" 2>/dev/null | tail -1 \
+       | jq -r '.message.stop_reason // empty' 2>/dev/null)
+  [ "$sr" = "tool_use" ]
+}
+
 prune_state_and_emit() {
   local sf="$WORKERS_STATE_FILE"
   [ -f "$sf" ] || return 0
@@ -149,6 +184,29 @@ prune_state_and_emit() {
           keep=false
         else
           is_bash_output_present "$col3" || keep=false
+        fi
+      fi
+    elif [ "$kind" = "agent" ]; then
+      if [ -z "$col6" ]; then
+        : # legacy 5-col row → keep (sync agents are removed by Post hook)
+      else
+        # 6-col row: col6 is the '-' placeholder or a real agentId.
+        # Within the grace window from start_unix (col5) always keep —
+        # covers the Pre→Post gap and the brief window before the
+        # subagent JSONL is created. Beyond grace, a still-'-' col6 means
+        # Post never patched it → reap; otherwise liveness-check.
+        local now_ts age within_grace=false
+        now_ts=$(date +%s)
+        if [ -n "$col5" ] && [ "$col5" -gt 0 ] 2>/dev/null; then
+          age=$((now_ts - col5))
+          [ "$age" -le "$WORKERS_PLACEHOLDER_GRACE_SEC" ] && within_grace=true
+        fi
+        if [ "$within_grace" = "true" ]; then
+          : # keep
+        elif [ "$col6" = "-" ]; then
+          keep=false
+        else
+          is_agent_alive "$col6" || keep=false
         fi
       fi
     fi
