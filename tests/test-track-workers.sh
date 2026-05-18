@@ -630,4 +630,26 @@ EOF
 assert_line_count "$SF" 0 "sync Agent post must still remove the row"
 end_test
 
+# --- I2: async post with no agentId keeps placeholder + logs (diagnosable) ---
+start_test "PostToolUse(Agent async) without agentId leaves col6=- and logs"
+SESSION_ID="test-session-agent-noid"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+LOG="$OMC_STATE_DIR/track-workers.log"
+: > "$LOG"
+printf 'agent\ttoolu_ni\tExplore\tno id probe\t1735000000\t-\n' > "$SF"
+cat <<'EOF' | OMC_STATE_DIR="$OMC_STATE_DIR" OMC_LOG_FILE="$OMC_STATE_DIR/track-workers.log" bash "$TRACK_WORKERS" post
+{
+  "session_id": "test-session-agent-noid",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Agent",
+  "tool_use_id": "toolu_ni",
+  "tool_input": { "run_in_background": true },
+  "tool_response": { "isAsync": true, "status": "async_launched" }
+}
+EOF
+assert_eq "-" "$(awk -F'\t' '{print $6}' "$SF")" "col6 stays '-' when agentId absent"
+assert_line_count "$SF" 1 "row must remain (reaped later by render grace)"
+assert_file_contains "$LOG" "no agentId" "missing-agentId case must be logged"
+end_test
+
 print_summary

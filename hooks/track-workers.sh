@@ -186,6 +186,12 @@ case "$ARG" in
           AGENT_ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.agentId // empty' 2>/dev/null)
           if [ -n "$AGENT_ID" ] && [ -n "$TOOL_USE_ID" ]; then
             update_col "$SF" 2 "$TOOL_USE_ID" 6 "$AGENT_ID"
+          else
+            # col6 stays '-': the render side will reap this row as an
+            # orphaned placeholder once the grace window expires. Log so
+            # the (rare) lost-agentId case is diagnosable rather than a
+            # silent vanish.
+            log "async Agent post: no agentId (tuid='$TOOL_USE_ID'); row stays placeholder and will be reaped at grace"
           fi
         elif [ -n "$TOOL_USE_ID" ]; then
           remove_by_kind "$SF" agent 2 "$TOOL_USE_ID"

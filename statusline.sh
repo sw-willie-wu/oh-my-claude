@@ -35,8 +35,11 @@ LAYOUT="default"
 # Async subagents have no completion hook. Liveness is read off the
 # subagent transcript JSONL: if its mtime is within this many seconds the
 # agent is treated as actively running (fast path); otherwise the last
-# assistant line's stop_reason decides.
-: "${WORKERS_AGENT_QUIET_SEC:=30}"
+# transcript line's type/stop_reason decides. Set comfortably above the
+# observed worst-case inter-line gap (real transcripts show 30s+ pauses
+# across slow tool calls) to avoid false-pruning a stalled-but-working
+# agent.
+: "${WORKERS_AGENT_QUIET_SEC:=60}"
 : "${WORKERS_AGENT_TRANSCRIPT_ROOT:=$HOME/.claude/projects}"
 
 LIB_DIR="${OMC_DIR}/lib"
@@ -121,24 +124,34 @@ is_bash_output_present() {
   [ -z "$bash_id" ] && return 1
   tmp="${TEMP:-${TMPDIR:-/tmp}}"
   tmp="${tmp//\\//}"
-  wd_id=$(printf '%s' "$WORKDIR_RAW" | sed 's|[:\\/]|-|g')
+  wd_id=$(printf '%s' "$WORKDIR_RAW" | sed 's/[^A-Za-z0-9]/-/g')
   [ -f "${tmp}/claude/${wd_id}/${SESSION_ID}/tasks/${bash_id}.output" ]
 }
 
 # Liveness for async subagents. Their transcript lives at
 #   $WORKERS_AGENT_TRANSCRIPT_ROOT/<wd_id>/<session_id>/subagents/agent-<id>.jsonl
-# (wd_id = WORKDIR_RAW with :,\,/ collapsed to '-', same transform as the
-# tasks/ output path). Fast path: mtime within WORKERS_AGENT_QUIET_SEC means
-# the agent is still emitting → alive. Stale mtime: the last
-# `"type":"assistant"` line's stop_reason == "tool_use" means more turns are
-# coming (alive); any terminal reason (end_turn/max_tokens/stop_sequence)
-# means done. Missing JSONL → cannot prove alive → treat as done (the
-# render-side grace window covers the brief pre-creation launch gap).
+# where wd_id is the cwd with every non-alphanumeric char replaced by '-'
+# (Claude Code's project-dir slug; identical transform used for the tasks/
+# output path).
+#
+# Fast path: mtime within WORKERS_AGENT_QUIET_SEC → still emitting → alive.
+# Stale mtime: decide on the LAST non-empty transcript line:
+#   - a `user` line (tool_result delivered) → model owes a turn → alive
+#   - an `assistant` line with stop_reason=="tool_use" → tool call pending
+#     → alive
+#   - any other terminal `assistant` line (stop_reason end_turn/max_tokens/
+#     stop_sequence, or the trailing null-stop_reason answer text) → done
+# stop_reason alone is unreliable (a finished agent's last line is usually
+# stop_reason:null answer text, not end_turn), hence the line-type test.
+# Missing JSONL → cannot prove alive → treat as done (the render-side grace
+# window covers the brief pre-creation launch gap). jq absent → cannot parse
+# → degrade to "done" (consistent with the hook side's jq hard-dep stance);
+# the mtime fast-path still protects actively-emitting agents.
 is_agent_alive() {
   local agent_id="$1"
   [ -z "$agent_id" ] && return 1
   local wd_id jsonl
-  wd_id=$(printf '%s' "$WORKDIR_RAW" | sed 's|[:\\/]|-|g')
+  wd_id=$(printf '%s' "$WORKDIR_RAW" | sed 's/[^A-Za-z0-9]/-/g')
   jsonl="${WORKERS_AGENT_TRANSCRIPT_ROOT}/${wd_id}/${SESSION_ID}/subagents/agent-${agent_id}.jsonl"
   [ -f "$jsonl" ] || return 1
   local now_ts mtime
@@ -148,10 +161,18 @@ is_agent_alive() {
   if [ -n "$mtime" ] && [ $((now_ts - mtime)) -le "$WORKERS_AGENT_QUIET_SEC" ]; then
     return 0
   fi
-  local sr
-  sr=$(grep '"type":"assistant"' "$jsonl" 2>/dev/null | tail -1 \
-       | jq -r '.message.stop_reason // empty' 2>/dev/null)
-  [ "$sr" = "tool_use" ]
+  command -v jq >/dev/null 2>&1 || return 1
+  local last type
+  last=$(grep -v '^[[:space:]]*$' "$jsonl" 2>/dev/null | tail -1)
+  [ -z "$last" ] && return 1
+  type=$(printf '%s' "$last" | jq -r '.type // empty' 2>/dev/null)
+  case "$type" in
+    user) return 0 ;;
+    assistant)
+      [ "$(printf '%s' "$last" | jq -r '.message.stop_reason // empty' 2>/dev/null)" = "tool_use" ]
+      ;;
+    *) return 1 ;;
+  esac
 }
 
 prune_state_and_emit() {

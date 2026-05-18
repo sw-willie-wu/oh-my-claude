@@ -348,7 +348,7 @@ end_test
 # wd_id transform mirrors statusline.sh: WORKDIR_RAW with :,\,/ -> '-'.
 # WORKDIR_RAW='/tmp' => wd_id='-tmp'.
 agent_prune() {
-  # $1=state file  $2=session id  $3=transcript root
+  # $1=state file  $2=session id  $3=transcript root  $4=WORKDIR_RAW(default /tmp)
   WORKERS_AGENT_TRANSCRIPT_ROOT="$3" \
   WORKERS_PLACEHOLDER_GRACE_SEC=5 \
   WORKERS_AGENT_QUIET_SEC=5 \
@@ -356,25 +356,30 @@ agent_prune() {
     OMC_TEST_LIB_ONLY=1
     source '$STATUSLINE'
     WORKERS_STATE_FILE='$1'
-    WORKDIR_RAW='/tmp'
+    WORKDIR_RAW='${4:-/tmp}'
     SESSION_ID='$2'
     prune_state_and_emit >/dev/null
   "
 }
+# Claude Code slugifies the cwd by replacing every non-alphanumeric char
+# with '-' (NOT collapsed). '/tmp' -> '-tmp'.
+wd_slug() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
 mk_jsonl() {
-  # $1=root $2=sid $3=agentId $4=stop_reason $5=mtime_epoch(optional)
-  local d="$1/-tmp/$2/subagents"
+  # $1=root $2=sid $3=agentId $4=lastline_json $5=mtime_epoch(optional) $6=slug(default -tmp)
+  local d="$1/${6:--tmp}/$2/subagents"
   mkdir -p "$d"
-  printf '{"type":"assistant","message":{"stop_reason":"%s"}}\n' "$4" > "$d/agent-$3.jsonl"
+  printf '%s\n' "$4" > "$d/agent-$3.jsonl"
   [ -n "${5:-}" ] && touch -d "@$5" "$d/agent-$3.jsonl"
 }
+asst_line() { printf '{"type":"assistant","message":{"stop_reason":%s}}' "$1"; }
+user_line='{"type":"user","message":{"content":[{"type":"tool_result"}]}}'
 
 start_test "prune keeps agent row when JSONL mtime is fresh (alive fast-path)"
 SID="render-test-agent-live-mtime"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 ROOT=$(mktemp -d)
 NOW=$(date +%s)
-mk_jsonl "$ROOT" "$SID" "a_live" "end_turn"   # fresh mtime (just created)
+mk_jsonl "$ROOT" "$SID" "a_live" "$(asst_line '"end_turn"')"   # fresh mtime (just created)
 printf 'agent\ttoolu_lm\tExplore\tdesc\t%s\ta_live\n' "$((NOW - 9999))" > "$SF"
 agent_prune "$SF" "$SID" "$ROOT"
 assert_line_count "$SF" 1 "fresh-mtime agent must be kept even beyond grace"
@@ -386,7 +391,7 @@ SID="render-test-agent-done"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 ROOT=$(mktemp -d)
 NOW=$(date +%s)
-mk_jsonl "$ROOT" "$SID" "a_done" "end_turn" "$((NOW - 9999))"
+mk_jsonl "$ROOT" "$SID" "a_done" "$(asst_line '"end_turn"')" "$((NOW - 9999))"
 printf 'agent\ttoolu_dn\tExplore\tdesc\t%s\ta_done\n' "$((NOW - 9999))" > "$SF"
 agent_prune "$SF" "$SID" "$ROOT"
 assert_line_count "$SF" 0 "stale + end_turn agent must be pruned"
@@ -398,7 +403,7 @@ SID="render-test-agent-midloop"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 ROOT=$(mktemp -d)
 NOW=$(date +%s)
-mk_jsonl "$ROOT" "$SID" "a_loop" "tool_use" "$((NOW - 9999))"
+mk_jsonl "$ROOT" "$SID" "a_loop" "$(asst_line '"tool_use"')" "$((NOW - 9999))"
 printf 'agent\ttoolu_ml\tExplore\tdesc\t%s\ta_loop\n' "$((NOW - 9999))" > "$SF"
 agent_prune "$SF" "$SID" "$ROOT"
 assert_line_count "$SF" 1 "stale-but-tool_use agent must be kept (still mid-loop)"
@@ -446,6 +451,45 @@ NOW=$(date +%s)
 printf 'agent\ttoolu_ps\tExplore\tdesc\t%s\t-\n' "$((NOW - 9999))" > "$SF"
 agent_prune "$SF" "$SID" "$ROOT"
 assert_line_count "$SF" 0 "stale placeholder (Post never patched col6) must be reaped"
+rm -rf "$ROOT"
+end_test
+
+# --- C1: wd_id slug must match Claude Code (all non-alnum -> '-') ---
+start_test "is_agent_alive resolves JSONL under a cwd containing _ and ."
+SID="render-test-agent-slug"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+ROOT=$(mktemp -d)
+NOW=$(date +%s)
+WDR='/home/a_b.c/proj'                       # real slug: -home-a-b-c-proj
+mk_jsonl "$ROOT" "$SID" "a_slug" "$(asst_line '"tool_use"')" "" "$(wd_slug "$WDR")"
+printf 'agent\ttoolu_sl\tExplore\tdesc\t%s\ta_slug\n' "$((NOW - 9999))" > "$SF"
+agent_prune "$SF" "$SID" "$ROOT" "$WDR"
+assert_line_count "$SF" 1 "agent must be found+kept when cwd slug has _/. (C1)"
+rm -rf "$ROOT"
+end_test
+
+# --- I1: liveness keys off the last transcript line's type, not just stop_reason ---
+start_test "prune keeps agent whose JSONL ends on a user/tool_result line (model owes a turn)"
+SID="render-test-agent-toolresult"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+ROOT=$(mktemp -d)
+NOW=$(date +%s)
+mk_jsonl "$ROOT" "$SID" "a_tr" "$user_line" "$((NOW - 9999))"
+printf 'agent\ttoolu_tr\tExplore\tdesc\t%s\ta_tr\n' "$((NOW - 9999))" > "$SF"
+agent_prune "$SF" "$SID" "$ROOT"
+assert_line_count "$SF" 1 "stale JSONL ending in tool_result must be kept (mid-loop)"
+rm -rf "$ROOT"
+end_test
+
+start_test "prune drops agent whose last assistant line has stop_reason null (terminal text)"
+SID="render-test-agent-nullsr"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+ROOT=$(mktemp -d)
+NOW=$(date +%s)
+mk_jsonl "$ROOT" "$SID" "a_ns" "$(asst_line null)" "$((NOW - 9999))"
+printf 'agent\ttoolu_ns\tExplore\tdesc\t%s\ta_ns\n' "$((NOW - 9999))" > "$SF"
+agent_prune "$SF" "$SID" "$ROOT"
+assert_line_count "$SF" 0 "stale + trailing assistant text (sr=null) must be pruned"
 rm -rf "$ROOT"
 end_test
 
