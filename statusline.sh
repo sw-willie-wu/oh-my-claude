@@ -128,6 +128,33 @@ is_bash_output_present() {
   [ -f "${tmp}/claude/${wd_id}/${SESSION_ID}/tasks/${bash_id}.output" ]
 }
 
+# Liveness for bg-Bash shell rows. The Post-hook PID fingerprint is racy at
+# launch (the child often isn't in the process table yet), and bg-Bash has
+# no on-disk completion marker (the .output file is sticky), so PID=0 rows
+# can't be reaped via a file check. Instead, at render time (well past the
+# launch instant) fingerprint-match the stored command (col5) against ps:
+# present → alive, absent → done. Mirrors the hook's match logic (b3310c5):
+# the bare child (`sleep 50` → index==1) and the MSYS eval-wrapper
+# (`… eval 'sleep 50…` → needle hit) both count.
+is_shell_alive() {
+  local cmd fp out
+  cmd="$(unescape_field "$1")"
+  fp="${cmd:0:60}"
+  [ -z "$fp" ] && return 1
+  # cygwin -Wefww/-efww exit 1; -ef/-Wef carry full args. linux -efww does.
+  # Empty-output fallthrough, NOT || exit-code chaining (cygwin ps exit
+  # codes are unreliable — an args-stripped variant can win a || chain).
+  out=$(ps -efww 2>/dev/null); [ -z "$out" ] && out=$(ps -ef 2>/dev/null)
+  [ -z "$out" ] && out=$(ps -Wef 2>/dev/null)
+  [ -z "$out" ] && return 1
+  printf '%s\n' "$out" | awk -v fp="$fp" 'NR>1 {
+      c=""
+      for (i=6; i<=NF; i++) c = c (i>6 ? " " : "") $i
+      needle = "eval \047" fp
+      if (index(c, fp)==1 || index(c, needle)>0) { f=1; exit }
+    } END { exit !f }'
+}
+
 # Liveness for async subagents. Their transcript lives at
 #   $WORKERS_AGENT_TRANSCRIPT_ROOT/<wd_id>/<session_id>/subagents/agent-<id>.jsonl
 # where wd_id is the cwd with every non-alphanumeric char replaced by '-'

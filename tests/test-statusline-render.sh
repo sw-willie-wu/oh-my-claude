@@ -494,5 +494,44 @@ assert_line_count "$SF" 0 "stale + trailing assistant text (sr=null) must be pru
 rm -rf "$ROOT"
 end_test
 
+# --- bg-Bash render-side liveness: is_shell_alive helper ---
+call_is_shell_alive() {
+  # $1 = command string to fingerprint-check
+  bash -c "
+    OMC_TEST_LIB_ONLY=1
+    source '$STATUSLINE'
+    is_shell_alive \"\$1\" && echo YES || echo NO
+  " _ "$1"
+}
+
+start_test "is_shell_alive: YES for a live eval-wrapped bg process (needle path)"
+TAG="omcprobe_$$_$RANDOM"
+( /usr/bin/bash -c "eval 'sleep 8 && : $TAG' < /dev/null" ) &
+WRAP_PID=$!
+sleep 0.5
+RESULT=$(call_is_shell_alive "sleep 8 && : $TAG")
+kill "$WRAP_PID" 2>/dev/null; pkill -f "$TAG" 2>/dev/null; wait "$WRAP_PID" 2>/dev/null
+assert_eq "YES" "$RESULT" "running eval-wrapped process must be detected alive"
+end_test
+
+start_test "is_shell_alive: YES for a live bare process (index==1 path)"
+sleep 8 &
+BARE_PID=$!
+sleep 0.3
+RESULT=$(call_is_shell_alive "sleep 8")
+kill "$BARE_PID" 2>/dev/null; wait "$BARE_PID" 2>/dev/null
+assert_eq "YES" "$RESULT" "running bare process must be detected alive"
+end_test
+
+start_test "is_shell_alive: NO when no matching process exists"
+RESULT=$(call_is_shell_alive "omc_no_such_command_$$_$RANDOM xyzzy")
+assert_eq "NO" "$RESULT" "absent command must be reported dead"
+end_test
+
+start_test "is_shell_alive: NO for empty command"
+RESULT=$(call_is_shell_alive "")
+assert_eq "NO" "$RESULT" "empty command fingerprint must be dead"
+end_test
+
 cleanup_render_state
 print_summary
