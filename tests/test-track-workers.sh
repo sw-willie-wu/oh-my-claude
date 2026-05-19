@@ -369,7 +369,6 @@ if date -d '30 seconds ago' '+%Y%m%d%H%M.%S' >/dev/null 2>&1; then
 else
   touch -t "$(date -v-30S '+%Y%m%d%H%M.%S')" "$OMC_STATE_DIR/state.lock"
 fi
-START=$(date +%s)
 cat <<EOF | bash "$TRACK_WORKERS" pre
 {
   "session_id": "$SESSION_ID",
@@ -379,9 +378,15 @@ cat <<EOF | bash "$TRACK_WORKERS" pre
   "tool_input": { "subagent_type": "Plan", "description": "stale lock victim" }
 }
 EOF
-ELAPSED=$(( $(date +%s) - START ))
+# The line count IS the guarantee: a row was written ⇒ the 30s-stale lock was
+# detected and broken. If stale-detection regressed, omc_with_lock spins its
+# bounded 100×0.05s loop, never acquires, and track-workers exits WITHOUT
+# writing → 0 lines (caught here). The old `ELAPSED <= 2s` wall-clock check was
+# a fragile proxy that mostly measured bash/jq spawn overhead and false-failed
+# on a loaded box; it is redundant with this assertion (a broken stale-break
+# degrades to a line-count failure within ~5s — it cannot hang) so it was
+# removed rather than guessing at a timing budget (condition-based-waiting).
 assert_line_count "$SF" 1 "writer should have succeeded after breaking stale lock"
-[ "$ELAPSED" -le 2 ] || { printf '    FAIL: took %ds (>2s)\n' "$ELAPSED" >&2; TEST_FAILED=1; }
 end_test
 
 start_test "description with tab/newline/backslash round-trips through state file"
