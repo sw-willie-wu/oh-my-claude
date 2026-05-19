@@ -25,6 +25,13 @@ LAYOUT="default"
 # WORKERS_AGENT_ICON / WORKERS_SHELL_ICON default in each theme;
 # user conf overrides (use empty string to disable an icon).
 : "${WORKERS_SHELL_MAX_AGE:=3600}"
+# When `ps` is entirely unusable (no output from any ps form — e.g.
+# Windows/MSYS where ps -efww/-ef/-Wef return nothing), is_shell_alive
+# cannot tell a live PID-less bg-shell from a dead one. Such rows are KEPT
+# (fail-safe) but reaped once older than this many seconds so a dead shell
+# cannot linger / grow the state file. Only affects the ps-unusable path;
+# ps-working hosts never hit it. Independent of WORKERS_SHELL_MAX_AGE.
+: "${WORKERS_SHELL_UNKNOWN_MAX_AGE:=60}"
 # Grace window for shell rows whose col7 (PID) hasn't been filled yet by
 # PostToolUse — covers both the placeholder gap (col3="-") and the brief
 # sub-window between the two `update_col` writes inside post (col3 set,
@@ -129,6 +136,9 @@ is_alive() {
 # present → alive, absent → done. Mirrors the hook's match logic (b3310c5):
 # the bare child (`sleep 50` → index==1) and the MSYS eval-wrapper
 # (`… eval 'sleep 50…` → needle hit) both count.
+# Returns: 0=alive (ps had output, fp matched); 1=dead (ps had output but
+# no match, or empty fp/cmd); 2=ps unusable (all ps forms empty) — caller
+# decides keep-vs-reap.
 is_shell_alive() {
   local cmd fp out
   cmd="$(unescape_field "$1")"
@@ -139,7 +149,7 @@ is_shell_alive() {
   # codes are unreliable — an args-stripped variant can win a || chain).
   out=$(ps -efww 2>/dev/null); [ -z "$out" ] && out=$(ps -ef 2>/dev/null)
   [ -z "$out" ] && out=$(ps -Wef 2>/dev/null)
-  [ -z "$out" ] && return 1
+  [ -z "$out" ] && return 2        # ps unusable → unknown (NOT dead)
   printf '%s\n' "$out" | awk -v fp="$fp" 'NR>1 {
       c=""
       for (i=6; i<=NF; i++) c = c (i>6 ? " " : "") $i
@@ -227,7 +237,21 @@ prune_state_and_emit() {
         elif [ "$col3" = "-" ]; then
           keep=false
         else
-          is_shell_alive "$col5" || keep=false
+          is_shell_alive "$col5"; local sa=$?
+          if [ "$sa" -eq 1 ]; then
+            keep=false                       # ps worked, process gone
+          elif [ "$sa" -eq 2 ]; then
+            # ps unusable: cannot disprove liveness → keep, but bound so a
+            # dead shell on a permanently-ps-blind box can't linger. age is
+            # already computed above when col6 (start_unix) is valid; if
+            # col6 is unusable the row is corrupt/unbounded → reap.
+            if [ -n "$col6" ] && [ "$col6" -gt 0 ] 2>/dev/null; then
+              [ "$age" -gt "$WORKERS_SHELL_UNKNOWN_MAX_AGE" ] && keep=false
+            else
+              keep=false
+            fi
+          fi
+          # sa == 0 → keep (alive)
         fi
       fi
     elif [ "$kind" = "agent" ]; then
