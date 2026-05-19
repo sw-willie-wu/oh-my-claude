@@ -773,5 +773,53 @@ ls "$ST"/gitcache- >/dev/null 2>&1 \
 rm -rf "$ST" "$RA" "$RB"
 end_test
 
+# --- §8.1: git_info skips `git submodule foreach` when no .gitmodules ---
+# `git submodule foreach` pays a ~7s MSYS process-startup cost even with zero
+# submodules; git_info calls it twice (status+diff) ⇒ ~14s pure waste ⇒ blank
+# statusline under load. A PATH-shim git records each `submodule` invocation.
+gi_shim_setup() {  # $1 = workdir; installs fake git that logs submodule calls
+  mkdir -p "$1/bin"
+  cat > "$1/bin/git" <<EOS
+#!/bin/bash
+case "\$1 \$2" in
+  "rev-parse --show-toplevel") echo "$1"; exit 0 ;;
+esac
+case "\$1" in
+  rev-parse) echo "$1"; exit 0 ;;
+  branch) echo shimbr; exit 0 ;;
+  status|diff) exit 0 ;;
+  submodule) echo called >> "$1/.gitsentinel"; exit 0 ;;
+  *) exit 0 ;;
+esac
+EOS
+  chmod +x "$1/bin/git"
+}
+call_git_info_shimmed() {  # $1 = workdir
+  ( cd "$1" && OMC_CONF=/dev/null PATH="$1/bin:$PATH" bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "'"$STATUSLINE"'"
+      git_info
+  ' )
+}
+
+start_test "git_info: NO .gitmodules → git submodule foreach is NOT invoked"
+GW=$(mktemp -d); gi_shim_setup "$GW"           # no .gitmodules created
+OUT=$(call_git_info_shimmed "$GW")
+[ -f "$GW/.gitsentinel" ] \
+  && { printf '    FAIL: submodule foreach invoked despite no .gitmodules (the ~14s waste)\n' >&2; TEST_FAILED=1; }
+NF=$(printf '%s' "$OUT" | awk -F'\t' '{print NF}')
+assert_eq "6" "$NF" "git_info still emits 6 fields"
+assert_eq "shimbr" "$(printf '%s' "$OUT" | cut -f1)" "branch still resolved"
+rm -rf "$GW"
+end_test
+
+start_test "git_info: .gitmodules present → submodule scanning still runs (no regression)"
+GW=$(mktemp -d); gi_shim_setup "$GW"; : > "$GW/.gitmodules"
+call_git_info_shimmed "$GW" >/dev/null
+[ -f "$GW/.gitsentinel" ] \
+  || { printf '    FAIL: submodule scan skipped even though .gitmodules exists\n' >&2; TEST_FAILED=1; }
+rm -rf "$GW"
+end_test
+
 cleanup_render_state
 print_summary

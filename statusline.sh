@@ -365,20 +365,39 @@ emit_workers() {
 # globals. stdout = exactly one line, 6 TAB-joined fields (NO trailing newline):
 #   <BRANCH>\t<ADD>\t<MOD>\t<DEL>\t<LINES_ADD>\t<LINES_DEL>
 # not-a-repo and detached HEAD → field 1 empty; fields 2–6 are integers.
-# Logic is the verbatim former inline block (statusline.sh git section) so
-# downstream values are byte-identical; only the plumbing changed.
+# Values are byte-identical to the former inline block in repos with no
+# submodules (the common case); only the plumbing changed plus the §8.1
+# submodule guard below.
 git_info() {
-  local branch="" add=0 mod=0 del=0 ladd=0 ldel=0
-  if git rev-parse --git-dir > /dev/null 2>&1; then
+  local branch="" add=0 mod=0 del=0 ladd=0 ldel=0 toplevel
+  # `--show-toplevel` doubles as the in-a-worktree gate AND gives the path for
+  # the .gitmodules check below in a single git call (replacing the old bare
+  # `rev-parse --git-dir` gate; a bare repo with no worktree → treated as
+  # non-repo, which is correct for a working-tree status line).
+  if toplevel=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$toplevel" ]; then
     branch=$(git branch --show-current 2>/dev/null)
-    local status sub_status all_status diff_stats
+    local status sub_status all_status diff_stats has_sub=""
+    # §8.1: `git submodule foreach` pays a heavy per-call process/startup cost
+    # on MSYS (~7s observed) even with ZERO submodules, and git_info calls it
+    # twice (status + diff) ⇒ ~14s of pure waste ⇒ statusline exceeds Claude
+    # Code's render budget ⇒ blank. Only scan submodules if the repo actually
+    # tracks them (.gitmodules at the worktree toplevel).
+    [ -f "$toplevel/.gitmodules" ] && has_sub=1
     status=$(git status --porcelain -uall 2>/dev/null)
-    sub_status=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
+    if [ -n "$has_sub" ]; then
+      sub_status=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
+    else
+      sub_status=""
+    fi
     all_status=$(printf '%s\n%s' "$status" "$sub_status")
     add=$(echo "$all_status" | grep -c '^A\|^??')
     mod=$(echo "$all_status" | grep -c '^ M\|^M\|^MM\|^AM')
     del=$(echo "$all_status" | grep -c '^ D\|^D')
-    diff_stats=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
+    if [ -n "$has_sub" ]; then
+      diff_stats=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
+    else
+      diff_stats=$(git diff HEAD --numstat 2>/dev/null)
+    fi
     ladd=$(echo "$diff_stats" | awk '{s+=$1} END {print s+0}')
     ldel=$(echo "$diff_stats" | awk '{s+=$2} END {print s+0}')
   fi
