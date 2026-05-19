@@ -821,5 +821,45 @@ call_git_info_shimmed "$GW" >/dev/null
 rm -rf "$GW"
 end_test
 
+# --- §8.3 Task A: extract JSON parse + GI_LINE split into pure functions ---
+# Fixture = the official Claude Code statusLine docs representative payload
+# (code.claude.com/docs/en/statusline.md). Golden values hand-traced through
+# the CURRENT (grep) logic so Task A proves a byte-identical pure refactor.
+DOCS_JSON='{"cwd":"/c/w/d","session_id":"abc123...","model":{"id":"claude-opus-4-7","display_name":"Opus"},"workspace":{"current_dir":"/c/w/d"},"version":"2.1.90","context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":23.5,"resets_at":1738425600},"seven_day":{"used_percentage":41.2,"resets_at":1738857600}}}'
+call_parse() {  # $1=json → pipe-joined parsed fields
+  bash -c '
+    OMC_TEST_LIB_ONLY=1
+    source "'"$STATUSLINE"'"
+    parse_status_json "$1"
+    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" \
+      "$SESSION_ID" "$SANITIZED_SID" "$MODEL" "$DIR" "$WORKDIR_RAW" \
+      "$CTX_PCT" "$RATE5_PCT" "$RATE5_RESET" "$RATE7_PCT" "$RATE7_RESET"
+  ' _ "$1"
+}
+call_split() {  # $1=GI_LINE → pipe-joined 6 git vars
+  bash -c '
+    OMC_TEST_LIB_ONLY=1
+    source "'"$STATUSLINE"'"
+    split_gi_line "$1"
+    printf "%s|%s|%s|%s|%s|%s\n" \
+      "$BRANCH" "$ADD_FILES" "$MOD_FILES" "$DEL_FILES" "$LINES_ADD" "$LINES_DEL"
+  ' _ "$1"
+}
+
+start_test "parse_status_json: docs fixture → fields match current grep behaviour"
+GOT=$(call_parse "$DOCS_JSON")
+# session|sanitized(.→_)|model|dir(norm)|workdir_raw|ctx|r5%|r5reset|r7%|r7reset
+# old grep: ctx=first used_percentage=8; r5%=grep[0-9]* of 23.5 → 23; r7%=41
+assert_eq 'abc123...|abc123___|Opus|/c/w/d|/c/w/d|8|23|1738425600|41|1738857600' \
+  "$GOT" "parse_status_json must reproduce current grep extraction byte-for-byte"
+end_test
+
+start_test "split_gi_line: non-repo line keeps empty BRANCH + 6 fields"
+GOT=$(call_split "$(printf '\t0\t0\t0\t0\t0')")
+assert_eq '|0|0|0|0|0' "$GOT" "empty leading BRANCH preserved, 6 fields"
+GOT=$(call_split "$(printf 'feat/x\t1\t2\t3\t4\t5')")
+assert_eq 'feat/x|1|2|3|4|5' "$GOT" "normal branch + counts"
+end_test
+
 cleanup_render_state
 print_summary

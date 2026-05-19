@@ -461,6 +461,50 @@ cached_git_info() {
   printf '%s' "$out"
 }
 
+# Parse the statusLine JSON ($1) into globals. Pure (no stdin/render side
+# effects) so the lib loader can test it. §8.3 Task A: extracted VERBATIM
+# from the former inline render block (still grep-based); Task B rewrites the
+# internals to a single jq pass. Behaviour byte-identical for Task A.
+parse_status_json() {
+  local input="$1"
+  SESSION_ID=""
+  if command -v jq >/dev/null 2>&1; then
+    SESSION_ID=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)
+  fi
+  if [ -z "$SESSION_ID" ]; then
+    SESSION_ID=$(printf '%s' "$input" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+  fi
+  SANITIZED_SID=$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9-_' '_')
+  WORKERS_STATE_FILE="$HOME/.claude/oh-my-claude/state/state-${SANITIZED_SID}.tsv"
+  MODEL=$(echo "$input" | grep -o '"display_name":"[^"]*"' | cut -d'"' -f4 | sed 's/ (.*//')
+  DIR=$(echo "$input" | grep -o '"current_dir":"[^"]*"' | head -1 | cut -d'"' -f4)
+  CTX_PCT=$(echo "$input" | grep -o '"used_percentage":[0-9]*' | head -1 | grep -o '[0-9]*')
+  RATE5_PCT=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
+  RATE5_RESET=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
+  RATE7_PCT=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
+  RATE7_RESET=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
+  # Raw cwd before normalization (is_agent_alive slug source); grep doubles
+  # backslashes so collapse \\\\ -> \\.
+  WORKDIR_RAW=$(printf '%s' "$DIR" | sed 's|\\\\|\\|g')
+  [ -n "${OMC_DEBUG_DUMP_WORKDIR_RAW:-}" ] && printf 'WORKDIR_RAW=%s\n' "$WORKDIR_RAW" >&2
+  # Windows path → ~/relative (display).
+  DIR=$(echo "$DIR" | sed 's|\\\\|/|g; s|\\|/|g; s|C:/Users/[^/]*/|~/|i')
+}
+
+# Split cached_git_info's 6 TAB fields into globals. cut (not `IFS=$'\t'
+# read`) because tab is IFS-whitespace and would drop a leading empty BRANCH
+# (non-repo / detached HEAD). §8.3 Task A extraction; Task C rewrites to a
+# zero-fork \x1f split. Behaviour byte-identical for Task A.
+split_gi_line() {
+  local GI_LINE="$1"
+  BRANCH=$(printf '%s' "$GI_LINE" | cut -f1)
+  ADD_FILES=$(printf '%s' "$GI_LINE" | cut -f2)
+  MOD_FILES=$(printf '%s' "$GI_LINE" | cut -f3)
+  DEL_FILES=$(printf '%s' "$GI_LINE" | cut -f4)
+  LINES_ADD=$(printf '%s' "$GI_LINE" | cut -f5)
+  LINES_DEL=$(printf '%s' "$GI_LINE" | cut -f6)
+}
+
 # ---------------------------------------------------------------------------
 # Render pipeline — gated so test loaders can source this file without
 # blocking on stdin or triggering side-effects.
@@ -469,48 +513,9 @@ if [ -z "${OMC_TEST_LIB_ONLY:-}" ]; then
 
 # Read JSON input from stdin
 input=$(cat)
-
-# Extract session_id (jq preferred; grep fallback for jq-less systems).
-SESSION_ID=""
-if command -v jq >/dev/null 2>&1; then
-  SESSION_ID=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)
-fi
-if [ -z "$SESSION_ID" ]; then
-  SESSION_ID=$(printf '%s' "$input" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
-fi
-SANITIZED_SID=$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9-_' '_')
-WORKERS_STATE_FILE="$HOME/.claude/oh-my-claude/state/state-${SANITIZED_SID}.tsv"
-
-# Parse JSON fields
-MODEL=$(echo "$input" | grep -o '"display_name":"[^"]*"' | cut -d'"' -f4 | sed 's/ (.*//')
-DIR=$(echo "$input" | grep -o '"current_dir":"[^"]*"' | head -1 | cut -d'"' -f4)
-CTX_PCT=$(echo "$input" | grep -o '"used_percentage":[0-9]*' | head -1 | grep -o '[0-9]*')
-RATE5_PCT=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
-RATE5_RESET=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
-RATE7_PCT=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
-RATE7_RESET=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
-
-# Capture raw cwd before destructive normalization below — used by
-# is_agent_alive to derive the subagent-transcript project slug. JSON-extracted
-# via grep leaves backslashes doubled, so collapse \\\\ -> \\ here. (TODO:
-# switch JSON extraction to jq for robustness against \", \uXXXX, etc.)
-WORKDIR_RAW=$(printf '%s' "$DIR" | sed 's|\\\\|\\|g')
-[ -n "${OMC_DEBUG_DUMP_WORKDIR_RAW:-}" ] && printf 'WORKDIR_RAW=%s\n' "$WORKDIR_RAW" >&2
-
-# Convert Windows path to ~/relative
-DIR=$(echo "$DIR" | sed 's|\\\\|/|g; s|\\|/|g; s|C:/Users/[^/]*/|~/|i')
-
-# Git info via the TTL cache (cached_git_info → git_info on miss). Parsed with
-# cut: `IFS=$'\t' read` would treat the leading TAB of a non-repo /
-# detached-HEAD line (empty field 1) as IFS-whitespace and drop the field,
-# shifting every value. cut -f keeps empty fields verbatim.
+parse_status_json "$input"
 GI_LINE=$(cached_git_info)
-BRANCH=$(printf '%s' "$GI_LINE" | cut -f1)
-ADD_FILES=$(printf '%s' "$GI_LINE" | cut -f2)
-MOD_FILES=$(printf '%s' "$GI_LINE" | cut -f3)
-DEL_FILES=$(printf '%s' "$GI_LINE" | cut -f4)
-LINES_ADD=$(printf '%s' "$GI_LINE" | cut -f5)
-LINES_DEL=$(printf '%s' "$GI_LINE" | cut -f6)
+split_gi_line "$GI_LINE"
 
 # Rate limit reset info
 RATE5_SUFFIX=""
