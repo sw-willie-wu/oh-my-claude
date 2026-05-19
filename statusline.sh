@@ -510,18 +510,17 @@ parse_status_json() {
   fi
 }
 
-# Split cached_git_info's 6 TAB fields into globals. cut (not `IFS=$'\t'
-# read`) because tab is IFS-whitespace and would drop a leading empty BRANCH
-# (non-repo / detached HEAD). §8.3 Task A extraction; Task C rewrites to a
-# zero-fork \x1f split. Behaviour byte-identical for Task A.
+# Split cached_git_info's 6 TAB fields into globals. §8.3 Task C: zero-fork
+# (was 6× `cut`). Translate TAB→US (\x1f) then `IFS=$'\x1f' read`: \x1f is
+# NOT IFS-whitespace so an empty leading BRANCH (non-repo / detached HEAD,
+# locked d85481a) is preserved — a naive `IFS=$'\t' read` would drop it.
+# git refnames forbid control chars ⇒ cached_git_info output can never
+# contain \x1f ⇒ collision-free (spec §4.5). Byte-identical to the old cut.
 split_gi_line() {
-  local GI_LINE="$1"
-  BRANCH=$(printf '%s' "$GI_LINE" | cut -f1)
-  ADD_FILES=$(printf '%s' "$GI_LINE" | cut -f2)
-  MOD_FILES=$(printf '%s' "$GI_LINE" | cut -f3)
-  DEL_FILES=$(printf '%s' "$GI_LINE" | cut -f4)
-  LINES_ADD=$(printf '%s' "$GI_LINE" | cut -f5)
-  LINES_DEL=$(printf '%s' "$GI_LINE" | cut -f6)
+  local GI_LINE="$1" _gi
+  _gi="${GI_LINE//$'\t'/$'\x1f'}"
+  IFS=$'\x1f' read -r BRANCH ADD_FILES MOD_FILES DEL_FILES LINES_ADD \
+    LINES_DEL <<<"$_gi"
 }
 
 # ---------------------------------------------------------------------------

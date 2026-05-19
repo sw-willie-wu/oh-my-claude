@@ -861,6 +861,24 @@ GOT=$(call_split "$(printf 'feat/x\t1\t2\t3\t4\t5')")
 assert_eq 'feat/x|1|2|3|4|5' "$GOT" "normal branch + counts"
 end_test
 
+# §8.3 Task C: split_gi_line → zero-fork \x1f split (spec §4.5). Goldens
+# pin the old `cut` behaviour byte-for-byte; the non-repo empty-BRANCH case
+# above is the regression sentinel (a naive IFS=$'\t' read would drop it).
+start_test "split_gi_line: detached HEAD (empty BRANCH) with non-zero counts"
+GOT=$(call_split "$(printf '\t2\t3\t1\t40\t12')")
+assert_eq '|2|3|1|40|12' "$GOT" "empty BRANCH preserved, non-zero counts intact"
+end_test
+
+start_test "split_gi_line: branch containing '/' with dirty counts"
+GOT=$(call_split "$(printf 'feature/foo-bar\t0\t5\t0\t0\t0')")
+assert_eq 'feature/foo-bar|0|5|0|0|0' "$GOT" "slash in refname survives split"
+end_test
+
+start_test "split_gi_line: short line (<6 fields) → trailing vars empty, parity with cut"
+GOT=$(call_split "$(printf 'main\t1\t2')")
+assert_eq 'main|1|2|||' "$GOT" "missing trailing fields empty, no spill (cut parity)"
+end_test
+
 # --- §8.3 Task B: parse_status_json → single jq pass. Spec §4.1–§4.4/§4.6. ---
 # Goldens are the SPEC-pinned values: equivalence to the old grep where the
 # spec preserves behaviour (dir norm, WORKDIR_RAW single-backslash, model
