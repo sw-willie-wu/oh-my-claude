@@ -861,5 +861,60 @@ GOT=$(call_split "$(printf 'feat/x\t1\t2\t3\t4\t5')")
 assert_eq 'feat/x|1|2|3|4|5' "$GOT" "normal branch + counts"
 end_test
 
+# --- §8.3 Task B: parse_status_json → single jq pass. Spec §4.1–§4.4/§4.6. ---
+# Goldens are the SPEC-pinned values: equivalence to the old grep where the
+# spec preserves behaviour (dir norm, WORKDIR_RAW single-backslash, model
+# suffix strip, SANITIZED_SID, fractional floor) and the spec-sanctioned
+# improvements where jq is strictly more robust than positional grep (null /
+# absent context_window ⇒ CTX 0, never a mis-grabbed rate used_percentage).
+# JSON below uses literal `\\` (single-quoted, faithful) → valid JSON \\ →
+# jq raw value has SINGLE backslashes.
+
+start_test "parse_status_json: C:/c: → ~/, D: kept, single-backslash WORKDIR_RAW"
+GOT=$(call_parse '{"session_id":"w","model":{"display_name":"X"},"workspace":{"current_dir":"C:\\Users\\willie\\proj"}}')
+assert_eq 'w|w|X|~/proj|C:\Users\willie\proj|0||||' "$GOT" "C:\\Users\\ → ~/ ; WORKDIR_RAW single-backslash"
+GOT=$(call_parse '{"session_id":"w","model":{"display_name":"X"},"workspace":{"current_dir":"c:\\users\\bob\\x"}}')
+assert_eq 'w|w|X|~/x|c:\users\bob\x|0||||' "$GOT" "lowercase c:/users collapses (case-insensitive, old i flag)"
+GOT=$(call_parse '{"session_id":"w","model":{"display_name":"X"},"workspace":{"current_dir":"D:\\Users\\bob\\x"}}')
+assert_eq 'w|w|X|D:/Users/bob/x|D:\Users\bob\x|0||||' "$GOT" "non-C drive NOT collapsed (old behaviour)"
+end_test
+
+start_test "parse_status_json: display_name \" (…)\" stripped; null context → CTX 0"
+GOT=$(call_parse '{"session_id":"s2","model":{"display_name":"Opus 4.7 (1M context)"},"workspace":{"current_dir":"/home/u/p"},"context_window":{"used_percentage":null}}')
+assert_eq 's2|s2|Opus 4.7|/home/u/p|/home/u/p|0||||' "$GOT" "suffix stripped; null used_percentage → 0 (// 0 | floor)"
+end_test
+
+start_test "parse_status_json: absent context_window does NOT mis-grab a rate used_percentage"
+GOT=$(call_parse '{"session_id":"s1","rate_limits":{"five_hour":{"used_percentage":50,"resets_at":111},"seven_day":{"used_percentage":60,"resets_at":222}}}')
+assert_eq 's1|s1||||0|50|111|60|222' "$GOT" "CTX=0 via jq path, not 50 (old positional-grep bug); rates intact"
+end_test
+
+start_test "parse_status_json: fractional used_percentage floors; SANITIZED_SID maps non-alnum"
+GOT=$(call_parse '{"session_id":"f","model":{"display_name":"Opus"},"workspace":{"current_dir":"/c/w/d"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":23.5,"resets_at":1738425600},"seven_day":{"used_percentage":41.2,"resets_at":1738857600}}}')
+assert_eq 'f|f|Opus|/c/w/d|/c/w/d|8|23|1738425600|41|1738857600' "$GOT" "23.5→23, 41.2→41 (floor), byte-identical to old grep [0-9]*"
+GOT=$(call_parse '{"session_id":"a/b.c d","model":{"display_name":"X"},"workspace":{"current_dir":"/x"},"context_window":{"used_percentage":8}}')
+assert_eq 'a/b.c d|a_b_c_d|X|/x|/x|8||||' "$GOT" "SANITIZED_SID: non-alnum → _ (tr -c equivalent)"
+end_test
+
+# Gate-level: jq failure (malformed input) and empty session_id both collapse
+# to an empty SESSION_ID → the render gate emits a single notice + exit 0,
+# BEFORE any state-*.tsv write. Old grep code instead renders normally.
+start_test "render gate: malformed input → jq-required notice, exit 0, no state write"
+NOTICE='oh-my-claude: jq required (winget install jqlang.jq)'
+rm -f "$RENDER_STATE_DIR/state-.tsv"
+OUT=$(printf 'not valid json at all' | bash "$STATUSLINE" 2>/dev/null); RC=$?
+assert_eq "$NOTICE" "$OUT" "malformed JSON → exactly the jq-required notice"
+assert_eq "0" "$RC" "notice path exits 0"
+[ ! -e "$RENDER_STATE_DIR/state-.tsv" ] \
+  || { printf '    FAIL: state-.tsv written on jq-failure path\n' >&2; TEST_FAILED=1; }
+end_test
+
+start_test "render gate: empty session_id → jq-required notice, exit 0"
+NOTICE='oh-my-claude: jq required (winget install jqlang.jq)'
+OUT=$(echo '{"session_id":"","model":{"display_name":"X"},"workspace":{"current_dir":"/x"}}' | bash "$STATUSLINE" 2>/dev/null); RC=$?
+assert_eq "$NOTICE" "$OUT" "empty session_id → notice (no broken statusline)"
+assert_eq "0" "$RC" "empty-session notice path exits 0"
+end_test
+
 cleanup_render_state
 print_summary

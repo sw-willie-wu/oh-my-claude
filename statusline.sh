@@ -462,33 +462,52 @@ cached_git_info() {
 }
 
 # Parse the statusLine JSON ($1) into globals. Pure (no stdin/render side
-# effects) so the lib loader can test it. §8.3 Task A: extracted VERBATIM
-# from the former inline render block (still grep-based); Task B rewrites the
-# internals to a single jq pass. Behaviour byte-identical for Task A.
+# effects) so the lib loader can test it. §8.3 Task B: ONE `jq --raw-output0`
+# pass replaces ~30 `echo|grep -o` forks (spec §4.1–§4.4). jq is a render-side
+# hard dep (already a hook-side one); on jq absent/too-old/malformed input the
+# 8 reads leave SESSION_ID empty and the render gate emits the §4.6 notice.
+# SANITIZED_SID/WORKERS_STATE_FILE are kept here as fork-free var assignments
+# (no I/O); the gate's empty-SESSION_ID guard exits before anything WRITES
+# state-*.tsv, preserving spec §4.6 (deviation noted in spec §10).
 parse_status_json() {
   local input="$1"
-  SESSION_ID=""
-  if command -v jq >/dev/null 2>&1; then
-    SESSION_ID=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)
-  fi
-  if [ -z "$SESSION_ID" ]; then
-    SESSION_ID=$(printf '%s' "$input" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
-  fi
-  SANITIZED_SID=$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9-_' '_')
+  local _jqfilter='
+    .session_id // "",
+    .model.display_name // "",
+    .workspace.current_dir // "",
+    ((.context_window.used_percentage // 0) | floor),
+    ((.rate_limits.five_hour.used_percentage // "") | (if type=="number" then floor else . end)),
+    (.rate_limits.five_hour.resets_at // ""),
+    ((.rate_limits.seven_day.used_percentage // "") | (if type=="number" then floor else . end)),
+    (.rate_limits.seven_day.resets_at // "")'
+  SESSION_ID=""; MODEL=""; DIR=""; CTX_PCT=""
+  RATE5_PCT=""; RATE5_RESET=""; RATE7_PCT=""; RATE7_RESET=""
+  # --raw-output0: raw scalars (backslashes stay SINGLE — no @tsv re-doubling)
+  # NUL-delimited (no \n, so winget jq's CRLF line-xlate never runs). Not
+  # chained with ||/&& (spec §4.7): a normal "rate_limits absent" payload
+  # must not abort the render.
+  {
+    IFS= read -r -d '' SESSION_ID
+    IFS= read -r -d '' MODEL
+    IFS= read -r -d '' DIR
+    IFS= read -r -d '' CTX_PCT
+    IFS= read -r -d '' RATE5_PCT
+    IFS= read -r -d '' RATE5_RESET
+    IFS= read -r -d '' RATE7_PCT
+    IFS= read -r -d '' RATE7_RESET
+  } < <(printf '%s' "$input" | jq --raw-output0 "$_jqfilter")
+  MODEL="${MODEL%% (*}"                              # strip " (…)" suffix
+  SANITIZED_SID="${SESSION_ID//[^A-Za-z0-9_-]/_}"    # tr -c equivalent, no fork
   WORKERS_STATE_FILE="$HOME/.claude/oh-my-claude/state/state-${SANITIZED_SID}.tsv"
-  MODEL=$(echo "$input" | grep -o '"display_name":"[^"]*"' | cut -d'"' -f4 | sed 's/ (.*//')
-  DIR=$(echo "$input" | grep -o '"current_dir":"[^"]*"' | head -1 | cut -d'"' -f4)
-  CTX_PCT=$(echo "$input" | grep -o '"used_percentage":[0-9]*' | head -1 | grep -o '[0-9]*')
-  RATE5_PCT=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
-  RATE5_RESET=$(echo "$input" | grep -o '"five_hour":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
-  RATE7_PCT=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"used_percentage":[0-9]*' | grep -o '[0-9]*')
-  RATE7_RESET=$(echo "$input" | grep -o '"seven_day":{[^}]*' | grep -o '"resets_at":[0-9]*' | grep -o '[0-9]*')
-  # Raw cwd before normalization (is_agent_alive slug source); grep doubles
-  # backslashes so collapse \\\\ -> \\.
-  WORKDIR_RAW=$(printf '%s' "$DIR" | sed 's|\\\\|\\|g')
+  WORKDIR_RAW="$DIR"                                 # raw jq value, single backslashes
   [ -n "${OMC_DEBUG_DUMP_WORKDIR_RAW:-}" ] && printf 'WORKDIR_RAW=%s\n' "$WORKDIR_RAW" >&2
-  # Windows path → ~/relative (display).
-  DIR=$(echo "$DIR" | sed 's|\\\\|/|g; s|\\|/|g; s|C:/Users/[^/]*/|~/|i')
+  # Windows path → ~/relative (display). Faithfully reproduces the old
+  # `sed 's|\\|/|g; s|C:/Users/[^/]*/|~/|i'`: drive C only (case-insensitive),
+  # Users case-insensitive, one segment; other drives unchanged.
+  DIR="${DIR//\\//}"
+  if [[ "$DIR" =~ ^[Cc]:/[Uu][Ss][Ee][Rr][Ss]/[^/]*/(.*)$ ]]; then
+    DIR="~/${BASH_REMATCH[1]}"
+  fi
 }
 
 # Split cached_git_info's 6 TAB fields into globals. cut (not `IFS=$'\t'
@@ -514,6 +533,16 @@ if [ -z "${OMC_TEST_LIB_ONLY:-}" ]; then
 # Read JSON input from stdin
 input=$(cat)
 parse_status_json "$input"
+# jq-failure / empty-session guard (spec §4.6). `.session_id` is documented
+# always-present, so an empty SESSION_ID unambiguously means jq is absent,
+# too old (`--raw-output0` unknown), or `$input` was malformed. One cheap
+# test, no extra fork — and it runs BEFORE cached_git_info/render so no
+# state-*.tsv is ever written on the failure path. Same effective outcome as
+# the old grep code (empty session → no useful statusline), but loud.
+if [ -z "$SESSION_ID" ]; then
+  printf 'oh-my-claude: jq required (winget install jqlang.jq)\n'
+  exit 0
+fi
 GI_LINE=$(cached_git_info)
 split_gi_line "$GI_LINE"
 
