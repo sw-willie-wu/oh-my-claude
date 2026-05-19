@@ -108,6 +108,10 @@ bash oh-my-claude/install.sh
 
 Restart Claude Code to see the statusline.
 
+### Upgrading
+
+If you installed oh-my-claude before 1.1.0, re-run `/oh-my-claude:setup` and accept the prompt to add `refreshInterval` to your `statusLine` settings — it enables the live elapsed-time / workers refresh (git info is cached for `GIT_CACHE_TTL` seconds so the 1-second refresh stays cheap). Existing themes/layouts are unaffected.
+
 ## Usage
 
 ### Switch theme / layout
