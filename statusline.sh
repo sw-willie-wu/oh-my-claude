@@ -40,6 +40,10 @@ LAYOUT="default"
 # agent.
 : "${WORKERS_AGENT_QUIET_SEC:=60}"
 : "${WORKERS_AGENT_TRANSCRIPT_ROOT:=$HOME/.claude/projects}"
+# git_info() result cache TTL (seconds). Makes statusLine refreshInterval:1
+# affordable by not running git every tick. 0 = disable caching (always
+# recompute = exact legacy behavior). Non-numeric/negative → 3.
+: "${GIT_CACHE_TTL:=3}"
 
 LIB_DIR="${OMC_DIR}/lib"
 [ -d "$LIB_DIR" ] || LIB_DIR="$SCRIPT_DIR/lib"
@@ -357,6 +361,106 @@ emit_workers() {
   done
 }
 
+# Git working-tree summary. Pure: runs git in the caller's $PWD, mutates no
+# globals. stdout = exactly one line, 6 TAB-joined fields (NO trailing newline):
+#   <BRANCH>\t<ADD>\t<MOD>\t<DEL>\t<LINES_ADD>\t<LINES_DEL>
+# not-a-repo and detached HEAD → field 1 empty; fields 2–6 are integers.
+# Values are byte-identical to the former inline block in repos with no
+# submodules (the common case); only the plumbing changed plus the §8.1
+# submodule guard below.
+git_info() {
+  local branch="" add=0 mod=0 del=0 ladd=0 ldel=0 toplevel
+  # `--show-toplevel` doubles as the in-a-worktree gate AND gives the path for
+  # the .gitmodules check below in a single git call (replacing the old bare
+  # `rev-parse --git-dir` gate; a bare repo with no worktree → treated as
+  # non-repo, which is correct for a working-tree status line).
+  if toplevel=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$toplevel" ]; then
+    branch=$(git branch --show-current 2>/dev/null)
+    local status sub_status all_status diff_stats has_sub=""
+    # §8.1: `git submodule foreach` pays a heavy per-call process/startup cost
+    # on MSYS (~7s observed) even with ZERO submodules, and git_info calls it
+    # twice (status + diff) ⇒ ~14s of pure waste ⇒ statusline exceeds Claude
+    # Code's render budget ⇒ blank. Only scan submodules if the repo actually
+    # tracks them (.gitmodules at the worktree toplevel).
+    [ -f "$toplevel/.gitmodules" ] && has_sub=1
+    status=$(git status --porcelain -uall 2>/dev/null)
+    if [ -n "$has_sub" ]; then
+      sub_status=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
+    else
+      sub_status=""
+    fi
+    all_status=$(printf '%s\n%s' "$status" "$sub_status")
+    add=$(echo "$all_status" | grep -c '^A\|^??')
+    mod=$(echo "$all_status" | grep -c '^ M\|^M\|^MM\|^AM')
+    del=$(echo "$all_status" | grep -c '^ D\|^D')
+    if [ -n "$has_sub" ]; then
+      diff_stats=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
+    else
+      diff_stats=$(git diff HEAD --numstat 2>/dev/null)
+    fi
+    ladd=$(echo "$diff_stats" | awk '{s+=$1} END {print s+0}')
+    ldel=$(echo "$diff_stats" | awk '{s+=$2} END {print s+0}')
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s' "$branch" "$add" "$mod" "$del" "$ladd" "$ldel"
+}
+
+# Short-TTL on-disk cache around git_info(), keyed by $PWD (the dir git runs
+# in — NOT $WORKDIR_RAW/current_dir, which are display-only and differ from
+# $PWD under MSYS). Makes statusLine refreshInterval:1 affordable. OMC_STATE_DIR
+# is already in scope (set by lib/state-lock.sh, sourced above). Stale-write
+# safety: per-cwd file + atomic tmp+mv (no lock — independent of worker state;
+# worst case is N concurrent dupes, self-healing).
+cached_git_info() {
+  local ttl="$GIT_CACHE_TTL"
+  # empty / negative / decimal / non-integer → 3; "0" (disabled) preserved.
+  case "$ttl" in ''|*[!0-9]*) ttl=3 ;; esac
+  if [ "$ttl" = "0" ]; then
+    git_info
+    return
+  fi
+  local wd key file content now mtime age out
+  # Key off the ACTUAL cwd (getcwd via `pwd -P`), not the $PWD variable:
+  # Claude Code can invoke the statusLine command with $PWD empty, which
+  # collapsed key="" so every repo shared one "gitcache-" file and got
+  # served another repo's git info. If even getcwd is unavailable (cwd
+  # deleted), bypass the cache entirely — compute fresh, write nothing —
+  # so a missing cwd can never poison a shared key.
+  wd=$(pwd -P 2>/dev/null)
+  if [ -z "$wd" ]; then
+    git_info
+    return
+  fi
+  key=$(printf '%s' "$wd" | sed 's/[^A-Za-z0-9]/-/g')
+  file="$OMC_STATE_DIR/gitcache-${key}"
+  if [ -f "$file" ]; then
+    # OMC_NOW_OVERRIDE: test-only clock seam so the TTL-boundary tests are
+    # deterministic instead of racing wall-clock on a slow box. Unset in
+    # production → identical behaviour (date +%s).
+    now=${OMC_NOW_OVERRIDE:-$(date +%s)}
+    mtime=$(stat -c %Y "$file" 2>/dev/null)
+    [ -z "$mtime" ] && mtime=$(date -r "$file" +%s 2>/dev/null)
+    if [ -n "$mtime" ]; then
+      age=$((now - mtime))
+      if [ "$age" -le "$ttl" ]; then
+        content=$(cat "$file")          # $() strips trailing \n (none written)
+        local TAB; TAB=$'\t'
+        # Well-formed = exactly one line, 6 fields, fields 2–6 integers. The
+        # anchored bash regex (no /m) also enforces single-line: a 0-byte,
+        # truncated, or multi-line file fails. $re MUST stay unquoted.
+        local re="^[^${TAB}]*${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+$"
+        if [[ "$content" =~ $re ]]; then
+          printf '%s' "$content"
+          return
+        fi
+      fi
+    fi
+  fi
+  out=$(git_info)                                                  # MISS
+  mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+  printf '%s' "$out" > "$file.tmp.$$" && mv "$file.tmp.$$" "$file"  # atomic
+  printf '%s' "$out"
+}
+
 # ---------------------------------------------------------------------------
 # Render pipeline — gated so test loaders can source this file without
 # blocking on stdin or triggering side-effects.
@@ -396,20 +500,17 @@ WORKDIR_RAW=$(printf '%s' "$DIR" | sed 's|\\\\|\\|g')
 # Convert Windows path to ~/relative
 DIR=$(echo "$DIR" | sed 's|\\\\|/|g; s|\\|/|g; s|C:/Users/[^/]*/|~/|i')
 
-# Git info (if in a repo)
-BRANCH="" ADD_FILES=0 MOD_FILES=0 DEL_FILES=0 LINES_ADD=0 LINES_DEL=0
-if git rev-parse --git-dir > /dev/null 2>&1; then
-  BRANCH=$(git branch --show-current 2>/dev/null)
-  STATUS=$(git status --porcelain -uall 2>/dev/null)
-  SUB_STATUS=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
-  ALL_STATUS=$(printf '%s\n%s' "$STATUS" "$SUB_STATUS")
-  ADD_FILES=$(echo "$ALL_STATUS" | grep -c '^A\|^??')
-  MOD_FILES=$(echo "$ALL_STATUS" | grep -c '^ M\|^M\|^MM\|^AM')
-  DEL_FILES=$(echo "$ALL_STATUS" | grep -c '^ D\|^D')
-  DIFF_STATS=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
-  LINES_ADD=$(echo "$DIFF_STATS" | awk '{s+=$1} END {print s+0}')
-  LINES_DEL=$(echo "$DIFF_STATS" | awk '{s+=$2} END {print s+0}')
-fi
+# Git info via the TTL cache (cached_git_info → git_info on miss). Parsed with
+# cut: `IFS=$'\t' read` would treat the leading TAB of a non-repo /
+# detached-HEAD line (empty field 1) as IFS-whitespace and drop the field,
+# shifting every value. cut -f keeps empty fields verbatim.
+GI_LINE=$(cached_git_info)
+BRANCH=$(printf '%s' "$GI_LINE" | cut -f1)
+ADD_FILES=$(printf '%s' "$GI_LINE" | cut -f2)
+MOD_FILES=$(printf '%s' "$GI_LINE" | cut -f3)
+DEL_FILES=$(printf '%s' "$GI_LINE" | cut -f4)
+LINES_ADD=$(printf '%s' "$GI_LINE" | cut -f5)
+LINES_DEL=$(printf '%s' "$GI_LINE" | cut -f6)
 
 # Rate limit reset info
 RATE5_SUFFIX=""

@@ -492,5 +492,334 @@ grep -qF 'toolu_livecmd' "$SF" \
   || { printf '    FAIL: live-process shell row pruned (col7=0 fingerprint path)\n' >&2; TEST_FAILED=1; }
 end_test
 
+# --- Task A: git_info() extracted, pure, 6 TAB-joined fields ---
+call_git_info() {
+  # $1 = directory to cd into before running git_info (git uses ambient $PWD)
+  ( cd "$1" && bash -c "
+    OMC_TEST_LIB_ONLY=1
+    source '$STATUSLINE'
+    git_info
+  " )
+}
+
+start_test "git_info: in a git repo, field 1 is the current branch and there are 6 TAB fields"
+GI_REPO=$(mktemp -d)
+(
+  cd "$GI_REPO"
+  git init -q .
+  git config user.email t@t.t
+  git config user.name t
+  echo a > tracked.txt
+  git add tracked.txt
+  git commit -qm init
+  git branch -m omcbranch
+  echo b >> tracked.txt          # modified tracked file
+  echo c > untracked.txt         # untracked file
+)
+GI_OUT=$(call_git_info "$GI_REPO")
+GI_NF=$(printf '%s' "$GI_OUT" | awk -F'\t' '{print NF}')
+assert_eq "6" "$GI_NF" "git_info must emit exactly 6 TAB-separated fields"
+GI_BRANCH=$(printf '%s' "$GI_OUT" | cut -f1)
+assert_eq "omcbranch" "$GI_BRANCH" "field 1 must be the current branch"
+rm -rf "$GI_REPO"
+end_test
+
+start_test "git_info: outside a git repo emits empty branch and five zeros"
+GI_NONREPO=$(mktemp -d)
+GI_OUT=$(call_git_info "$GI_NONREPO")
+GI_EXPECT=$(printf '\t0\t0\t0\t0\t0')
+assert_eq "$GI_EXPECT" "$GI_OUT" "non-repo must be empty-branch + five zero counts"
+rm -rf "$GI_NONREPO"
+end_test
+
+start_test "git_info: detached HEAD emits empty branch field but still 6 fields"
+GI_DET=$(mktemp -d)
+(
+  cd "$GI_DET"
+  git init -q .
+  git config user.email t@t.t
+  git config user.name t
+  echo a > f.txt; git add f.txt; git commit -qm c1
+  echo b > f.txt; git add f.txt; git commit -qm c2
+  git checkout -q HEAD~1          # detached HEAD
+)
+GI_OUT=$(call_git_info "$GI_DET")
+GI_BRANCH=$(printf '%s' "$GI_OUT" | cut -f1)
+assert_eq "" "$GI_BRANCH" "detached HEAD must yield empty branch field 1"
+GI_NF=$(printf '%s' "$GI_OUT" | awk -F'\t' '{print NF}')
+assert_eq "6" "$GI_NF" "detached HEAD still emits 6 fields"
+rm -rf "$GI_DET"
+end_test
+
+# --- Task B: cached_git_info() + GIT_CACHE_TTL ---
+# Cache-layer tests stub git_info() by REDEFINING it after sourcing (function
+# resolution is dynamic, so cached_git_info calls the stub). This decouples
+# the cache logic from real git — git parsing is already covered by Task A's
+# git_info tests. The stub bumps a persistent counter file so HIT (no bump)
+# vs MISS (bump) is observable across separate processes.
+# $1=workdir(cd target → $PWD = cache key) $2=OMC_STATE_DIR $3=GIT_CACHE_TTL
+# $4=stub output (default well-formed 6-field line)
+cgi() {
+  local out="${4:-$(printf 'stub\t1\t2\t3\t4\t5')}"
+  ( cd "$1" && OMC_STATE_DIR="$2" GIT_CACHE_TTL="$3" STUB_OUT="$out" OMC_CONF=/dev/null \
+       OMC_NOW_OVERRIDE="${OMC_NOW_OVERRIDE:-}" bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "'"$STATUSLINE"'"
+      CNT="$OMC_STATE_DIR/.gitcnt"
+      [ -f "$CNT" ] || echo 0 > "$CNT"
+      git_info() { echo $(( $(cat "$CNT") + 1 )) > "$CNT"; printf "%s" "$STUB_OUT"; }
+      cached_git_info
+  ' )
+}
+STUB_LINE=$(printf 'stub\t1\t2\t3\t4\t5')
+
+start_test "cached_git_info: miss invokes git_info once and creates the cache file"
+ST=$(mktemp -d); WD=$(mktemp -d)
+OUT=$(cgi "$WD" "$ST" 3)
+assert_eq "$STUB_LINE" "$OUT" "miss must return git_info output"
+assert_eq "1" "$(cat "$ST/.gitcnt")" "git_info called exactly once on miss"
+CF=$(ls "$ST"/gitcache-* 2>/dev/null)
+[ -n "$CF" ] || { printf '    FAIL: no cache file created\n' >&2; TEST_FAILED=1; }
+assert_eq "$STUB_LINE" "$(cat "$CF" 2>/dev/null)" "cache file content == git_info output"
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: fresh cache is a HIT (git_info not re-invoked)"
+ST=$(mktemp -d); WD=$(mktemp -d)
+OUT1=$(cgi "$WD" "$ST" 3); OUT2=$(cgi "$WD" "$ST" 3)
+assert_eq "1" "$(cat "$ST/.gitcnt")" "second call must be a cache HIT (counter stays 1)"
+assert_eq "$STUB_LINE" "$OUT2" "HIT returns cached content"
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: TTL boundary is <= (age==TTL HIT, age==TTL+1 MISS)"
+# Deterministic: pin the cache mtime to a fixed epoch E and drive cached_git_info's
+# clock via OMC_NOW_OVERRIDE, so age = NOW-E is exact regardless of how slow the
+# box is. (The old form raced wall-clock between `touch` and the 2nd call's own
+# date+%s; on a loaded MSYS box age slipped to TTL+1 → false MISS → flaky.)
+ST=$(mktemp -d); WD=$(mktemp -d)
+E=1000000000
+cgi "$WD" "$ST" 3 >/dev/null               # miss → counter=1, cache written
+CF=$(ls "$ST"/gitcache-*)
+touch -d "@$E" "$CF"                        # mtime = E (fixed)
+OMC_NOW_OVERRIDE=$((E + 3)) cgi "$WD" "$ST" 3 >/dev/null   # age == TTL(3)
+assert_eq "1" "$(cat "$ST/.gitcnt")" "age == TTL must be a HIT (<= boundary, not <)"
+OMC_NOW_OVERRIDE=$((E + 4)) cgi "$WD" "$ST" 3 >/dev/null   # age == TTL+1
+assert_eq "2" "$(cat "$ST/.gitcnt")" "age == TTL+1 must MISS (boundary excludes above)"
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: age beyond TTL is a MISS (cache rewritten)"
+ST=$(mktemp -d); WD=$(mktemp -d)
+cgi "$WD" "$ST" 3 >/dev/null
+CF=$(ls "$ST"/gitcache-*)
+touch -d "@$(( $(date +%s) - 4 ))" "$CF"   # TTL+1 old
+cgi "$WD" "$ST" 3 >/dev/null
+assert_eq "2" "$(cat "$ST/.gitcnt")" "expired cache must recompute"
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: GIT_CACHE_TTL=0 disables caching (no file, every call computes)"
+ST=$(mktemp -d); WD=$(mktemp -d)
+cgi "$WD" "$ST" 0 >/dev/null; cgi "$WD" "$ST" 0 >/dev/null
+assert_eq "2" "$(cat "$ST/.gitcnt")" "TTL=0 must compute every call"
+ls "$ST"/gitcache-* >/dev/null 2>&1 \
+  && { printf '    FAIL: TTL=0 must not write a cache file\n' >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: distinct \$PWD yields distinct cache files"
+ST=$(mktemp -d); WD1=$(mktemp -d); WD2=$(mktemp -d)
+cgi "$WD1" "$ST" 3 >/dev/null; cgi "$WD2" "$ST" 3 >/dev/null
+N=$(ls "$ST"/gitcache-* 2>/dev/null | wc -l | tr -d ' ')
+assert_eq "2" "$N" "two different workdirs must key two different cache files"
+rm -rf "$ST" "$WD1" "$WD2"
+end_test
+
+start_test "cached_git_info: malformed (5-field) cache file fails the guard and recomputes"
+ST=$(mktemp -d); WD=$(mktemp -d)
+cgi "$WD" "$ST" 3 >/dev/null            # counter=1, valid cache
+CF=$(ls "$ST"/gitcache-*)
+printf 'bad\t1\t2\t3\t4' > "$CF"        # 5 fields, fresh mtime
+cgi "$WD" "$ST" 3 >/dev/null
+assert_eq "2" "$(cat "$ST/.gitcnt")" "5-field cache must fail guard → recompute"
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: empty (0-byte) cache file fails the guard and recomputes"
+ST=$(mktemp -d); WD=$(mktemp -d)
+cgi "$WD" "$ST" 3 >/dev/null
+CF=$(ls "$ST"/gitcache-*)
+: > "$CF"                               # 0-byte, fresh mtime
+cgi "$WD" "$ST" 3 >/dev/null
+assert_eq "2" "$(cat "$ST/.gitcnt")" "0-byte cache must fail guard → recompute"
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: valid non-repo line passes the guard and HITs"
+ST=$(mktemp -d); WD=$(mktemp -d)
+NONREPO=$(printf '\t0\t0\t0\t0\t0')
+cgi "$WD" "$ST" 3 "$NONREPO" >/dev/null
+OUT2=$(cgi "$WD" "$ST" 3 "$NONREPO")
+assert_eq "1" "$(cat "$ST/.gitcnt")" "non-repo line (empty field1) must pass guard → HIT"
+assert_eq "$NONREPO" "$OUT2" "HIT returns the cached non-repo line"
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: non-numeric GIT_CACHE_TTL falls back to default 3 (not 0/disabled)"
+ST=$(mktemp -d); WD=$(mktemp -d)
+cgi "$WD" "$ST" abc >/dev/null; cgi "$WD" "$ST" abc >/dev/null
+assert_eq "1" "$(cat "$ST/.gitcnt")" "abc→3: fresh second call must HIT (would be 2 if treated as 0)"
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: negative GIT_CACHE_TTL falls back to default 3"
+ST=$(mktemp -d); WD=$(mktemp -d)
+cgi "$WD" "$ST" -5 >/dev/null; cgi "$WD" "$ST" -5 >/dev/null
+assert_eq "1" "$(cat "$ST/.gitcnt")" "-5→3: fresh second call must HIT"
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: no .tmp.* leftover after a normal miss (atomic write)"
+ST=$(mktemp -d); WD=$(mktemp -d)
+cgi "$WD" "$ST" 3 >/dev/null
+ls "$ST"/gitcache-*.tmp.* >/dev/null 2>&1 \
+  && { printf '    FAIL: temp file left behind after atomic write\n' >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$WD"
+end_test
+
+# --- Task C: cached_git_info() wired into the render path ---
+# run_workers cannot steer the git cwd (it hardcodes current_dir:/tmp but git
+# runs against $PWD) nor isolate the cache. This helper cd's into the target
+# repo and passes OMC_STATE_DIR (and optional GIT_CACHE_TTL) into the render.
+run_workers_in() {
+  # $1=dir(cd → git cwd + cache key)  $2=sid  $3=OMC_STATE_DIR
+  # $4=GIT_CACHE_TTL(optional)  $5=cols(default 200)
+  local d="$1" sid="$2" sd="$3" ttl="${4:-}" cols="${5:-200}"
+  (
+    cd "$d" || exit 1
+    export COLUMNS="$cols" OMC_CONF=/dev/null OMC_STATE_DIR="$sd"
+    [ -n "$ttl" ] && export GIT_CACHE_TTL="$ttl"
+    printf '{"session_id":"%s","model":{"display_name":"X"},"workspace":{"current_dir":"/tmp"}}' "$sid" \
+      | bash "$STATUSLINE" 2>/dev/null
+  )
+}
+gi_mkrepo() {  # $1=dir $2=initial branch name
+  ( cd "$1" && git init -q . && git config user.email t@t.t && git config user.name t \
+      && echo a > f.txt && git add f.txt && git commit -qm i && git branch -m "$2" )
+}
+
+start_test "render: git repo output shows the branch AND a gitcache file is written"
+ST=$(mktemp -d); WD=$(mktemp -d)
+gi_mkrepo "$WD" omcbranch
+OUT=$(run_workers_in "$WD" "render-gc-1" "$ST" | strip_ansi)
+echo "$OUT" | grep -qF 'omcbranch' \
+  || { printf '    FAIL: branch not in render output\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+ls "$ST"/gitcache-* >/dev/null 2>&1 \
+  || { printf '    FAIL: render wrote no gitcache file (cache not wired into render)\n' >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "render: second render within TTL serves STALE cached git state (cache wired in)"
+ST=$(mktemp -d); WD=$(mktemp -d)
+gi_mkrepo "$WD" branchbefore
+run_workers_in "$WD" "render-gc-2" "$ST" 300 >/dev/null  # arg4=GIT_CACHE_TTL (300=large so 2nd render HITs); caches branchbefore
+( cd "$WD" && git branch -m branchafter )                # git state changes
+OUT=$(run_workers_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)  # arg4=GIT_CACHE_TTL=300
+echo "$OUT" | grep -qF 'branchbefore' \
+  || { printf '    FAIL: render bypassed cache (expected stale branchbefore)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF 'branchafter' \
+  && { printf '    FAIL: render showed fresh state (cache not consulted)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "render: GIT_CACHE_TTL=0 serves fresh git state and writes no cache file"
+ST=$(mktemp -d); WD=$(mktemp -d)
+gi_mkrepo "$WD" freshbefore
+run_workers_in "$WD" "render-gc-3" "$ST" 0 >/dev/null  # arg4=GIT_CACHE_TTL=0 (cache disabled)
+( cd "$WD" && git branch -m freshafter )
+OUT=$(run_workers_in "$WD" "render-gc-3" "$ST" 0 | strip_ansi)  # arg4=GIT_CACHE_TTL=0
+echo "$OUT" | grep -qF 'freshafter' \
+  || { printf '    FAIL: TTL=0 must show fresh state\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+ls "$ST"/gitcache-* >/dev/null 2>&1 \
+  && { printf '    FAIL: TTL=0 must not write a cache file via render\n' >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$WD"
+end_test
+
+# --- Bugfix: empty $PWD must not collapse the cache key (cross-repo collision)
+# Real Claude Code can invoke the statusLine command with $PWD empty; the
+# original key=slug($PWD) then became "" so every repo shared one
+# "gitcache-" file → wrong repo's git info served. Key must come from the
+# actual cwd (pwd -P = getcwd), robust to an empty $PWD variable.
+cgi_emptypwd() {  # $1=repo dir  $2=OMC_STATE_DIR ; REAL git_info, $PWD forced empty
+  ( cd "$1" && OMC_STATE_DIR="$2" OMC_CONF=/dev/null GIT_CACHE_TTL=300 bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "'"$STATUSLINE"'"
+      PWD=""
+      cached_git_info
+  ' )
+}
+
+start_test "cached_git_info: empty \$PWD does not collide the cache across repos"
+ST=$(mktemp -d); RA=$(mktemp -d); RB=$(mktemp -d)
+gi_mkrepo "$RA" alpha
+gi_mkrepo "$RB" beta
+OA=$(cgi_emptypwd "$RA" "$ST" | cut -f1)
+OB=$(cgi_emptypwd "$RB" "$ST" | cut -f1)
+assert_eq "alpha" "$OA" "repoA with empty \$PWD must report its own branch"
+assert_eq "beta"  "$OB" "repoB must NOT be served repoA's cached line (collision bug)"
+ls "$ST"/gitcache- >/dev/null 2>&1 \
+  && { printf '    FAIL: an empty-key gitcache- file was created (key collapsed)\n' >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$RA" "$RB"
+end_test
+
+# --- §8.1: git_info skips `git submodule foreach` when no .gitmodules ---
+# `git submodule foreach` pays a ~7s MSYS process-startup cost even with zero
+# submodules; git_info calls it twice (status+diff) ⇒ ~14s pure waste ⇒ blank
+# statusline under load. A PATH-shim git records each `submodule` invocation.
+gi_shim_setup() {  # $1 = workdir; installs fake git that logs submodule calls
+  mkdir -p "$1/bin"
+  cat > "$1/bin/git" <<EOS
+#!/bin/bash
+case "\$1 \$2" in
+  "rev-parse --show-toplevel") echo "$1"; exit 0 ;;
+esac
+case "\$1" in
+  rev-parse) echo "$1"; exit 0 ;;
+  branch) echo shimbr; exit 0 ;;
+  status|diff) exit 0 ;;
+  submodule) echo called >> "$1/.gitsentinel"; exit 0 ;;
+  *) exit 0 ;;
+esac
+EOS
+  chmod +x "$1/bin/git"
+}
+call_git_info_shimmed() {  # $1 = workdir
+  ( cd "$1" && OMC_CONF=/dev/null PATH="$1/bin:$PATH" bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "'"$STATUSLINE"'"
+      git_info
+  ' )
+}
+
+start_test "git_info: NO .gitmodules → git submodule foreach is NOT invoked"
+GW=$(mktemp -d); gi_shim_setup "$GW"           # no .gitmodules created
+OUT=$(call_git_info_shimmed "$GW")
+[ -f "$GW/.gitsentinel" ] \
+  && { printf '    FAIL: submodule foreach invoked despite no .gitmodules (the ~14s waste)\n' >&2; TEST_FAILED=1; }
+NF=$(printf '%s' "$OUT" | awk -F'\t' '{print NF}')
+assert_eq "6" "$NF" "git_info still emits 6 fields"
+assert_eq "shimbr" "$(printf '%s' "$OUT" | cut -f1)" "branch still resolved"
+rm -rf "$GW"
+end_test
+
+start_test "git_info: .gitmodules present → submodule scanning still runs (no regression)"
+GW=$(mktemp -d); gi_shim_setup "$GW"; : > "$GW/.gitmodules"
+call_git_info_shimmed "$GW" >/dev/null
+[ -f "$GW/.gitsentinel" ] \
+  || { printf '    FAIL: submodule scan skipped even though .gitmodules exists\n' >&2; TEST_FAILED=1; }
+rm -rf "$GW"
+end_test
+
 cleanup_render_state
 print_summary
