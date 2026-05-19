@@ -461,6 +461,90 @@ RESULT=$(call_is_shell_alive "")
 assert_eq "NO" "$RESULT" "empty command fingerprint must be dead"
 end_test
 
+# --- item-2: is_shell_alive 3-way (0 alive / 1 ps-worked-but-absent /
+# 2 ps-unusable) + rc-aware prune. Deterministic ps via injected ps()
+# function in the SAME bash -c as source (so it shadows the bare `ps`
+# calls); NOT run_workers (child bash can't see the function). ---
+call_isa_rc() {  # $1=command  $2=ps() definition → prints is_shell_alive rc
+  bash -c "
+    OMC_TEST_LIB_ONLY=1
+    source '$STATUSLINE'
+    $2
+    is_shell_alive \"\$1\"; echo \$?
+  " _ "$1"
+}
+
+start_test "is_shell_alive: rc=2 when ps is entirely unusable (ps-blind box)"
+RC=$(call_isa_rc "sleep 9 omc_t1" 'ps(){ :; }')
+assert_eq "2" "$RC" "all-empty ps → unknown(2), NOT dead(1)"
+end_test
+
+start_test "is_shell_alive: rc=0 when ps works and fingerprint matches"
+RC=$(call_isa_rc "omc_probe_t2" 'ps(){ printf "H H H H H H\nu p q r s omc_probe_t2\n"; }')
+assert_eq "0" "$RC" "ps output with matching cmd → alive(0)"
+end_test
+
+start_test "is_shell_alive: rc=1 when ps works but no match (still dead)"
+RC=$(call_isa_rc "omc_absent_t3" 'ps(){ printf "UID PID PPID C STIME TTY TIME CMD\nu 1 0 0 t ? 0 /sbin/init\n"; }')
+assert_eq "1" "$RC" "ps worked, no match → dead(1) — ps-working contract"
+end_test
+
+start_test "is_shell_alive: rc=1 for empty command even if ps unusable"
+RC=$(call_isa_rc "" 'ps(){ :; }')
+assert_eq "1" "$RC" "empty fp is dead(1), not a ps problem"
+end_test
+
+# prune: in-subshell source pattern (I1) so the injected ps() shadows
+# is_shell_alive's bare ps. Row: shell, col7 empty, col3 != "-", past
+# grace (grace=30). col6 drives age (race-free; no OMC_NOW_OVERRIDE seam).
+prune_with_ps() {  # $1=SF $2=SID $3=ps() def $4=WORKERS_SHELL_UNKNOWN_MAX_AGE(opt)
+  bash -c "
+    OMC_TEST_LIB_ONLY=1
+    source '$STATUSLINE'
+    $3
+    WORKERS_STATE_FILE='$1'; WORKDIR_RAW='/tmp'; SESSION_ID='$2'
+    WORKERS_PLACEHOLDER_GRACE_SEC=30
+    ${4:+WORKERS_SHELL_UNKNOWN_MAX_AGE=$4}
+    prune_state_and_emit
+  " >/dev/null 2>&1
+}
+
+start_test "prune: ps-unusable, PID-less, past grace, age<=cap → row KEPT"
+SID="render-test-isa-keep"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+# age 45: past grace(30), within default cap(60). col7 absent, col3 != "-".
+printf 'shell\ttoolu_keep\tbash_x\tdesc\tomc_cmd_keep\t%s\n' "$((NOW - 45))" > "$SF"
+prune_with_ps "$SF" "$SID" 'ps(){ :; }'
+grep -qF 'toolu_keep' "$SF" \
+  || { printf '    FAIL: live-unknowable shell false-pruned on ps-blind box\n      SF: %q\n' "$(cat "$SF")" >&2; TEST_FAILED=1; }
+end_test
+
+start_test "prune: ps-unusable, PID-less, past grace, age>cap → row reaped (bounded)"
+SID="render-test-isa-cap"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+printf 'shell\ttoolu_cap\tbash_x\tdesc\tomc_cmd_cap\t%s\n' "$((NOW - 45))" > "$SF"
+prune_with_ps "$SF" "$SID" 'ps(){ :; }' 0   # cap=0 → age 45 > 0 → reap
+grep -qF 'toolu_cap' "$SF" \
+  && { printf '    FAIL: ps-unknown dead shell not bounded by UNKNOWN_MAX_AGE\n' >&2; TEST_FAILED=1; }
+end_test
+
+start_test "prune: ps works but no match, PID-less past grace → reaped (rc1 unchanged)"
+SID="render-test-isa-nomatch"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+printf 'shell\ttoolu_nm\tbash_x\tdesc\tomc_cmd_nm\t%s\n' "$((NOW - 45))" > "$SF"
+prune_with_ps "$SF" "$SID" 'ps(){ printf "UID PID CMD\nu 1 /sbin/init\n"; }'
+grep -qF 'toolu_nm' "$SF" \
+  && { printf '    FAIL: ps-working no-match shell not pruned (rc1 contract broken)\n' >&2; TEST_FAILED=1; }
+end_test
+
+start_test "prune: ps-unusable + corrupt col6 (0) → reaped (cannot bound)"
+SID="render-test-isa-corrupt"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+printf 'shell\ttoolu_cor\tbash_x\tdesc\tomc_cmd_cor\t0\n' > "$SF"
+prune_with_ps "$SF" "$SID" 'ps(){ :; }'
+grep -qF 'toolu_cor' "$SF" \
+  && { printf '    FAIL: corrupt-col6 ps-unknown row not reaped\n' >&2; TEST_FAILED=1; }
+end_test
+
 # --- Task 2: prune shell branch uses is_shell_alive (not sticky output file) ---
 start_test "prune drops stale shell row when process dead despite sticky .output file"
 SID="render-test-shell-sticky-dead"
