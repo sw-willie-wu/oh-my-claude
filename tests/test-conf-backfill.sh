@@ -132,4 +132,54 @@ assert_file_contains "$custom_conf" "WORKERS_MAX" "template copied to override c
 [ -d "$sbox/omc" ] || { printf '    FAIL: runtime not written to OMC_DIR override path\n' >&2; TEST_FAILED=1; }
 end_test
 
+# ============================================================
+# setup.sh conf-key detection (read-only notice)
+# ============================================================
+
+start_test "setup.sh emits a context notice when keys are missing"
+sbox="$OMC_STATE_DIR/sbox-detect-miss"
+mkdir -p "$sbox/home"
+uc="$sbox/oh-my-claude.conf"
+printf 'THEME=catppuccin\n' > "$uc"   # non-empty partial conf (LAYOUT etc. missing)
+out="$(HOME="$sbox/home" \
+  OMC_DIR="$sbox/omc" \
+  OMC_CONF="$uc" \
+  OMC_CONF_TEMPLATE="$REPO_ROOT/oh-my-claude.conf" \
+  bash "$SETUP_SH" 2>/dev/null)"
+case "$out" in
+  *"[oh-my-claude]"*"LAYOUT"*) ;;
+  *) printf '    FAIL: notice missing or lacks key name; got: %s\n' "$out" >&2; TEST_FAILED=1 ;;
+esac
+# the partial user conf must not have been modified by detection
+assert_eq "$(printf 'THEME=catppuccin')" "$(cat "$uc")" "detection must not write the conf"
+end_test
+
+start_test "setup.sh is silent when the conf has all template keys"
+sbox="$OMC_STATE_DIR/sbox-detect-full"
+mkdir -p "$sbox/home"
+uc="$sbox/oh-my-claude.conf"
+cp "$REPO_ROOT/oh-my-claude.conf" "$uc"   # conf == template → nothing missing
+out="$(HOME="$sbox/home" \
+  OMC_DIR="$sbox/omc" \
+  OMC_CONF="$uc" \
+  OMC_CONF_TEMPLATE="$REPO_ROOT/oh-my-claude.conf" \
+  bash "$SETUP_SH" 2>/dev/null)"
+assert_eq "" "$out" "no notice when conf is complete"
+end_test
+
+start_test "setup.sh exits 0 and is silent on an unreadable template"
+sbox="$OMC_STATE_DIR/sbox-detect-badtpl"
+mkdir -p "$sbox/home"
+uc="$sbox/oh-my-claude.conf"
+printf 'THEME=catppuccin\n' > "$uc"
+HOME="$sbox/home" \
+  OMC_DIR="$sbox/omc" \
+  OMC_CONF="$uc" \
+  OMC_CONF_TEMPLATE="$sbox/no-such-template.conf" \
+  bash "$SETUP_SH" >"$sbox/out.txt" 2>/dev/null
+rc=$?
+assert_eq "0" "$rc" "hook exits 0 even with a broken template"
+assert_eq "" "$(cat "$sbox/out.txt")" "no notice on broken template"
+end_test
+
 print_summary
