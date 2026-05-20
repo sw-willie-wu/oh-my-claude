@@ -8,3 +8,7 @@ C_RED='\033[38;2;191;97;106m'
 C_TEXT='\033[38;2;236;239;244m'
 C_SUBTEXT='\033[38;2;216;222;233m'
 C_SURFACE='\033[38;2;67;76;94m'
+
+# Worker row icons (set to "" in oh-my-claude.conf to disable).
+WORKERS_AGENT_ICON=${WORKERS_AGENT_ICON-$'\xf0\x9f\xa4\x96'}
+WORKERS_SHELL_ICON=${WORKERS_SHELL_ICON-$'\xe2\x8f\xb3'}

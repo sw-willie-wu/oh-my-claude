@@ -11,8 +11,8 @@
     {
       "name": "oh-my-claude",
       "source": "./",
-      "description": "Themeable statusline for Claude Code. 8 color themes and 5 layouts.",
-      "version": "1.0.3"
+      "description": "Themeable statusline for Claude Code. 9 color themes and 6 layouts.",
+      "version": "1.1.0"
     }
   ]
 }

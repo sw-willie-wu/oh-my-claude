@@ -49,6 +49,7 @@ render() {
   LINE2+="  ${C_SUBTEXT}5h${RESET} $(bar "${RATE5_PCT:-0}" 12)${RATE5_SUFFIX}"
   LINE2+="  ${C_SUBTEXT}7d${RESET} $(bar "${RATE7_PCT:-0}" 12)${RATE7_SUFFIX}"
 
+  emit_workers
   echo -e "$LINE1"
   echo -e "$LINE2"
 }
