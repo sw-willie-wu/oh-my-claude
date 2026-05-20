@@ -4,8 +4,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-OMC_DIR="$HOME/.claude/oh-my-claude"
-OMC_CONF="$HOME/.claude/oh-my-claude.conf"
+OMC_DIR="${OMC_DIR:-$HOME/.claude/oh-my-claude}"
+OMC_CONF="${OMC_CONF:-$HOME/.claude/oh-my-claude.conf}"
+OMC_CONF_TEMPLATE="${OMC_CONF_TEMPLATE:-$SCRIPT_DIR/oh-my-claude.conf}"
 
 mkdir -p "$OMC_DIR"
 cp "$SCRIPT_DIR/statusline.sh" "$OMC_DIR/"
@@ -16,4 +17,4 @@ cp "$SCRIPT_DIR/preview.sh" "$OMC_DIR/"
 cp "$SCRIPT_DIR/generate-preview.sh" "$OMC_DIR/"
 
 # Create config if not exists or is empty
-[ -s "$OMC_CONF" ] || cp "$SCRIPT_DIR/oh-my-claude.conf" "$OMC_CONF"
+[ -s "$OMC_CONF" ] || cp "$OMC_CONF_TEMPLATE" "$OMC_CONF"

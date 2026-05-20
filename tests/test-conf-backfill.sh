@@ -114,4 +114,22 @@ rc=$?
 [ "$rc" -ne 0 ] || { printf '    FAIL: expected non-zero exit, got %s\n' "$rc" >&2; TEST_FAILED=1; }
 end_test
 
+# ============================================================
+# setup.sh path-override seam
+# ============================================================
+
+start_test "setup.sh honors OMC_CONF/OMC_DIR/OMC_CONF_TEMPLATE overrides"
+sbox="$OMC_STATE_DIR/sbox-seam"
+mkdir -p "$sbox/home"
+custom_conf="$sbox/custom-oh-my-claude.conf"
+HOME="$sbox/home" \
+  OMC_DIR="$sbox/omc" \
+  OMC_CONF="$custom_conf" \
+  OMC_CONF_TEMPLATE="$REPO_ROOT/oh-my-claude.conf" \
+  bash "$SETUP_SH" >/dev/null 2>&1
+[ -f "$custom_conf" ] || { printf '    FAIL: conf not written to OMC_CONF override path\n' >&2; TEST_FAILED=1; }
+assert_file_contains "$custom_conf" "WORKERS_MAX" "template copied to override conf path"
+[ -d "$sbox/omc" ] || { printf '    FAIL: runtime not written to OMC_DIR override path\n' >&2; TEST_FAILED=1; }
+end_test
+
 print_summary
