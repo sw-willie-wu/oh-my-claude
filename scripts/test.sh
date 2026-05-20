@@ -11,4 +11,9 @@ if [ -f "$REPO_ROOT/tests/test-statusline-render.sh" ]; then
   echo "=== statusline render tests ==="
   bash "$REPO_ROOT/tests/test-statusline-render.sh" || FAIL=1
 fi
+if [ -f "$REPO_ROOT/tests/test-conf-backfill.sh" ]; then
+  echo
+  echo "=== conf-backfill tests ==="
+  bash "$REPO_ROOT/tests/test-conf-backfill.sh" || FAIL=1
+fi
 exit "$FAIL"

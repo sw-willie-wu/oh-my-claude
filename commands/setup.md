@@ -60,7 +60,47 @@ Steps:
       - If AskUserQuestion is not available, ask in plain chat text instead.
       - Only update if the user confirms.
 
-3. After updating (or skipping), tell the user:
+3. Conf-key backfill — bring an existing `~/.claude/oh-my-claude.conf` up
+      to date with options added to the bundled template, without overwriting
+      any existing value:
+
+      - Read `~/.claude/oh-my-claude.conf`. If it does not exist or is empty,
+        skip this step (a fresh install already received the full template).
+      - Read the bundled template `oh-my-claude.conf` from the plugin/repo
+        root.
+      - Compute the missing keys: every `KEY=` assignment in the template
+        whose KEY does NOT appear in the user conf as an uncommented
+        assignment. A key counts as PRESENT if any uncommented line matches
+        the key allowing an optional `export ` prefix and whitespace around
+        `=` — e.g. `export K=v`, `K = v`, and `K=v  # note` all count as
+        present. A key that appears ONLY in a commented line (`# KEY=v`)
+        counts as MISSING. Never compare values; never treat a differing
+        value as missing.
+      - If there are no missing keys: tell the user their conf is already up
+        to date and do not modify the file.
+      - If there are missing keys:
+        - Show the user the exact lines that would be added — one
+          `KEY=<template default value>` per missing key.
+        - If the AskUserQuestion tool is available, use it with options
+          [Yes, No] to ask: "Your oh-my-claude.conf is missing N new
+          option(s): <comma-separated keys>. Add them with safe defaults?
+          Your existing values are preserved."
+        - If AskUserQuestion is not available, ask in plain chat text.
+        - If yes: append to the END of `~/.claude/oh-my-claude.conf`:
+          - First ensure the file ends with exactly one newline (if its last
+            byte is not a newline, add one).
+          - Then append a single header comment line
+            `# --- added by /oh-my-claude:setup (YYYY-MM-DD) ---` using
+            today's date, followed by one `KEY=<template default>` line per
+            missing key.
+          - Do NOT rewrite, reorder, or reformat any existing line. This is a
+            targeted append only — preserve every existing value, comment,
+            and line ending byte-for-byte.
+          - Confirm to the user exactly which keys were added.
+        - If no: leave `~/.claude/oh-my-claude.conf` unchanged, tell the
+            user nothing was modified, and continue.
+
+4. After updating (or skipping), tell the user:
    - Restart Claude Code to see the statusline
    - `/oh-my-claude:list-themes` to preview themes and layouts
    - `/oh-my-claude:set-theme <theme> <layout>` to switch
