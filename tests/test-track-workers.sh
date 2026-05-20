@@ -358,7 +358,7 @@ wait
 assert_line_count "$SF" 10 "expected 10 rows from concurrent writers"
 end_test
 
-start_test "stale lock (>10s) is broken and writer succeeds"
+start_test "stale lock (no pid file, past OMC_LOCK_STALE_SEC) is broken and writer succeeds"
 SESSION_ID="test-session-stale-lock"
 SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
 : > "$SF"
@@ -387,6 +387,29 @@ EOF
 # degrades to a line-count failure within ~5s — it cannot hang) so it was
 # removed rather than guessing at a timing budget (condition-based-waiting).
 assert_line_count "$SF" 1 "writer should have succeeded after breaking stale lock"
+end_test
+
+start_test "lock with a dead holder PID is reclaimed before the stale window"
+SESSION_ID="test-session-deadpid-lock"
+SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
+: > "$SF"
+mkdir "$OMC_STATE_DIR/state.lock" 2>/dev/null
+# A PID too large to be live. The lock dir mtime is fresh (just created,
+# well within OMC_LOCK_STALE_SEC) — so ONLY the dead-holder PID check, not
+# the age backstop, can break this lock. If PID-liveness detection
+# regressed, omc_with_lock spins out its bounded loop without acquiring and
+# track-workers exits writing 0 lines (caught by the assertion below).
+echo "2147480000" > "$OMC_STATE_DIR/state.lock/pid"
+cat <<EOF | bash "$TRACK_WORKERS" pre
+{
+  "session_id": "$SESSION_ID",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Task",
+  "tool_use_id": "toolu_deadpid",
+  "tool_input": { "subagent_type": "Plan", "description": "dead-holder victim" }
+}
+EOF
+assert_line_count "$SF" 1 "writer should reclaim a lock whose holder PID is dead"
 end_test
 
 start_test "description with tab/newline/backslash round-trips through state file"

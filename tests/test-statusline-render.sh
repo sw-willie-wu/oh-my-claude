@@ -1131,5 +1131,52 @@ I_C=$(line_index "$OUT" 'ctx')
   || { printf '    FAIL: workers not after meters (c=%s w=%s)\n      got: %q\n' "$I_C" "$I_W" "$OUT" >&2; TEST_FAILED=1; }
 end_test
 
+start_test "_omc_sweep_stale_tmp removes orphaned temp files older than 30s, keeps the rest"
+ST=$(mktemp -d)
+NOW=$(date +%s)
+# Crash-orphaned temp files (60s old) — must be swept.
+printf 'x' > "$ST/state-sess.tsv.prune.111"
+printf 'x' > "$ST/gitcache-somekey.tmp.222"
+touch -d "@$((NOW - 60))" "$ST/state-sess.tsv.prune.111" "$ST/gitcache-somekey.tmp.222"
+# Fresh temp file + real state/cache files — must all survive.
+printf 'x' > "$ST/state-sess.tsv.prune.333"
+printf 'x' > "$ST/state-sess.tsv"
+printf 'x' > "$ST/gitcache-somekey"
+bash -c "
+  OMC_STATE_DIR='$ST'
+  OMC_TEST_LIB_ONLY=1
+  source '$STATUSLINE'
+  _omc_sweep_stale_tmp
+"
+[ ! -f "$ST/state-sess.tsv.prune.111" ] \
+  || { printf '    FAIL: stale .prune temp not swept\n' >&2; TEST_FAILED=1; }
+[ ! -f "$ST/gitcache-somekey.tmp.222" ] \
+  || { printf '    FAIL: stale gitcache .tmp temp not swept\n' >&2; TEST_FAILED=1; }
+[ -f "$ST/state-sess.tsv.prune.333" ] \
+  || { printf '    FAIL: fresh temp file wrongly swept\n' >&2; TEST_FAILED=1; }
+[ -f "$ST/state-sess.tsv" ] \
+  || { printf '    FAIL: real state file wrongly swept\n' >&2; TEST_FAILED=1; }
+[ -f "$ST/gitcache-somekey" ] \
+  || { printf '    FAIL: real gitcache file wrongly swept\n' >&2; TEST_FAILED=1; }
+rm -rf "$ST"
+end_test
+
+start_test "a full render runs the stale-temp sweep (wiring, not just the unit)"
+# statusline.sh's _omc_sweep_stale_tmp scans $OMC_STATE_DIR. The test
+# harness exports OMC_STATE_DIR (test-helpers.sh) and start_test just
+# recreated it empty, so seed the orphan there — that is the directory a
+# real render's sweep actually targets. If the _omc_sweep_stale_tmp call
+# were dropped from the render path, the unit test above would still pass
+# but this assertion would catch the missing wiring.
+NOW=$(date +%s)
+ORPHAN="$OMC_STATE_DIR/state-sweepwire.tsv.prune.99999"
+printf 'x' > "$ORPHAN"
+touch -d "@$((NOW - 60))" "$ORPHAN"
+run_workers "render-test-sweep-wiring" 120 >/dev/null
+[ ! -f "$ORPHAN" ] \
+  || { printf '    FAIL: full render did not sweep the orphaned temp file\n' >&2; TEST_FAILED=1; }
+rm -f "$ORPHAN"
+end_test
+
 cleanup_render_state
 print_summary
