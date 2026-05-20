@@ -1018,5 +1018,118 @@ assert_eq "$NOTICE" "$OUT" "empty session_id → notice (no broken statusline)"
 assert_eq "0" "$RC" "empty-session notice path exits 0"
 end_test
 
+# --- worker grouping (spec 2026-05-19) -----------------------------------
+# 1-based index of the first stripped output line containing $2 (literal),
+# or 0 if absent. Used to assert relative render order.
+line_index() {
+  printf '%s\n' "$1" | grep -nF -- "$2" | head -1 | cut -d: -f1 | { read -r n; printf '%s' "${n:-0}"; }
+}
+
+start_test "default emit_workers groups agents before shells, launch order kept within group"
+SID="render-test-group-default"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+sleep 60 & LP1=$!
+sleep 60 & LP2=$!
+{
+  printf 'agent\ttoolu_a1\tgeneral-purpose\tagent-one\t%s\n'           "$((NOW - 30))"
+  printf 'shell\ttoolu_b1\tbash_1\tshell-one\tsleep 99\t%s\t%s\n'      "$((NOW - 25))" "$LP1"
+  printf 'agent\ttoolu_a2\tgeneral-purpose\tagent-two\t%s\n'           "$((NOW - 10))"
+  printf 'shell\ttoolu_b2\tbash_2\tshell-two\tsleep 99\t%s\t%s\n'      "$((NOW - 5))"  "$LP2"
+} > "$SF"
+OUT="$(run_workers "$SID" 200 | strip_ansi)"
+kill "$LP1" "$LP2" 2>/dev/null; wait "$LP1" "$LP2" 2>/dev/null
+I_A1=$(line_index "$OUT" 'agent-one'); I_A2=$(line_index "$OUT" 'agent-two')
+I_B1=$(line_index "$OUT" 'shell-one'); I_B2=$(line_index "$OUT" 'shell-two')
+[ "$I_A1" -gt 0 ] && [ "$I_A2" -gt 0 ] && [ "$I_B1" -gt 0 ] && [ "$I_B2" -gt 0 ] \
+  || { printf '    FAIL: a worker missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+[ "$I_A1" -lt "$I_A2" ] \
+  || { printf '    FAIL: agent launch order not kept (a1=%s a2=%s)\n' "$I_A1" "$I_A2" >&2; TEST_FAILED=1; }
+[ "$I_B1" -lt "$I_B2" ] \
+  || { printf '    FAIL: shell launch order not kept (b1=%s b2=%s)\n' "$I_B1" "$I_B2" >&2; TEST_FAILED=1; }
+[ "$I_A2" -lt "$I_B1" ] \
+  || { printf '    FAIL: agents not all before shells (a2=%s b1=%s)\n' "$I_A2" "$I_B1" >&2; TEST_FAILED=1; }
+end_test
+
+start_test "emit_workers shell agent reverses group order (layout-controlled)"
+SID="render-test-group-rev"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+sleep 60 & LP=$!
+{
+  printf 'agent\ttoolu_a1\tgeneral-purpose\tagent-one\t%s\n'      "$((NOW - 20))"
+  printf 'shell\ttoolu_b1\tbash_1\tshell-one\tsleep 99\t%s\t%s\n' "$((NOW - 10))" "$LP"
+} > "$SF"
+OUT="$(bash -c "
+  OMC_TEST_LIB_ONLY=1
+  source '$STATUSLINE'
+  WORKERS_STATE_FILE='$SF'
+  WORKDIR_RAW='/tmp'; SESSION_ID='$SID'
+  WORKERS_AGENT_ICON='A'; WORKERS_SHELL_ICON='S'
+  emit_workers shell agent
+" | strip_ansi)"
+kill "$LP" 2>/dev/null; wait "$LP" 2>/dev/null
+I_A=$(line_index "$OUT" 'agent-one'); I_B=$(line_index "$OUT" 'shell-one')
+[ "$I_A" -gt 0 ] && [ "$I_B" -gt 0 ] \
+  || { printf '    FAIL: worker missing under reversed order\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+[ "$I_B" -lt "$I_A" ] \
+  || { printf '    FAIL: shell not before agent under "shell agent" (b=%s a=%s)\n' "$I_B" "$I_A" >&2; TEST_FAILED=1; }
+end_test
+
+start_test "WORKERS_MAX truncates on the regrouped sequence, not file order"
+SID="render-test-group-max"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+sleep 60 & LP1=$!
+sleep 60 & LP2=$!
+{
+  printf 'agent\ttoolu_a1\tgeneral-purpose\tagent-one\t%s\n'           "$((NOW - 30))"
+  printf 'shell\ttoolu_b1\tbash_1\tshell-one\tsleep 99\t%s\t%s\n'      "$((NOW - 25))" "$LP1"
+  printf 'agent\ttoolu_a2\tgeneral-purpose\tagent-two\t%s\n'           "$((NOW - 10))"
+  printf 'shell\ttoolu_b2\tbash_2\tshell-two\tsleep 99\t%s\t%s\n'      "$((NOW - 5))"  "$LP2"
+} > "$SF"
+OUT="$(bash -c "
+  OMC_TEST_LIB_ONLY=1
+  source '$STATUSLINE'
+  WORKERS_STATE_FILE='$SF'
+  WORKDIR_RAW='/tmp'; SESSION_ID='$SID'
+  WORKERS_MAX=2
+  WORKERS_AGENT_ICON='A'; WORKERS_SHELL_ICON='S'
+  emit_workers
+" | strip_ansi)"
+kill "$LP1" "$LP2" 2>/dev/null; wait "$LP1" "$LP2" 2>/dev/null
+echo "$OUT" | grep -qF 'agent-one' && echo "$OUT" | grep -qF 'agent-two' \
+  || { printf '    FAIL: cap=2 + grouping should keep both agents\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF 'shell-one' \
+  && { printf '    FAIL: shell rendered though cap=2 fills with agents first\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+end_test
+
+start_test "fancy layout order: git before meters, workers (agent>task) last"
+SID="render-test-fancy-order"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+printf 'agent\ttoolu_fa\tgeneral-purpose\tfancyagentX\t%s\n' "$((NOW - 15))" > "$SF"
+FREPO="$RENDER_STATE_DIR/fancy-repo"
+rm -rf "$FREPO"; mkdir -p "$FREPO"
+git -C "$FREPO" init -q
+git -C "$FREPO" symbolic-ref HEAD refs/heads/fancybrZ
+FCONF="$RENDER_STATE_DIR/fancy.conf"
+printf 'THEME="catppuccin"\nLAYOUT="fancy"\n' > "$FCONF"
+OUT="$(COLUMNS=200 OMC_CONF="$FCONF" bash -c "
+  cd '$FREPO' && echo '{\"session_id\":\"$SID\",\"model\":{\"display_name\":\"X\"},\"workspace\":{\"current_dir\":\"$FREPO\"}}' \
+    | bash '$STATUSLINE' 2>/dev/null
+" | strip_ansi)"
+rm -rf "$FREPO" "$FCONF"
+I_W=$(line_index "$OUT" 'fancyagentX')
+I_G=$(line_index "$OUT" 'fancybrZ')
+I_C=$(line_index "$OUT" 'ctx')
+[ "$I_W" -gt 0 ] && [ "$I_G" -gt 0 ] && [ "$I_C" -gt 0 ] \
+  || { printf '    FAIL: worker/git/ctx line missing (w=%s g=%s c=%s)\n      got: %q\n' "$I_W" "$I_G" "$I_C" "$OUT" >&2; TEST_FAILED=1; }
+[ "$I_G" -lt "$I_C" ] \
+  || { printf '    FAIL: git not before meters (g=%s c=%s)\n      got: %q\n' "$I_G" "$I_C" "$OUT" >&2; TEST_FAILED=1; }
+[ "$I_C" -lt "$I_W" ] \
+  || { printf '    FAIL: workers not after meters (c=%s w=%s)\n      got: %q\n' "$I_C" "$I_W" "$OUT" >&2; TEST_FAILED=1; }
+end_test
+
 cleanup_render_state
 print_summary
