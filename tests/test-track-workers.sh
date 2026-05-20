@@ -399,7 +399,7 @@ mkdir "$OMC_STATE_DIR/state.lock" 2>/dev/null
 # the age backstop, can break this lock. If PID-liveness detection
 # regressed, omc_with_lock spins out its bounded loop without acquiring and
 # track-workers exits writing 0 lines (caught by the assertion below).
-echo "2147480000" > "$OMC_STATE_DIR/state.lock/pid"
+printf '%s' "2147480000" > "$OMC_STATE_DIR/state.lock/pid"  # no newline — mirror production's pid write
 cat <<EOF | bash "$TRACK_WORKERS" pre
 {
   "session_id": "$SESSION_ID",

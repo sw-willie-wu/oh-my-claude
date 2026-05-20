@@ -97,7 +97,10 @@ omc_with_lock() {
   done
   # Record the holder PID so a contender can detect a crashed holder
   # immediately instead of waiting out the stale window. Best-effort: if the
-  # write fails the contender simply falls back to the age threshold.
+  # write fails (a degraded FS) both sides degrade gracefully to the age
+  # threshold — a contender cannot fast-reclaim, and _omc_release_lock below
+  # finds no matching pid so this holder will not self-release either; the
+  # lock then self-heals within OMC_LOCK_STALE_SEC.
   printf '%s' "$$" > "$lock_dir/pid" 2>/dev/null
   # Save existing INT/TERM traps and install our own that releases the lock
   # then re-raises so the caller's handler still fires.
