@@ -13,5 +13,11 @@
   it (existing installs never received the 1.1.0 refresh feature otherwise).
 
 ### Upgrading
+- **Fully restart Claude Code after updating.** The Workers section adds
+  new `SessionStart` / `PreToolUse` / `PostToolUse` hooks; Claude Code
+  caches the old `hooks.json` until a full restart. Without the restart,
+  worker tracking never registers and no worker rows appear (the rest of
+  the statusline still works). Re-running `/oh-my-claude:setup` alone does
+  not load the hooks.
 - Existing users: re-run `/oh-my-claude:setup` and accept the
   `refreshInterval` prompt.
