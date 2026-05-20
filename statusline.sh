@@ -304,6 +304,30 @@ emit_workers() {
   rendered="$(omc_with_lock prune_state_and_emit)"
   [ -z "$rendered" ] && return 0
 
+  # Group rows by kind (col1). Group order is decided by the caller (layout)
+  # via positional args; no args → default `agent shell`. Within each group
+  # the original state-file order (== launch order) is preserved — awk is a
+  # stable single pass. Unknown arg tokens never match a row and are inert;
+  # any kind not named in the order is appended last in first-seen order so a
+  # future new kind can't silently vanish. The downstream WORKERS_MAX cap and
+  # width truncation then apply to this regrouped sequence unchanged.
+  # Contract: each arg is a single whitespace-free, backslash-free kind name
+  # (the awk `split(order," ")` and `awk -v` escaping assume this — true for
+  # the only kinds, `agent`/`shell`).
+  [ "$#" -eq 0 ] && set -- agent shell
+  local g order=""
+  for g in "$@"; do
+    case " $order " in *" $g "*) ;; *) order="${order:+$order }$g" ;; esac
+  done
+  rendered="$(printf '%s\n' "$rendered" | awk -F'\t' -v order="$order" '
+    BEGIN { maxr = split(order, ord, " "); for (i = 1; i <= maxr; i++) rank[ord[i]] = i }
+    $0 == "" { next }
+    { k = $1; if (!(k in rank)) rank[k] = ++maxr
+      r = rank[k]; bucket[r] = bucket[r] $0 ORS }
+    END { for (i = 1; i <= maxr; i++) if (i in bucket) printf "%s", bucket[i] }
+  ')"
+  [ -z "$rendered" ] && return 0
+
   local now count=0
   now=$(date +%s)
   local width="${COLUMNS:-120}"
