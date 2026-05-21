@@ -19,10 +19,10 @@ Steps:
           "type": "command",
           "command": "bash ~/.claude/oh-my-claude/statusline.sh",
           "padding": 1,
-          "refreshInterval": 1
+          "refreshInterval": 3
         }
         ```
-        The `refreshInterval: 1` keeps elapsed time in the workers section updating while the main agent waits on subagents. If the user prefers no extra timer-driven refreshes, omit it.
+        The `refreshInterval: 3` keeps elapsed time in the workers section updating while the main agent waits on subagents. (It is deliberately 3, not 1: on Windows a 1-second tick can outpace a render and cause overlapping statusline processes.) If the user prefers no extra timer-driven refreshes, omit it.
 
    b) If "statusLine" already exists AND its command points to "oh-my-claude/statusline.sh":
       (Treat "statusLine" as the object at the top level of ~/.claude/settings.json.
@@ -43,13 +43,13 @@ Steps:
           section updating while the main agent waits on subagents; optional).
           Add it?"
         - If AskUserQuestion is not available, ask in plain chat text instead.
-        - If yes: add ONLY the key `"refreshInterval": 1` into the EXISTING
+        - If yes: add ONLY the key `"refreshInterval": 3` into the EXISTING
           statusLine object in ~/.claude/settings.json, preserving every other
           key in that object and the rest of the file (a targeted one-key
           insertion — do NOT rewrite or reformat settings.json). Confirm to the
-          user that you have added `"refreshInterval": 1` to their
+          user that you have added `"refreshInterval": 3` to their
           ~/.claude/settings.json statusLine object, then tell them: the
-          `refreshInterval: 1` keeps elapsed time updating while the main agent
+          `refreshInterval: 3` keeps elapsed time updating while the main agent
           waits on subagents; to disable the extra timer-driven refreshes,
           remove the `refreshInterval` line.
         - If no: leave ~/.claude/settings.json unchanged and continue.

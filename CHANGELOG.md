@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.1 (2026-05-21)
+
+### Fixed
+- Worker-state lock is now PID-aware: a crashed or SIGKILL'd lock holder is
+  detected via its recorded PID and reclaimed at once, and the stale-lock
+  fallback window dropped from 10s to 3s — so a stuck lock no longer
+  silently skips worker pruning for up to 10s. A holder also releases its
+  lock only while it still owns it, so a force-broken holder cannot delete
+  a successor's lock.
+- Crash-orphaned temp files (`*.prune.*`, `gitcache-*.tmp.*`) are swept at
+  the start of each render instead of lingering until the 24h cleanup.
+
+### Changed
+- Recommended statusLine `refreshInterval` is now 3 (was 1): on Windows a
+  1-second tick can outpace a render and spawn overlapping, lock-contending
+  statusline processes. `/oh-my-claude:setup` writes 3 for new installs and
+  when adding the key to an existing config.
+
 ## 1.1.0 (2026-05-20)
 
 ### Added

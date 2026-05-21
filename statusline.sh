@@ -47,8 +47,9 @@ LAYOUT="default"
 # agent.
 : "${WORKERS_AGENT_QUIET_SEC:=60}"
 : "${WORKERS_AGENT_TRANSCRIPT_ROOT:=$HOME/.claude/projects}"
-# git_info() result cache TTL (seconds). Makes statusLine refreshInterval:1
-# affordable by not running git every tick. 0 = disable caching (always
+# git_info() result cache TTL (seconds). Makes a low statusLine
+# refreshInterval (recommended: 3) affordable by not running git every
+# tick. 0 = disable caching (always
 # recompute = exact legacy behavior). Non-numeric/negative → 3.
 : "${GIT_CACHE_TTL:=3}"
 
@@ -205,10 +206,33 @@ is_agent_alive() {
   esac
 }
 
+# Sweep crash-orphaned temp files (>30s old) from the state dir. A writer
+# SIGKILL'd between creating its temp file and the atomic rename leaves a
+# `*.prune.<pid>` (prune_state_and_emit) or a `gitcache-*.tmp.<pid>`
+# (cached_git_info) behind. A live writer renames its temp file within the
+# same sub-second critical section, so 30s is far past any legitimate
+# lifetime — nothing in use is ever swept. Best-effort, never fatal.
+# SessionStart's 24h sweep is the coarse backstop; this keeps the dir tidy
+# within a long-lived session. An unmatched glob stays literal and is
+# filtered out by the `[ -f ]` test.
+_omc_sweep_stale_tmp() {
+  local now mt f
+  now=$(date +%s 2>/dev/null) || return 0
+  for f in "$OMC_STATE_DIR"/*.prune.* "$OMC_STATE_DIR"/gitcache-*.tmp.*; do
+    [ -f "$f" ] || continue
+    mt=$(stat -c %Y "$f" 2>/dev/null) || continue
+    [ $((now - mt)) -gt 30 ] && rm -f "$f" 2>/dev/null
+  done
+}
+
 prune_state_and_emit() {
   local sf="$WORKERS_STATE_FILE"
   [ -f "$sf" ] || return 0
   local tmp="${sf}.prune.$$"
+  # A SIGKILL mid-prune can't be caught (the sweep above is the backstop
+  # for that), but any non-KILL early return must not leak the temp file.
+  # Self-clear the trap once fired so it can't outlive this function.
+  trap 'rm -f "$tmp" 2>/dev/null; trap - RETURN' RETURN
   : > "$tmp"
   while IFS=$'\t' read -r kind tool_use_id col3 desc col5 col6 col7 || [ -n "$kind" ]; do
     [ -z "$kind" ] && continue
@@ -454,7 +478,7 @@ git_info() {
 
 # Short-TTL on-disk cache around git_info(), keyed by $PWD (the dir git runs
 # in — NOT $WORKDIR_RAW/current_dir, which are display-only and differ from
-# $PWD under MSYS). Makes statusLine refreshInterval:1 affordable. OMC_STATE_DIR
+# $PWD under MSYS). Makes a low statusLine refreshInterval affordable. OMC_STATE_DIR
 # is already in scope (set by lib/state-lock.sh, sourced above). Stale-write
 # safety: per-cwd file + atomic tmp+mv (no lock — independent of worker state;
 # worst case is N concurrent dupes, self-healing).
@@ -590,6 +614,8 @@ if [ -z "$SESSION_ID" ]; then
   printf 'oh-my-claude: jq required (winget install jqlang.jq)\n'
   exit 0
 fi
+# Reap any crash-orphaned temp files before this render writes its own.
+_omc_sweep_stale_tmp
 GI_LINE=$(cached_git_info)
 split_gi_line "$GI_LINE"
 
