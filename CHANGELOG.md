@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.2 (2026-10-05)
 
 ### Fixed
 - The statusline's git calls now run with `GIT_OPTIONAL_LOCKS=0`. Before this,
