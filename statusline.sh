@@ -442,6 +442,13 @@ emit_workers() {
 # submodule guard below.
 git_info() {
   local branch="" add=0 mod=0 del=0 ladd=0 ldel=0 toplevel
+  # `git status` opportunistically refreshes the index, taking .git/index.lock.
+  # Claude Code kills a statusline that overruns its budget; a git killed
+  # mid-refresh leaves a stale 0-byte index.lock that blocks the user's own
+  # `git add`/`commit`. GIT_OPTIONAL_LOCKS=0 skips that optional write. `local`
+  # + export scopes it to this function and the git children it spawns
+  # (including the nested ones under `submodule foreach`).
+  local GIT_OPTIONAL_LOCKS=0; export GIT_OPTIONAL_LOCKS
   # `--show-toplevel` doubles as the in-a-worktree gate AND gives the path for
   # the .gitmodules check below in a single git call (replacing the old bare
   # `rev-parse --git-dir` gate; a bare repo with no worktree → treated as

@@ -905,6 +905,53 @@ call_git_info_shimmed "$GW" >/dev/null
 rm -rf "$GW"
 end_test
 
+# --- GIT_OPTIONAL_LOCKS=0: git_info must not take .git/index.lock ---
+# `git status` opportunistically refreshes the index (takes index.lock); when
+# Claude Code kills a slow statusline mid-run the lock is left behind and
+# blocks the user's `git add`/`commit`. Every git call git_info makes (incl.
+# the nested ones inside `submodule foreach`, which inherit env) must see
+# GIT_OPTIONAL_LOCKS=0, and the setting must not leak out of git_info.
+gi_lockenv_setup() {  # $1 = workdir; fake git logging "<subcmd> <GIT_OPTIONAL_LOCKS>"
+  mkdir -p "$1/bin"
+  cat > "$1/bin/git" <<EOS
+#!/bin/bash
+echo "\$1 \${GIT_OPTIONAL_LOCKS-unset}" >> "$1/.gitenvlog"
+case "\$1 \$2" in
+  "rev-parse --show-toplevel") echo "$1"; exit 0 ;;
+esac
+case "\$1" in
+  branch) echo shimbr; exit 0 ;;
+  *) exit 0 ;;
+esac
+EOS
+  chmod +x "$1/bin/git"
+}
+
+start_test "git_info: every git call runs with GIT_OPTIONAL_LOCKS=0 (incl. submodule path)"
+GW=$(mktemp -d); gi_lockenv_setup "$GW"; : > "$GW/.gitmodules"
+( unset GIT_OPTIONAL_LOCKS; call_git_info_shimmed "$GW" >/dev/null )
+for sub in rev-parse branch status diff submodule; do
+  grep -q "^$sub " "$GW/.gitenvlog" 2>/dev/null \
+    || { printf '    FAIL: expected a git %s call\n' "$sub" >&2; TEST_FAILED=1; }
+done
+BAD=$(grep -v ' 0$' "$GW/.gitenvlog" 2>/dev/null)
+[ -z "$BAD" ] \
+  || { printf '    FAIL: git ran without GIT_OPTIONAL_LOCKS=0:\n%s\n' "$BAD" >&2; TEST_FAILED=1; }
+rm -rf "$GW"
+end_test
+
+start_test "git_info: GIT_OPTIONAL_LOCKS does not leak out of git_info"
+GW=$(mktemp -d); gi_lockenv_setup "$GW"
+LEAK=$( cd "$GW" && unset GIT_OPTIONAL_LOCKS && OMC_CONF=/dev/null PATH="$GW/bin:$PATH" bash -c '
+    OMC_TEST_LIB_ONLY=1
+    source "'"$STATUSLINE"'"
+    git_info >/dev/null
+    printf "%s" "${GIT_OPTIONAL_LOCKS-unset}"
+' )
+assert_eq "unset" "$LEAK" "GIT_OPTIONAL_LOCKS must be function-local"
+rm -rf "$GW"
+end_test
+
 # --- §8.3 Task A: extract JSON parse + GI_LINE split into pure functions ---
 # Fixture = the official Claude Code statusLine docs representative payload
 # (code.claude.com/docs/en/statusline.md). Golden values hand-traced through
