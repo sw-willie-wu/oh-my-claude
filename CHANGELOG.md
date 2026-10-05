@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.2 (2026-10-05)
+
+### Fixed
+- The statusline's git calls now run with `GIT_OPTIONAL_LOCKS=0`. Before this,
+  `git status` could take `.git/index.lock` to refresh the index, and when
+  Claude Code killed a slow render partway through, the lock stayed behind and
+  blocked your own `git add`/`commit` in the session's repo. This happened most
+  in repos with submodules.
+
 ## 1.1.1 (2026-05-21)
 
 ### Fixed
