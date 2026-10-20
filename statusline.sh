@@ -41,6 +41,10 @@ LAYOUT="default"
 # tick. 0 = disable caching (always
 # recompute = exact legacy behavior). Non-numeric/negative → 3.
 : "${GIT_CACHE_TTL:=3}"
+# Account segment (spec §3.1). ACCOUNT_ICON is dash form: explicit "" disables it.
+: "${ACCOUNT_SHOW:=true}"
+: "${ACCOUNT_FORMAT:=name}"
+ACCOUNT_ICON="${ACCOUNT_ICON-$'\xef\x80\x87'}"
 
 LIB_DIR="${OMC_DIR}/lib"
 [ -d "$LIB_DIR" ] || LIB_DIR="$SCRIPT_DIR/lib"
@@ -160,7 +164,7 @@ is_shell_alive() {
 _omc_sweep_stale_tmp() {
   local now mt f
   now=$(date +%s 2>/dev/null) || return 0
-  for f in "$OMC_STATE_DIR"/*.prune.* "$OMC_STATE_DIR"/gitcache-*.tmp.*; do
+  for f in "$OMC_STATE_DIR"/*.prune.* "$OMC_STATE_DIR"/gitcache-*.tmp.* "$OMC_STATE_DIR"/account-*.tmp.*; do
     [ -f "$f" ] || continue
     mt=$(stat -c %Y "$f" 2>/dev/null) || continue
     [ $((now - mt)) -gt 30 ] && rm -f "$f" 2>/dev/null
@@ -456,6 +460,49 @@ parse_status_json() {
   fi
 }
 
+# Account segment (spec §3.2/§3.3). Sets ACC_NAME/ACC_FULL/ACC_EMAIL/ACC_ORG,
+# already sanitized and backslash-doubled (safe for `echo -e`). MUST be called
+# directly, never inside $( ), so the globals survive and a hit forks nothing.
+cached_account_fields() {
+  ACC_NAME=""; ACC_FULL=""; ACC_EMAIL=""; ACC_ORG=""
+  [ "$ACCOUNT_SHOW" = true ] || return 0
+  local src cache raw rc
+  local _accfilter='(.oauthAccount? | objects) // {} | [.displayName, .fullName, .emailAddress, .organizationName]
+    | map((. // "") | tostring | gsub("[\u0000-\u001f\u007f-\u009f]"; "")
+          | gsub("^[[:space:]]+|[[:space:]]+$"; "") | gsub("\\\\"; "\\\\"))
+    | join("\u001f")'
+  src="${OMC_ACCOUNT_FILE:-${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json}"
+  [ -f "$src" ] || return 0
+  cache="$OMC_STATE_DIR/account-${src//[^A-Za-z0-9]/-}"
+  if [ -f "$cache" ] && ! [ "$src" -nt "$cache" ]; then
+    IFS=$'\x1f' read -r ACC_NAME ACC_FULL ACC_EMAIL ACC_ORG < "$cache"
+    return 0
+  fi
+  raw=$(jq -j "$_accfilter" "$src" 2>/dev/null)
+  rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
+    # Failure / half-written source: serve the old cache if any, write nothing.
+    if [ -f "$cache" ]; then
+      IFS=$'\x1f' read -r ACC_NAME ACC_FULL ACC_EMAIL ACC_ORG < "$cache"
+    fi
+    return 0
+  fi
+  [ -d "$OMC_STATE_DIR" ] || mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+  printf '%s\n' "$raw" > "$cache.tmp.$$" 2>/dev/null && mv -f "$cache.tmp.$$" "$cache" 2>/dev/null
+  IFS=$'\x1f' read -r ACC_NAME ACC_FULL ACC_EMAIL ACC_ORG <<<"$raw"
+  return 0
+}
+
+# ACCOUNT from ACCOUNT_FORMAT: first non-empty field in the chain wins.
+resolve_account() {
+  case "$ACCOUNT_FORMAT" in
+    fullname) ACCOUNT="${ACC_FULL:-${ACC_NAME:-$ACC_EMAIL}}" ;;
+    email)    ACCOUNT="$ACC_EMAIL" ;;
+    org)      ACCOUNT="${ACC_ORG:-$ACC_EMAIL}" ;;
+    *)        ACCOUNT="${ACC_NAME:-${ACC_FULL:-$ACC_EMAIL}}" ;;
+  esac
+}
+
 # Split cached_git_info's 6 TAB fields into globals. §8.3 Task C: zero-fork
 # (was 6× `cut`). Translate TAB→US (\x1f) then `IFS=$'\x1f' read`: \x1f is
 # NOT IFS-whitespace so an empty leading BRANCH (non-repo / detached HEAD,
@@ -492,6 +539,7 @@ fi
 _omc_sweep_stale_tmp
 GI_LINE=$(cached_git_info)
 split_gi_line "$GI_LINE"
+cached_account_fields; resolve_account
 
 # Rate limit reset info
 RATE5_SUFFIX=""

@@ -1003,5 +1003,171 @@ tok=WORKDIR; tok+=_RAW   # built at runtime so this test's own source never matc
 assert_eq "" "$(grep -rn -- "$tok" "$REPO_ROOT/tests" "$REPO_ROOT/statusline.sh")" "variable removed"
 end_test
 
+# ---------------------------------------------------------------------------
+# Task 3: account fields (cached_account_fields / resolve_account)
+# ---------------------------------------------------------------------------
+AT="$(mktemp -d -t omc-acct-XXXXXX)"
+ALOG="$AT/shim.log"
+ASHIM="$AT/shim"; make_jq_shim "$ASHIM" "$ALOG"
+AFAIL="$AT/failshim"; make_jq_shim "$AFAIL" "$ALOG" fail
+
+acct() {  # $1=fixture path; rest = VAR=val env; prints ACCOUNT|ACC_NAME|ACC_FULL|ACC_EMAIL|ACC_ORG
+  local f="$1"; shift
+  env OMC_ACCOUNT_FILE="$f" "$@" bash -c '
+    OMC_TEST_LIB_ONLY=1; source "'"$STATUSLINE"'"
+    declare -F cached_account_fields >/dev/null || { echo "NOFUNC"; exit 1; }   # no vacuous passes while RED
+    cached_account_fields; resolve_account
+    printf "%s|%s|%s|%s|%s\n" "$ACCOUNT" "$ACC_NAME" "$ACC_FULL" "$ACC_EMAIL" "$ACC_ORG"' | tr -d '\r'
+}
+acct1() { acct "$@" | cut -d'|' -f1; }
+# mkfx <path> <displayName> <fullName> <email> <org> [age_sec=10]
+mkfx() {
+  mkdir -p "$(dirname "$1")"
+  "$REAL_JQ" -nj --arg d "$2" --arg f "$3" --arg e "$4" --arg o "$5" \
+    '{oauthAccount:{displayName:$d,fullName:$f,emailAddress:$e,organizationName:$o}}' > "$1"
+  touch -d "@$(( $(date +%s) - ${6:-10} ))" "$1"
+}
+acache() { ls "$OMC_STATE_DIR"/account-* 2>/dev/null | grep -v '\.tmp\.' | head -1; }
+
+start_test "T3.1 each ACCOUNT_FORMAT picks the right field (bogus -> name)"
+FX="$AT/f1.json"; mkfx "$FX" willie willie_ttl w@x Org
+for pair in name:willie fullname:willie_ttl email:w@x org:Org bogus:willie; do
+  assert_eq "${pair#*:}" "$(acct1 "$FX" ACCOUNT_FORMAT="${pair%%:*}")" "format ${pair%%:*}"
+done
+end_test
+
+start_test "T3.2 fallback chains"
+FX="$AT/f2.json"
+mkfx "$FX" "" willie_ttl w@x Org
+assert_eq willie_ttl "$(acct1 "$FX")" "empty displayName -> fullName"
+rm -f "$OMC_STATE_DIR"/account-*
+mkfx "$FX" "" "" w@x Org
+assert_eq w@x "$(acct1 "$FX")" "empty name+full -> email"
+rm -f "$OMC_STATE_DIR"/account-*
+mkfx "$FX" willie willie_ttl w@x ""
+assert_eq w@x "$(acct1 "$FX" ACCOUNT_FORMAT=org)" "org empty -> email"
+rm -f "$OMC_STATE_DIR"/account-*
+mkfx "$FX" willie willie_ttl "" Org
+assert_eq "" "$(acct1 "$FX" ACCOUNT_FORMAT=email)" "email empty -> empty"
+end_test
+
+start_test "T3.3 first call writes cache ending in newline; second call is a hit"
+FX="$AT/f3.json"; mkfx "$FX" willie willie_ttl w@x Org; : > "$ALOG"
+assert_eq willie "$(acct1 "$FX" PATH="$ASHIM:$PATH")" "miss value"
+C=$(acache)
+[ -n "$C" ] || { printf '    FAIL: no account cache file\n' >&2; TEST_FAILED=1; }
+[ -n "$C" ] && assert_eq 0a "$(tail -c1 "$C" | od -An -tx1 | tr -d " ")" "cache ends with newline"
+assert_eq 1 "$(shim_count "$ALOG" "$FX")" "miss = one jq call"
+: > "$ALOG"
+assert_eq willie "$(acct1 "$FX" PATH="$ASHIM:$PATH")" "hit value"
+assert_eq 0 "$(shim_count "$ALOG" "$FX")" "hit = zero jq calls"
+end_test
+
+start_test "T3.4 source rewritten and newer re-runs jq"
+FX="$AT/f4.json"; mkfx "$FX" willie willie_ttl w@x Org
+acct1 "$FX" >/dev/null
+mkfx "$FX" neo willie_ttl w@x Org -5
+: > "$ALOG"
+assert_eq neo "$(acct1 "$FX" PATH="$ASHIM:$PATH")" "new name"
+assert_eq 1 "$(shim_count "$ALOG" "$FX")" "one jq call"
+end_test
+
+start_test "T3.5 format change reads cache only"
+FX="$AT/f5.json"; mkfx "$FX" willie willie_ttl w@x Org
+acct1 "$FX" >/dev/null; : > "$ALOG"
+assert_eq w@x "$(acct1 "$FX" ACCOUNT_FORMAT=email PATH="$ASHIM:$PATH")" "email from cache"
+assert_eq 0 "$(shim_count "$ALOG" "$FX")" "no jq"
+end_test
+
+start_test "T3.6 empty results are cached"
+FX="$AT/f6.json"; echo '{}' > "$FX"; touch -d "@$(( $(date +%s) - 10 ))" "$FX"; : > "$ALOG"
+assert_eq "" "$(acct1 "$FX" PATH="$ASHIM:$PATH")" "empty"
+C=$(acache)
+[ -n "$C" ] || { printf '    FAIL: no cache for empty result\n' >&2; TEST_FAILED=1; }
+[ -n "$C" ] && assert_eq 3 "$(tr -cd '\037' < "$C" | wc -c | tr -d ' ')" "three US separators"
+: > "$ALOG"; acct1 "$FX" PATH="$ASHIM:$PATH" >/dev/null
+assert_eq 0 "$(shim_count "$ALOG" "$FX")" "second call hit"
+end_test
+
+start_test "T3.7 source deleted -> empty despite cache"
+FX="$AT/f7.json"; mkfx "$FX" willie willie_ttl w@x Org
+acct1 "$FX" >/dev/null; rm -f "$FX"
+assert_eq "" "$(acct1 "$FX")" "empty"
+end_test
+
+start_test "T3.8 jq failure serves old cache, else empty"
+FX="$AT/f8.json"; mkfx "$FX" willie willie_ttl w@x Org
+assert_eq "" "$(acct1 "$FX" PATH="$AFAIL:$PATH")" "no cache + failing jq"
+assert_eq "" "$(acache)" "nothing written on failure"
+acct1 "$FX" >/dev/null
+mkfx "$FX" neo willie_ttl w@x Org -5
+assert_eq willie "$(acct1 "$FX" PATH="$AFAIL:$PATH")" "old cache served"
+end_test
+
+start_test "T3.9 0-byte source serves old cache, cache unchanged"
+FX="$AT/f9.json"; mkfx "$FX" willie willie_ttl w@x Org
+acct1 "$FX" >/dev/null; C=$(acache); before=$(od -c "$C")
+: > "$FX"; touch -d "@$(( $(date +%s) + 5 ))" "$FX"
+assert_eq willie "$(acct1 "$FX")" "old value"
+assert_eq "$before" "$(od -c "$C")" "cache bytes unchanged"
+end_test
+
+start_test "T3.10 non-object oauthAccount -> empty, cache written"
+FX="$AT/f10.json"; echo '{"oauthAccount":"x"}' > "$FX"; touch -d "@$(( $(date +%s) - 10 ))" "$FX"
+assert_eq "" "$(acct1 "$FX")" "empty"
+[ -n "$(acache)" ] || { printf '    FAIL: cache not written\n' >&2; TEST_FAILED=1; }
+end_test
+
+start_test "T3.11 missing state dir is created, no stderr"
+FX="$AT/f11.json"; mkfx "$FX" willie willie_ttl w@x Org
+ABS="$AT/absent"; rm -rf "$ABS"
+err=$(acct "$FX" OMC_STATE_DIR="$ABS" 2>&1 >/dev/null)
+assert_eq "" "$err" "stderr empty"
+if [ -d "$ABS" ] && ls "$ABS"/account-* >/dev/null 2>&1; then :; else printf '    FAIL: dir/cache not created\n' >&2; TEST_FAILED=1; fi
+end_test
+
+start_test "T3.12 CLAUDE_CONFIG_DIR is used when OMC_ACCOUNT_FILE is empty"
+mkfx "$AT/cfg/.claude.json" willie willie_ttl w@x Org
+assert_eq willie "$(acct1 '' CLAUDE_CONFIG_DIR="$AT/cfg")" "from config dir"
+end_test
+
+start_test "T3.13 source path with spaces (miss and hit)"
+FX="$AT/John Smith/.claude.json"; mkfx "$FX" willie willie_ttl w@x Org
+assert_eq willie "$(acct1 "$FX")" "miss"
+assert_eq willie "$(acct1 "$FX")" "hit"
+end_test
+
+start_test "T3.14 sanitization at field level; miss == hit"
+FX="$AT/f14.json"
+"$REAL_JQ" -nj '{oauthAccount:{displayName:"  \u001b[31mre\nd\\c\\b\u009bX  ",fullName:"f",emailAddress:"e",organizationName:"o"}}' > "$FX"
+touch -d "@$(( $(date +%s) - 10 ))" "$FX"
+m=$(acct "$FX"); h=$(acct "$FX")
+assert_eq "$m" "$h" "miss == hit"
+name="${m#*|}"; name="${name%%|*}"
+case "$name" in *$'\033'*|*$'\xc2\x9b'*) printf '    FAIL: ESC/CSI survived\n' >&2; TEST_FAILED=1;; esac
+assert_eq '[31mred\\c\\bX' "$name" "trimmed, controls stripped, backslashes doubled"
+end_test
+
+start_test "T3.15 whitespace-only displayName falls back to fullName"
+FX="$AT/f15.json"; mkfx "$FX" "   " willie_ttl w@x Org
+assert_eq willie_ttl "$(acct1 "$FX")" "fallback"
+end_test
+
+start_test "T3.16 ACCOUNT_SHOW=false: empty, no jq, no cache"
+FX="$AT/f16.json"; mkfx "$FX" willie willie_ttl w@x Org; : > "$ALOG"
+assert_eq "" "$(acct1 "$FX" ACCOUNT_SHOW=false PATH="$ASHIM:$PATH")" "empty"
+assert_eq 0 "$(shim_count "$ALOG" "$FX")" "no jq"
+assert_eq "" "$(acache)" "no cache"
+end_test
+
+start_test "T3.17 sweep removes stale account tmp files"
+printf x > "$OMC_STATE_DIR/account-x.tmp.123"
+touch -d "@$(( $(date +%s) - 60 ))" "$OMC_STATE_DIR/account-x.tmp.123"
+bash -c 'OMC_TEST_LIB_ONLY=1; source "'"$STATUSLINE"'"; _omc_sweep_stale_tmp'
+[ ! -f "$OMC_STATE_DIR/account-x.tmp.123" ] || { printf '    FAIL: tmp not swept\n' >&2; TEST_FAILED=1; }
+end_test
+
+rm -rf "$AT"
+
 cleanup_render_state
 print_summary

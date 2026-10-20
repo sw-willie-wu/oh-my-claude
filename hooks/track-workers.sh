@@ -157,6 +157,7 @@ case "$ARG" in
     # dirs not visited in 24h are swept.
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'state-*.tsv' -type f -mmin +1440 -delete 2>/dev/null
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'gitcache-*' -type f -mmin +1440 -delete 2>/dev/null
+    find "$OMC_STATE_DIR" -maxdepth 1 -name 'account-*' -type f -mmin +1440 -delete 2>/dev/null
     ;;
   pre)
     [ -z "$SESSION_ID" ] && exit 0

@@ -222,6 +222,12 @@ echo "{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"SessionStart\",\"sou
 [ ! -f "$GC_OLD" ] || { printf '    FAIL: stale gitcache file should have been deleted\n' >&2; TEST_FAILED=1; }
 [ ! -f "$GC_TMP_OLD" ] || { printf '    FAIL: stale gitcache .tmp leftover should have been deleted\n' >&2; TEST_FAILED=1; }
 [ -f "$GC_FRESH" ] || { printf '    FAIL: fresh gitcache file unexpectedly deleted\n' >&2; TEST_FAILED=1; }
+GC_ACC_OLD="$OMC_STATE_DIR/account-some-src"; GC_ACC_NEW="$OMC_STATE_DIR/account-fresh-src"
+printf x > "$GC_ACC_OLD"; printf x > "$GC_ACC_NEW"; touch -t "$GC_STALE_TS" "$GC_ACC_OLD"
+echo "{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" \
+  | bash "$TRACK_WORKERS" session-start
+[ ! -f "$GC_ACC_OLD" ] || { printf '    FAIL: stale account-* file should have been deleted\n' >&2; TEST_FAILED=1; }
+[ -f "$GC_ACC_NEW" ] || { printf '    FAIL: fresh account-* file unexpectedly deleted\n' >&2; TEST_FAILED=1; }
 end_test
 
 start_test "10 concurrent PreToolUse(Bash bg) writers all land"
