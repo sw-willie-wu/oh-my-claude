@@ -19,6 +19,9 @@
   `WORKERS_AGENT_TRANSCRIPT_ROOT` are gone; leftover lines in your conf are
   harmless.
 
+### Upgrading
+- **Fully restart every running Claude Code session after updating.** An old 1.1.2 session's SessionStart re-copies its old statusline and layouts over the shared live copy, so the account segment disappears until all sessions run 1.2.0.
+
 ### Changed
 - Hooks match only `Bash|KillShell` (pre) and `Bash|BashOutput` (post), run a
   single jq pass, and exit before jq or the lock when `WORKERS_ENABLED` or

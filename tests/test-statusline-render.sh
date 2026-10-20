@@ -1231,10 +1231,10 @@ end_test
 
 start_test "T4.5 preview shows account; ACCOUNT_SHOW=false hides it"
 p=$(OMC_DIR="$REPO_ROOT" OMC_CONF=/dev/null bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
-case "$p" in *willie*) ;; *) printf '    FAIL: preview lacks willie\n' >&2; TEST_FAILED=1;; esac
+if ! printf "%s" "$p" | grep -qw you; then printf '    FAIL: preview lacks you\n' >&2; TEST_FAILED=1; fi
 printf 'ACCOUNT_SHOW=false\n' > "$T4D/p.conf"
 p=$(OMC_DIR="$REPO_ROOT" OMC_CONF="$T4D/p.conf" bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
-case "$p" in *willie*) printf '    FAIL: preview shows willie when disabled\n' >&2; TEST_FAILED=1;; esac
+if printf "%s" "$p" | grep -qw you; then printf '    FAIL: preview shows you when disabled\n' >&2; TEST_FAILED=1; fi
 end_test
 
 rm -rf "$T4D"

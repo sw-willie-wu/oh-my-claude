@@ -75,7 +75,7 @@ preview_layout() {
   RATE5_SUFFIX="" RATE7_SUFFIX=""
   ACCOUNT_ICON="${ACCOUNT_ICON-$'\xef\x80\x87'}"
   ACCOUNT=""
-  [ "${ACCOUNT_SHOW:-true}" = true ] && ACCOUNT="willie"
+  [ "${ACCOUNT_SHOW:-true}" = true ] && ACCOUNT="you"
 
   # Indent render output
   render | sed 's/^/  /'

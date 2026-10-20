@@ -37,7 +37,7 @@ When background shells (Bash with `run_in_background: true`) are running, they a
 ████░░░ 23%   ██░░░░░ 15%   █░░░░░ 8%
 ```
 
-Each line shows: nerd-font icon, description, command, and elapsed time. Long lines are tail-truncated.
+Each line shows: icon (theme default ⏳), description, command, and elapsed time. Long lines are tail-truncated.
 
 Agents are not tracked here. Use the CLI's built-in agent panel below the prompt, or `/tasks`.
 
@@ -63,7 +63,7 @@ GIT_CACHE_TTL=3                   # git-info cache TTL (s); 0 = disable (always 
 
 ### Limitations
 
-- Background shells that crash without being polled (`BashOutput`) may continue to show as running. After `WORKERS_SHELL_MAX_AGE` (default 1h) they are visually dimmed and marked with `?`. Use Claude Code's built-in `/bashes` command for the true running state.
+- Background shells that crash without being polled (`BashOutput`) may continue to show as running. After `WORKERS_SHELL_MAX_AGE` (default 1h) they are visually dimmed and marked with `?`. Use Claude Code's built-in `/tasks` command for the true running state.
 - The statusline itself needs `jq` 1.7 or newer. The hooks need it too: without it the hook silently no-ops and no worker lines appear.
 - Plugin-only. The Workers section relies on the plugin's tool hooks, so it works only when oh-my-claude is installed as a plugin (marketplace or `--plugin-dir`). Standalone `install.sh` installs get the statusline but no worker rows.
 - For elapsed time to keep updating while the main agent is idle, set `"refreshInterval": 3` in your `statusLine` settings (the `/oh-my-claude:setup` command does this automatically). 3 rather than 1 is deliberate — on Windows a 1-second tick can outpace a render and spawn overlapping statusline processes that contend for the worker-state lock. To keep frequent refreshes affordable, git info is cached for `GIT_CACHE_TTL` seconds (default 3) instead of running git on every tick. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
@@ -134,7 +134,7 @@ you want live background-shell rows.
 
 ### Upgrading
 
-If you installed oh-my-claude before 1.1.0, re-run `/oh-my-claude:setup` and accept the prompt to add `refreshInterval` to your `statusLine` settings — it enables the live background-shell elapsed-time refresh (git info is cached for `GIT_CACHE_TTL` seconds so the 1-second refresh stays cheap). Existing themes/layouts are unaffected.
+If you installed oh-my-claude before 1.1.0, re-run `/oh-my-claude:setup` and accept the prompt to add `refreshInterval` to your `statusLine` settings — it enables the live background-shell elapsed-time refresh (git info is cached for `GIT_CACHE_TTL` seconds so the 3-second refresh stays cheap). Existing themes/layouts are unaffected.
 
 ## Usage
 
@@ -212,6 +212,7 @@ Add a `.sh` file to `layouts/` that defines a `render()` function. Available var
 - `$ADD_FILES`, `$MOD_FILES`, `$DEL_FILES` - git file counts
 - `$LINES_ADD`, `$LINES_DEL` - git line counts
 - `$CTX_PCT`, `$RATE5_PCT`, `$RATE7_PCT` - usage percentages
+- `$ACCOUNT`, `$ACCOUNT_ICON` - account segment (`$ACCOUNT` is empty when hidden; safe for `echo -e`)
 - `$C_PRIMARY`, `$C_SECONDARY`, etc. - theme colors
 
 See existing layouts in `layouts/` for examples.
