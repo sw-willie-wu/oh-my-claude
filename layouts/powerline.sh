@@ -20,6 +20,7 @@ render() {
   # Segment 1: Model
   local LINE="${C_PRIMARY} ${MODEL} ${RESET}"
   LINE+="${C_PRIMARY}${ARROW}${RESET} "
+  [ -n "$ACCOUNT" ] && LINE+="${C_SUBTEXT} ${ACCOUNT_ICON:+$ACCOUNT_ICON }${ACCOUNT} ${RESET}${C_SUBTEXT}${ARROW}${RESET} "
 
   # Segment 2: Directory
   LINE+="${C_SECONDARY} ${DIR} ${RESET}"

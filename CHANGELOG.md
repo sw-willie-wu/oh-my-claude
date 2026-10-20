@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.2.0 (2026-10-20)
+
+### Added
+- Account segment: the logged-in account is shown right after the model in all
+  six layouts. It reads `oauthAccount` from `~/.claude.json` (or
+  `$CLAUDE_CONFIG_DIR/.claude.json`), caches the result, and is hidden on
+  API-key logins. Keys: `ACCOUNT_SHOW`, `ACCOUNT_FORMAT`
+  (`name` | `fullname` | `email` | `org`) and `ACCOUNT_ICON`. It is **on by
+  default**; set `ACCOUNT_SHOW=false` when screen sharing. It also works for
+  standalone installs, since it needs no hooks.
+- Model context tag: the model name gets ` [1M]` (or `[2M]`, ...) when the
+  context window is 1,000,000 tokens or more, in all six layouts. A 200K
+  session shows no tag. Set `MODEL_CTX_TAG=false` to turn it off.
+
+### Removed
+- Subagent (agent) rows from the Workers section. The CLI's agent panel below
+  the prompt and `/tasks` cover them. Workers now shows background shells
+  only. The keys `WORKERS_SHOW_AGENTS`, `WORKERS_SHOW_TYPE`,
+  `WORKERS_AGENT_ICON`, `WORKERS_AGENT_QUIET_SEC` and
+  `WORKERS_AGENT_TRANSCRIPT_ROOT` are gone; leftover lines in your conf are
+  harmless.
+
+### Upgrading
+- **Fully restart every running Claude Code session after updating.** An old 1.1.2 session's SessionStart re-copies its old statusline and layouts over the shared live copy, so the account segment disappears until all sessions run 1.2.0.
+
+### Changed
+- Hooks match only `Bash|KillShell` (pre) and `Bash|BashOutput` (post), run a
+  single jq pass, and exit before jq or the lock when `WORKERS_ENABLED` or
+  `WORKERS_SHOW_SHELLS` is not true.
+- The hooks need jq 1.7 or newer (the statusline already did).
+
+### Fixed
+- The conf template no longer blanks the shell icon: `WORKERS_SHELL_ICON` is
+  now a commented example, so the theme default applies. A conf copied from an
+  older template still has `WORKERS_SHELL_ICON=""`; delete that line to get
+  the theme icon.
+
 ## 1.1.2 (2026-10-05)
 
 ### Fixed

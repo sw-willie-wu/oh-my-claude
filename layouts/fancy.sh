@@ -2,7 +2,7 @@
 # Line 1: model and directory (always first)
 # Line 2: git details with line stats (only if in repo)
 # Line 3: usage meters with labels (ctx + 5h + 7d)
-# Line 4: worker rows (agent group then task/shell group), if any
+# Line 4: worker (background shell) rows, if any
 
 RESET='\033[0m'
 
@@ -28,7 +28,9 @@ render() {
   local DOT="·"
 
   # Line 1: model + dir
-  local LINE1="${C_PRIMARY}${MODEL}${RESET} ${C_SUBTEXT}${DOT}${RESET} ${C_SECONDARY}${FOLDER_ICON} ${DIR}${RESET}"
+  local LINE1="${C_PRIMARY}${MODEL}${RESET}"
+  [ -n "$ACCOUNT" ] && LINE1+=" ${C_SUBTEXT}${DOT}${RESET} ${C_SUBTEXT}${ACCOUNT_ICON:+$ACCOUNT_ICON }${ACCOUNT}${RESET}"
+  LINE1+=" ${C_SUBTEXT}${DOT}${RESET} ${C_SECONDARY}${FOLDER_ICON} ${DIR}${RESET}"
 
   # Line 2: git info (only if in repo)
   local LINE2=""

@@ -42,24 +42,12 @@ run_workers() {
 cleanup_render_state
 printf 'Running statusline render tests\n\n'
 
-start_test "short agent line includes type, description, and elapsed"
-SID="render-test-001"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'agent\ttoolu_a1\tclaude-code-guide\tresearch feature\t%s\n' "$((NOW - 12))" > "$SF"
-OUT="$(run_workers "$SID" 120 | strip_ansi)"
-echo "$OUT" | grep -qF 'claude-code-guide: research feature' \
-  || { printf '    FAIL: agent body missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-echo "$OUT" | grep -qE '[0-9]+s' \
-  || { printf '    FAIL: elapsed (Ns) missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
 start_test "long line truncates and elapsed appears exactly once"
 SID="render-test-002"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 NOW=$(date +%s)
 LONG_DESC="a very long description that exceeds terminal width definitely and goes on and on"
-printf 'agent\ttoolu_a2\tclaude-code-guide\t%s\t%s\n' "$LONG_DESC" "$((NOW - 12))" > "$SF"
+printf 'shell\ttoolu_a2\t-\t%s\tsleep 99\t%s\n' "$LONG_DESC" "$((NOW - 12))" > "$SF"
 OUT="$(run_workers "$SID" 60 | strip_ansi)"
 LEN=$(printf '%s' "$OUT" | head -1 | awk '{print length}')
 [ "$LEN" -le 58 ] || { printf '    FAIL: line len=%d exceeds 58 (cols=60-2)\n      got: %q\n' "$LEN" "$OUT" >&2; TEST_FAILED=1; }
@@ -73,7 +61,7 @@ start_test "description with escaped tab/newline is unescaped on render"
 SID="render-test-003"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 NOW=$(date +%s)
-printf 'agent\ttoolu_a3\tgeneral-purpose\ta\\tb\\nc\t%s\n' "$((NOW - 5))" > "$SF"
+printf 'shell\ttoolu_a3\t-\ta\\tb\\nc\tsleep 99\t%s\n' "$((NOW - 5))" > "$SF"
 OUT="$(run_workers "$SID" 120 | strip_ansi)"
 TAB_PATTERN=$'a\tb'
 echo "$OUT" | head -1 | grep -qF "$TAB_PATTERN" \
@@ -84,7 +72,7 @@ start_test "WORKERS_ENABLED=false produces zero worker lines"
 SID="render-test-004"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 NOW=$(date +%s)
-printf 'agent\ttoolu_a4\tgeneral-purpose\tshould not appear\t%s\n' "$((NOW - 1))" > "$SF"
+printf 'shell\ttoolu_a4\t-\tshould not appear\tsleep 99\t%s\n' "$((NOW - 1))" > "$SF"
 OUT="$(WORKERS_ENABLED=false run_workers "$SID" 120 | strip_ansi)"
 echo "$OUT" | grep -qF 'should not appear' \
   && { printf '    FAIL: worker line emitted despite WORKERS_ENABLED=false\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
@@ -94,21 +82,10 @@ start_test "corrupt row (missing start_unix) is skipped silently"
 SID="render-test-005"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 # Row missing the trailing start_unix column.
-printf 'agent\ttoolu_a5\tgeneral-purpose\tcorrupt row no timestamp\n' > "$SF"
+printf 'shell\ttoolu_a5\t-\tcorrupt row no timestamp\tsleep 99\n' > "$SF"
 OUT="$(run_workers "$SID" 120 | strip_ansi)"
 echo "$OUT" | grep -qF 'corrupt row no timestamp' \
   && { printf '    FAIL: corrupt row should not render\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "WORKDIR_RAW preserves raw current_dir for is_agent_alive slug"
-SID="render-test-workdir-raw"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-: > "$SF"
-# Inject a debug echo via env override (we'll add WORKDIR_RAW capture in statusline).
-OUT=$(echo "{\"session_id\":\"$SID\",\"model\":{\"display_name\":\"X\"},\"workspace\":{\"current_dir\":\"C:\\\\Users\\\\test\\\\proj\"}}" \
-  | OMC_DEBUG_DUMP_WORKDIR_RAW=1 bash "$STATUSLINE" 2>&1)
-echo "$OUT" | grep -qF 'WORKDIR_RAW=C:\Users\test\proj' \
-  || { printf '    FAIL: WORKDIR_RAW not captured pre-normalization\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 end_test
 
 start_test "is_alive returns true for running PID, false for dead PID"
@@ -143,14 +120,13 @@ RESULT=$(bash -c "
   OMC_TEST_LIB_ONLY=1
   source '$STATUSLINE'
   WORKERS_STATE_FILE='$SF'
-  WORKDIR_RAW='/tmp'
   SESSION_ID='$SID'
   prune_state_and_emit
 ")
 assert_line_count "$SF" 0 "dead row should be removed by prune"
 end_test
 
-start_test "prune drops shell row with dead PID, keeps alive shell + agent"
+start_test "prune drops shell row with dead PID, keeps alive shell"
 SID="render-test-prune-1"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 NOW=$(date +%s)
@@ -158,31 +134,18 @@ sleep 30 &
 LIVE_PID=$!
 DEAD_PID=99999999
 {
-  printf 'agent\ttoolu_a1\tgeneral-purpose\talive agent\t%s\n' "$NOW"
   printf 'shell\ttoolu_b_dead\tbash_dead\tdead bash\tsleep 99\t%s\t%s\n' "$NOW" "$DEAD_PID"
   printf 'shell\ttoolu_b_live\tbash_live\tlive bash\tsleep 99\t%s\t%s\n' "$NOW" "$LIVE_PID"
 } > "$SF"
 OUT=$(run_workers "$SID" 200 | strip_ansi)
 kill "$LIVE_PID" 2>/dev/null
 wait "$LIVE_PID" 2>/dev/null
-echo "$OUT" | grep -qF 'alive agent' \
-  || { printf '    FAIL: agent missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 echo "$OUT" | grep -qF 'live bash' \
   || { printf '    FAIL: alive shell missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 echo "$OUT" | grep -qvF 'dead bash' \
   || { printf '    FAIL: dead shell still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 grep -qF 'bash_dead' "$SF" \
   && { printf '    FAIL: dead row not removed from state\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "prune preserves agent row at exactly 5 columns (N-C1 regression)"
-SID="render-test-prune-2"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'agent\ttoolu_a1\tgeneral-purpose\tagent only\t%s\n' "$NOW" > "$SF"
-run_workers "$SID" 200 >/dev/null
-COLCOUNT=$(awk -F'\t' '{print NF}' "$SF" | head -1)
-assert_eq "5" "$COLCOUNT" "agent row should remain 5 cols after prune"
 end_test
 
 start_test "row with valid col3 but col7 empty (post inter-update gap) is kept within grace"
@@ -235,191 +198,6 @@ echo "$OUT" | grep -qvF 'orphaned' \
   || { printf '    FAIL: stale placeholder still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 grep -qF 'toolu_pre2' "$SF" \
   && { printf '    FAIL: stale placeholder row not pruned from state file\n' >&2; TEST_FAILED=1; }
-end_test
-
-# --- Task 4: prune writeback preserves agent col6 ---
-start_test "prune preserves agent col6 (agentId) on writeback"
-SID="render-test-agent-col6"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'agent\ttoolu_pre\tExplore\tdesc\t%s\t-\n' "$NOW" > "$SF"
-RESULT=$(bash -c "
-  OMC_TEST_LIB_ONLY=1
-  source '$STATUSLINE'
-  WORKERS_STATE_FILE='$SF'
-  WORKDIR_RAW='/tmp'
-  SESSION_ID='$SID'
-  prune_state_and_emit >/dev/null
-")
-assert_eq "6" "$(awk -F'\t' '{print NF}' "$SF" | head -1)" "agent row must stay 6 cols after prune"
-assert_eq "-" "$(awk -F'\t' '{print $6}' "$SF" | head -1)" "col6 must survive writeback"
-end_test
-
-start_test "prune still emits legacy 5-col agent row as 5 cols (back-compat)"
-SID="render-test-agent-5col-bc"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'agent\ttoolu_legacy\tgeneral-purpose\tlegacy\t%s\n' "$NOW" > "$SF"
-bash -c "
-  OMC_TEST_LIB_ONLY=1
-  source '$STATUSLINE'
-  WORKERS_STATE_FILE='$SF'
-  WORKDIR_RAW='/tmp'
-  SESSION_ID='$SID'
-  prune_state_and_emit >/dev/null
-"
-assert_eq "5" "$(awk -F'\t' '{print NF}' "$SF" | head -1)" "legacy 5-col agent row must not grow a column"
-assert_line_count "$SF" 1 "legacy 5-col agent row must be kept"
-end_test
-
-# --- Task 5: render-side liveness check for async agent rows ---
-# wd_id transform mirrors statusline.sh: every non-alnum char in
-# WORKDIR_RAW -> '-' (per-char, not collapsed; Claude Code's slug rule).
-# WORKDIR_RAW='/tmp' => wd_id='-tmp'.
-agent_prune() {
-  # $1=state file  $2=session id  $3=transcript root  $4=WORKDIR_RAW(default /tmp)
-  WORKERS_AGENT_TRANSCRIPT_ROOT="$3" \
-  WORKERS_PLACEHOLDER_GRACE_SEC=5 \
-  WORKERS_AGENT_QUIET_SEC=5 \
-  bash -c "
-    OMC_TEST_LIB_ONLY=1
-    source '$STATUSLINE'
-    WORKERS_STATE_FILE='$1'
-    WORKDIR_RAW='${4:-/tmp}'
-    SESSION_ID='$2'
-    prune_state_and_emit >/dev/null
-  "
-}
-# Claude Code slugifies the cwd by replacing every non-alphanumeric char
-# with '-' (NOT collapsed). '/tmp' -> '-tmp'.
-wd_slug() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
-mk_jsonl() {
-  # $1=root $2=sid $3=agentId $4=lastline_json $5=mtime_epoch(optional) $6=slug(default -tmp)
-  local d="$1/${6:--tmp}/$2/subagents"
-  mkdir -p "$d"
-  printf '%s\n' "$4" > "$d/agent-$3.jsonl"
-  [ -n "${5:-}" ] && touch -d "@$5" "$d/agent-$3.jsonl"
-}
-asst_line() { printf '{"type":"assistant","message":{"stop_reason":%s}}' "$1"; }
-user_line='{"type":"user","message":{"content":[{"type":"tool_result"}]}}'
-
-start_test "prune keeps agent row when JSONL mtime is fresh (alive fast-path)"
-SID="render-test-agent-live-mtime"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-ROOT=$(mktemp -d)
-NOW=$(date +%s)
-mk_jsonl "$ROOT" "$SID" "a_live" "$(asst_line '"end_turn"')"   # fresh mtime (just created)
-printf 'agent\ttoolu_lm\tExplore\tdesc\t%s\ta_live\n' "$((NOW - 9999))" > "$SF"
-agent_prune "$SF" "$SID" "$ROOT"
-assert_line_count "$SF" 1 "fresh-mtime agent must be kept even beyond grace"
-rm -rf "$ROOT"
-end_test
-
-start_test "prune drops agent row when JSONL stale + stop_reason terminal"
-SID="render-test-agent-done"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-ROOT=$(mktemp -d)
-NOW=$(date +%s)
-mk_jsonl "$ROOT" "$SID" "a_done" "$(asst_line '"end_turn"')" "$((NOW - 9999))"
-printf 'agent\ttoolu_dn\tExplore\tdesc\t%s\ta_done\n' "$((NOW - 9999))" > "$SF"
-agent_prune "$SF" "$SID" "$ROOT"
-assert_line_count "$SF" 0 "stale + end_turn agent must be pruned"
-rm -rf "$ROOT"
-end_test
-
-start_test "prune keeps agent row when JSONL stale but stop_reason=tool_use (mid-loop)"
-SID="render-test-agent-midloop"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-ROOT=$(mktemp -d)
-NOW=$(date +%s)
-mk_jsonl "$ROOT" "$SID" "a_loop" "$(asst_line '"tool_use"')" "$((NOW - 9999))"
-printf 'agent\ttoolu_ml\tExplore\tdesc\t%s\ta_loop\n' "$((NOW - 9999))" > "$SF"
-agent_prune "$SF" "$SID" "$ROOT"
-assert_line_count "$SF" 1 "stale-but-tool_use agent must be kept (still mid-loop)"
-rm -rf "$ROOT"
-end_test
-
-start_test "prune drops agent row when JSONL missing and beyond grace"
-SID="render-test-agent-nojsonl"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-ROOT=$(mktemp -d)
-NOW=$(date +%s)
-printf 'agent\ttoolu_nj\tExplore\tdesc\t%s\ta_ghost\n' "$((NOW - 9999))" > "$SF"
-agent_prune "$SF" "$SID" "$ROOT"
-assert_line_count "$SF" 0 "missing JSONL beyond grace must be pruned"
-rm -rf "$ROOT"
-end_test
-
-start_test "prune keeps agentId row when JSONL missing but within grace (launch window)"
-SID="render-test-agent-grace"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-ROOT=$(mktemp -d)
-NOW=$(date +%s)
-printf 'agent\ttoolu_gw\tExplore\tdesc\t%s\ta_justlaunched\n' "$NOW" > "$SF"
-agent_prune "$SF" "$SID" "$ROOT"
-assert_line_count "$SF" 1 "fresh agentId row within grace must survive the launch window"
-rm -rf "$ROOT"
-end_test
-
-start_test "prune keeps placeholder agent row (col6=-) within grace"
-SID="render-test-agent-ph-fresh"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-ROOT=$(mktemp -d)
-NOW=$(date +%s)
-printf 'agent\ttoolu_pf\tExplore\tdesc\t%s\t-\n' "$NOW" > "$SF"
-agent_prune "$SF" "$SID" "$ROOT"
-assert_line_count "$SF" 1 "fresh placeholder must survive"
-rm -rf "$ROOT"
-end_test
-
-start_test "prune reaps placeholder agent row (col6=-) beyond grace"
-SID="render-test-agent-ph-stale"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-ROOT=$(mktemp -d)
-NOW=$(date +%s)
-printf 'agent\ttoolu_ps\tExplore\tdesc\t%s\t-\n' "$((NOW - 9999))" > "$SF"
-agent_prune "$SF" "$SID" "$ROOT"
-assert_line_count "$SF" 0 "stale placeholder (Post never patched col6) must be reaped"
-rm -rf "$ROOT"
-end_test
-
-# --- C1: wd_id slug must match Claude Code (all non-alnum -> '-') ---
-start_test "is_agent_alive resolves JSONL under a cwd containing _ and ."
-SID="render-test-agent-slug"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-ROOT=$(mktemp -d)
-NOW=$(date +%s)
-WDR='/home/a_b.c/proj'                       # real slug: -home-a-b-c-proj
-mk_jsonl "$ROOT" "$SID" "a_slug" "$(asst_line '"tool_use"')" "" "$(wd_slug "$WDR")"
-printf 'agent\ttoolu_sl\tExplore\tdesc\t%s\ta_slug\n' "$((NOW - 9999))" > "$SF"
-agent_prune "$SF" "$SID" "$ROOT" "$WDR"
-assert_line_count "$SF" 1 "agent must be found+kept when cwd slug has _/. (C1)"
-rm -rf "$ROOT"
-end_test
-
-# --- I1: liveness keys off the last transcript line's type, not just stop_reason ---
-start_test "prune keeps agent whose JSONL ends on a user/tool_result line (model owes a turn)"
-SID="render-test-agent-toolresult"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-ROOT=$(mktemp -d)
-NOW=$(date +%s)
-mk_jsonl "$ROOT" "$SID" "a_tr" "$user_line" "$((NOW - 9999))"
-printf 'agent\ttoolu_tr\tExplore\tdesc\t%s\ta_tr\n' "$((NOW - 9999))" > "$SF"
-agent_prune "$SF" "$SID" "$ROOT"
-assert_line_count "$SF" 1 "stale JSONL ending in tool_result must be kept (mid-loop)"
-rm -rf "$ROOT"
-end_test
-
-start_test "prune drops agent whose last assistant line has stop_reason null (terminal text)"
-SID="render-test-agent-nullsr"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-ROOT=$(mktemp -d)
-NOW=$(date +%s)
-mk_jsonl "$ROOT" "$SID" "a_ns" "$(asst_line null)" "$((NOW - 9999))"
-printf 'agent\ttoolu_ns\tExplore\tdesc\t%s\ta_ns\n' "$((NOW - 9999))" > "$SF"
-agent_prune "$SF" "$SID" "$ROOT"
-assert_line_count "$SF" 0 "stale + trailing assistant text (sr=null) must be pruned"
-rm -rf "$ROOT"
 end_test
 
 # --- bg-Bash render-side liveness: is_shell_alive helper ---
@@ -502,7 +280,7 @@ prune_with_ps() {  # $1=SF $2=SID $3=ps() def $4=WORKERS_SHELL_UNKNOWN_MAX_AGE(o
     OMC_TEST_LIB_ONLY=1
     source '$STATUSLINE'
     $3
-    WORKERS_STATE_FILE='$1'; WORKDIR_RAW='/tmp'; SESSION_ID='$2'
+    WORKERS_STATE_FILE='$1'; SESSION_ID='$2'
     WORKERS_PLACEHOLDER_GRACE_SEC=30
     ${4:+WORKERS_SHELL_UNKNOWN_MAX_AGE=$4}
     prune_state_and_emit
@@ -963,8 +741,9 @@ call_parse() {  # $1=json → pipe-joined parsed fields
     source "'"$STATUSLINE"'"
     parse_status_json "$1"
     printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" \
-      "$SESSION_ID" "$SANITIZED_SID" "$MODEL" "$DIR" "$WORKDIR_RAW" \
-      "$CTX_PCT" "$RATE5_PCT" "$RATE5_RESET" "$RATE7_PCT" "$RATE7_RESET"
+      "$SESSION_ID" "$SANITIZED_SID" "$MODEL" "$DIR" \
+      "$CTX_PCT" "$RATE5_PCT" "$RATE5_RESET" "$RATE7_PCT" "$RATE7_RESET" \
+      "$CTX_SIZE"
   ' _ "$1"
 }
 call_split() {  # $1=GI_LINE → pipe-joined 6 git vars
@@ -979,9 +758,9 @@ call_split() {  # $1=GI_LINE → pipe-joined 6 git vars
 
 start_test "parse_status_json: docs fixture → fields match current grep behaviour"
 GOT=$(call_parse "$DOCS_JSON")
-# session|sanitized(.→_)|model|dir(norm)|workdir_raw|ctx|r5%|r5reset|r7%|r7reset
+# session|sanitized(.→_)|model|dir(norm)|ctx|r5%|r5reset|r7%|r7reset
 # old grep: ctx=first used_percentage=8; r5%=grep[0-9]* of 23.5 → 23; r7%=41
-assert_eq 'abc123...|abc123___|Opus|/c/w/d|/c/w/d|8|23|1738425600|41|1738857600' \
+assert_eq 'abc123...|abc123___|Opus|/c/w/d|8|23|1738425600|41|1738857600|0' \
   "$GOT" "parse_status_json must reproduce current grep extraction byte-for-byte"
 end_test
 
@@ -1012,37 +791,79 @@ end_test
 
 # --- §8.3 Task B: parse_status_json → single jq pass. Spec §4.1–§4.4/§4.6. ---
 # Goldens are the SPEC-pinned values: equivalence to the old grep where the
-# spec preserves behaviour (dir norm, WORKDIR_RAW single-backslash, model
+# spec preserves behaviour (dir norm, model
 # suffix strip, SANITIZED_SID, fractional floor) and the spec-sanctioned
 # improvements where jq is strictly more robust than positional grep (null /
 # absent context_window ⇒ CTX 0, never a mis-grabbed rate used_percentage).
 # JSON below uses literal `\\` (single-quoted, faithful) → valid JSON \\ →
 # jq raw value has SINGLE backslashes.
 
-start_test "parse_status_json: C:/c: → ~/, D: kept, single-backslash WORKDIR_RAW"
+start_test "parse_status_json: C:/c: → ~/, D: kept"
 GOT=$(call_parse '{"session_id":"w","model":{"display_name":"X"},"workspace":{"current_dir":"C:\\Users\\willie\\proj"}}')
-assert_eq 'w|w|X|~/proj|C:\Users\willie\proj|0||||' "$GOT" "C:\\Users\\ → ~/ ; WORKDIR_RAW single-backslash"
+assert_eq 'w|w|X|~/proj|0|||||0' "$GOT" "C:\\Users\\ → ~/"
 GOT=$(call_parse '{"session_id":"w","model":{"display_name":"X"},"workspace":{"current_dir":"c:\\users\\bob\\x"}}')
-assert_eq 'w|w|X|~/x|c:\users\bob\x|0||||' "$GOT" "lowercase c:/users collapses (case-insensitive, old i flag)"
+assert_eq 'w|w|X|~/x|0|||||0' "$GOT" "lowercase c:/users collapses (case-insensitive, old i flag)"
 GOT=$(call_parse '{"session_id":"w","model":{"display_name":"X"},"workspace":{"current_dir":"D:\\Users\\bob\\x"}}')
-assert_eq 'w|w|X|D:/Users/bob/x|D:\Users\bob\x|0||||' "$GOT" "non-C drive NOT collapsed (old behaviour)"
+assert_eq 'w|w|X|D:/Users/bob/x|0|||||0' "$GOT" "non-C drive NOT collapsed (old behaviour)"
 end_test
 
 start_test "parse_status_json: display_name \" (…)\" stripped; null context → CTX 0"
 GOT=$(call_parse '{"session_id":"s2","model":{"display_name":"Opus 4.7 (1M context)"},"workspace":{"current_dir":"/home/u/p"},"context_window":{"used_percentage":null}}')
-assert_eq 's2|s2|Opus 4.7|/home/u/p|/home/u/p|0||||' "$GOT" "suffix stripped; null used_percentage → 0 (// 0 | floor)"
+assert_eq 's2|s2|Opus 4.7|/home/u/p|0|||||0' "$GOT" "suffix stripped; null used_percentage → 0 (// 0 | floor)"
 end_test
 
 start_test "parse_status_json: absent context_window does NOT mis-grab a rate used_percentage"
 GOT=$(call_parse '{"session_id":"s1","rate_limits":{"five_hour":{"used_percentage":50,"resets_at":111},"seven_day":{"used_percentage":60,"resets_at":222}}}')
-assert_eq 's1|s1||||0|50|111|60|222' "$GOT" "CTX=0 via jq path, not 50 (old positional-grep bug); rates intact"
+assert_eq 's1|s1|||0|50|111|60|222|0' "$GOT" "CTX=0 via jq path, not 50 (old positional-grep bug); rates intact"
 end_test
 
 start_test "parse_status_json: fractional used_percentage floors; SANITIZED_SID maps non-alnum"
 GOT=$(call_parse '{"session_id":"f","model":{"display_name":"Opus"},"workspace":{"current_dir":"/c/w/d"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":23.5,"resets_at":1738425600},"seven_day":{"used_percentage":41.2,"resets_at":1738857600}}}')
-assert_eq 'f|f|Opus|/c/w/d|/c/w/d|8|23|1738425600|41|1738857600' "$GOT" "23.5→23, 41.2→41 (floor), byte-identical to old grep [0-9]*"
+assert_eq 'f|f|Opus|/c/w/d|8|23|1738425600|41|1738857600|0' "$GOT" "23.5→23, 41.2→41 (floor), byte-identical to old grep [0-9]*"
 GOT=$(call_parse '{"session_id":"a/b.c d","model":{"display_name":"X"},"workspace":{"current_dir":"/x"},"context_window":{"used_percentage":8}}')
-assert_eq 'a/b.c d|a_b_c_d|X|/x|/x|8||||' "$GOT" "SANITIZED_SID: non-alnum → _ (tr -c equivalent)"
+assert_eq 'a/b.c d|a_b_c_d|X|/x|8|||||0' "$GOT" "SANITIZED_SID: non-alnum → _ (tr -c equivalent)"
+end_test
+
+# --- [1M] model context tag (spec §8.3): CTX_SIZE parse + apply_model_ctx_tag ---
+start_test "parse_status_json: CTX_SIZE clamp table (spec §8.3.2)"
+for pair in '1000000=1000000' '200000=200000' 'null=0' '"abc"=0' '-5=0' '1e20=0' \
+            '9223372036854775807=0' '1500000.5=1500000'; do
+  v="${pair%=*}"; want="${pair##*=}"
+  js=$(jq -n -c --argjson v "$v" '{session_id:"c",model:{display_name:"X"},workspace:{current_dir:"/x"},context_window:{context_window_size:$v}}' | tr -d '\r')
+  got=$(call_parse "$js"); got="${got##*|}"
+  assert_eq "$want" "$got" "context_window_size=$v"
+done
+end_test
+
+call_tag() {  # $1=MODEL $2=CTX_SIZE [$3=MODEL_CTX_TAG] → "MODEL|stderr"
+  local errf; errf=$(mktemp)
+  local out
+  out=$(bash -c '
+    OMC_TEST_LIB_ONLY=1
+    source "'"$STATUSLINE"'"
+    set -u
+    MODEL="$1"; CTX_SIZE="$2"
+    [ -n "${3-}" ] && MODEL_CTX_TAG="$3"
+    apply_model_ctx_tag
+    printf "%s" "$MODEL"
+  ' _ "$1" "$2" "${3-}" 2>"$errf")
+  printf '%s|%s' "$out" "$(cat "$errf")"; rm -f "$errf"
+}
+start_test "apply_model_ctx_tag: table (spec §8.3.3), stderr empty"
+assert_eq 'X [1M]|' "$(call_tag X 1000000)" "1000000"
+assert_eq 'X [2M]|' "$(call_tag X 2000000)" "2000000"
+assert_eq 'X [1M]|' "$(call_tag X 1500000)" "1500000"
+assert_eq 'X|' "$(call_tag X 200000)" "200000"
+assert_eq 'X|' "$(call_tag X '')" "empty"
+assert_eq 'X|' "$(call_tag X 08)" "08"
+assert_eq 'X|' "$(call_tag X 99999999999999999999)" "huge"
+assert_eq 'X|' "$(call_tag X 1000000 false)" "tag off"
+assert_eq '|' "$(call_tag '' 1000000)" "empty MODEL"
+end_test
+
+start_test "apply_model_ctx_tag: set -u safe with CTX_SIZE/MODEL/MODEL_CTX_TAG unset"
+err=$(bash -c 'OMC_TEST_LIB_ONLY=1; source "'"$STATUSLINE"'"; set -u; unset CTX_SIZE MODEL MODEL_CTX_TAG; apply_model_ctx_tag; echo done' 2>&1 >/dev/null)
+assert_eq "" "$err" "no unbound variable error"
 end_test
 
 # Gate-level: jq failure (malformed input) and empty session_id both collapse
@@ -1072,90 +893,39 @@ line_index() {
   printf '%s\n' "$1" | grep -nF -- "$2" | head -1 | cut -d: -f1 | { read -r n; printf '%s' "${n:-0}"; }
 }
 
-start_test "default emit_workers groups agents before shells, launch order kept within group"
-SID="render-test-group-default"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 60 & LP1=$!
-sleep 60 & LP2=$!
-{
-  printf 'agent\ttoolu_a1\tgeneral-purpose\tagent-one\t%s\n'           "$((NOW - 30))"
-  printf 'shell\ttoolu_b1\tbash_1\tshell-one\tsleep 99\t%s\t%s\n'      "$((NOW - 25))" "$LP1"
-  printf 'agent\ttoolu_a2\tgeneral-purpose\tagent-two\t%s\n'           "$((NOW - 10))"
-  printf 'shell\ttoolu_b2\tbash_2\tshell-two\tsleep 99\t%s\t%s\n'      "$((NOW - 5))"  "$LP2"
-} > "$SF"
-OUT="$(run_workers "$SID" 200 | strip_ansi)"
-kill "$LP1" "$LP2" 2>/dev/null; wait "$LP1" "$LP2" 2>/dev/null
-I_A1=$(line_index "$OUT" 'agent-one'); I_A2=$(line_index "$OUT" 'agent-two')
-I_B1=$(line_index "$OUT" 'shell-one'); I_B2=$(line_index "$OUT" 'shell-two')
-[ "$I_A1" -gt 0 ] && [ "$I_A2" -gt 0 ] && [ "$I_B1" -gt 0 ] && [ "$I_B2" -gt 0 ] \
-  || { printf '    FAIL: a worker missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-[ "$I_A1" -lt "$I_A2" ] \
-  || { printf '    FAIL: agent launch order not kept (a1=%s a2=%s)\n' "$I_A1" "$I_A2" >&2; TEST_FAILED=1; }
-[ "$I_B1" -lt "$I_B2" ] \
-  || { printf '    FAIL: shell launch order not kept (b1=%s b2=%s)\n' "$I_B1" "$I_B2" >&2; TEST_FAILED=1; }
-[ "$I_A2" -lt "$I_B1" ] \
-  || { printf '    FAIL: agents not all before shells (a2=%s b1=%s)\n' "$I_A2" "$I_B1" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "emit_workers shell agent reverses group order (layout-controlled)"
-SID="render-test-group-rev"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 60 & LP=$!
-{
-  printf 'agent\ttoolu_a1\tgeneral-purpose\tagent-one\t%s\n'      "$((NOW - 20))"
-  printf 'shell\ttoolu_b1\tbash_1\tshell-one\tsleep 99\t%s\t%s\n' "$((NOW - 10))" "$LP"
-} > "$SF"
-OUT="$(bash -c "
-  OMC_TEST_LIB_ONLY=1
-  source '$STATUSLINE'
-  WORKERS_STATE_FILE='$SF'
-  WORKDIR_RAW='/tmp'; SESSION_ID='$SID'
-  WORKERS_AGENT_ICON='A'; WORKERS_SHELL_ICON='S'
-  emit_workers shell agent
-" | strip_ansi)"
-kill "$LP" 2>/dev/null; wait "$LP" 2>/dev/null
-I_A=$(line_index "$OUT" 'agent-one'); I_B=$(line_index "$OUT" 'shell-one')
-[ "$I_A" -gt 0 ] && [ "$I_B" -gt 0 ] \
-  || { printf '    FAIL: worker missing under reversed order\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-[ "$I_B" -lt "$I_A" ] \
-  || { printf '    FAIL: shell not before agent under "shell agent" (b=%s a=%s)\n' "$I_B" "$I_A" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "WORKERS_MAX truncates on the regrouped sequence, not file order"
+start_test "WORKERS_MAX caps the rendered shell rows in launch order"
 SID="render-test-group-max"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 NOW=$(date +%s)
 sleep 60 & LP1=$!
 sleep 60 & LP2=$!
+sleep 60 & LP3=$!
 {
-  printf 'agent\ttoolu_a1\tgeneral-purpose\tagent-one\t%s\n'           "$((NOW - 30))"
   printf 'shell\ttoolu_b1\tbash_1\tshell-one\tsleep 99\t%s\t%s\n'      "$((NOW - 25))" "$LP1"
-  printf 'agent\ttoolu_a2\tgeneral-purpose\tagent-two\t%s\n'           "$((NOW - 10))"
-  printf 'shell\ttoolu_b2\tbash_2\tshell-two\tsleep 99\t%s\t%s\n'      "$((NOW - 5))"  "$LP2"
+  printf 'shell\ttoolu_b2\tbash_2\tshell-two\tsleep 99\t%s\t%s\n'      "$((NOW - 15))" "$LP2"
+  printf 'shell\ttoolu_b3\tbash_3\tshell-three\tsleep 99\t%s\t%s\n'    "$((NOW - 5))"  "$LP3"
 } > "$SF"
 OUT="$(bash -c "
   OMC_TEST_LIB_ONLY=1
   source '$STATUSLINE'
   WORKERS_STATE_FILE='$SF'
-  WORKDIR_RAW='/tmp'; SESSION_ID='$SID'
+  SESSION_ID='$SID'
   WORKERS_MAX=2
-  WORKERS_AGENT_ICON='A'; WORKERS_SHELL_ICON='S'
+  WORKERS_SHELL_ICON='S'
   emit_workers
 " | strip_ansi)"
-kill "$LP1" "$LP2" 2>/dev/null; wait "$LP1" "$LP2" 2>/dev/null
-echo "$OUT" | grep -qF 'agent-one' && echo "$OUT" | grep -qF 'agent-two' \
-  || { printf '    FAIL: cap=2 + grouping should keep both agents\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-echo "$OUT" | grep -qF 'shell-one' \
-  && { printf '    FAIL: shell rendered though cap=2 fills with agents first\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+kill "$LP1" "$LP2" "$LP3" 2>/dev/null; wait "$LP1" "$LP2" "$LP3" 2>/dev/null
+echo "$OUT" | grep -qF 'shell-one' && echo "$OUT" | grep -qF 'shell-two' \
+  || { printf '    FAIL: cap=2 should keep the first two shells\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF 'shell-three' \
+  && { printf '    FAIL: third shell rendered despite cap=2\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 end_test
 
-start_test "fancy layout order: git before meters, workers (agent>task) last"
+start_test "fancy layout order: git before meters, workers last"
 SID="render-test-fancy-order"
 SF="$RENDER_STATE_DIR/state-${SID}.tsv"
 NOW=$(date +%s)
-printf 'agent\ttoolu_fa\tgeneral-purpose\tfancyagentX\t%s\n' "$((NOW - 15))" > "$SF"
+printf 'shell\ttoolu_fa\tbash_fa\tfancyagentX\tsleep 99\t%s\n' "$((NOW - 15))" > "$SF"
 FREPO="$RENDER_STATE_DIR/fancy-repo"
 rm -rf "$FREPO"; mkdir -p "$FREPO"
 git -C "$FREPO" init -q
@@ -1225,5 +995,304 @@ run_workers "render-test-sweep-wiring" 120 >/dev/null
 rm -f "$ORPHAN"
 end_test
 
+# --- 1.2.0: agent tracking removed; prune keeps shell rows only ---
+start_test "prune keeps only shell rows: drops agent (5- and 6-col) and unknown kind"
+SID="render-test-t21"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+SHELL_LINE="$(printf 'shell\ttoolu_s1\t-\tkeepme\tsleep 99\t%s' "$NOW")"
+{
+  printf 'agent\ttoolu_a1\tgeneral-purpose\told five\t%s\n' "$NOW"
+  printf '%s\n' "$SHELL_LINE"
+  printf 'agent\ttoolu_a2\tExplore\told six\t%s\t-\n' "$NOW"
+  printf 'bogus\tx\ty\n'
+} > "$SF"
+run_workers "$SID" 200 >/dev/null
+assert_eq "$SHELL_LINE" "$(cat "$SF")" "state file must hold exactly the shell row"
+end_test
+
+start_test "WORKERS_SHOW_SHELLS=false: no worker lines and state file untouched (no prune)"
+SID="render-test-t22"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+DEAD_LINE="$(printf 'shell\ttoolu_dead\tbash_dead\tghost shell\tsleep 99\t%s\t99999999' "$((NOW - 9999))")"
+printf '%s\n' "$DEAD_LINE" > "$SF"
+OUT="$(WORKERS_SHOW_SHELLS=false run_workers "$SID" 200 | strip_ansi)"
+echo "$OUT" | grep -qF 'ghost shell' \
+  && { printf '    FAIL: worker line rendered with WORKERS_SHOW_SHELLS=false\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+assert_eq "$DEAD_LINE" "$(cat "$SF")" "dead row must survive (prune must not run)"
+end_test
+
+start_test "1.1.2 mixed state file upgrades to shell rows byte-identical"
+SID="render-test-t23"
+SF="$RENDER_STATE_DIR/state-${SID}.tsv"
+NOW=$(date +%s)
+sleep 60 & LP=$!
+S6="$(printf 'shell\ttoolu_p\t-\tplaceholder\tsleep 99\t%s' "$NOW")"
+S7="$(printf 'shell\ttoolu_l\tbash_l\tlive one\tsleep 99\t%s\t%s' "$NOW" "$LP")"
+{
+  printf 'agent\ttoolu_a1\tgeneral-purpose\tfive col\t%s\n' "$NOW"
+  printf '%s\n' "$S6"
+  printf 'agent\ttoolu_a2\tExplore\tsix col\t%s\tagent_x\n' "$NOW"
+  printf '%s\n' "$S7"
+} > "$SF"
+run_workers "$SID" 200 >/dev/null
+kill "$LP" 2>/dev/null; wait "$LP" 2>/dev/null
+assert_eq "$(printf '%s\n%s' "$S6" "$S7")" "$(cat "$SF")" "exactly the 2 shell lines, byte-identical"
+end_test
+
+start_test "no workdir-raw variable left in tests or statusline"
+tok=WORKDIR; tok+=_RAW   # built at runtime so this test's own source never matches
+assert_eq "" "$(grep -rn -- "$tok" "$REPO_ROOT/tests" "$REPO_ROOT/statusline.sh")" "variable removed"
+end_test
+
+# ---------------------------------------------------------------------------
+# Task 3: account fields (cached_account_fields / resolve_account)
+# ---------------------------------------------------------------------------
+AT="$(mktemp -d -t omc-acct-XXXXXX)"
+ALOG="$AT/shim.log"
+ASHIM="$AT/shim"; make_jq_shim "$ASHIM" "$ALOG"
+AFAIL="$AT/failshim"; make_jq_shim "$AFAIL" "$ALOG" fail
+
+acct() {  # $1=fixture path; rest = VAR=val env; prints ACCOUNT|ACC_NAME|ACC_FULL|ACC_EMAIL|ACC_ORG
+  local f="$1"; shift
+  env OMC_ACCOUNT_FILE="$f" "$@" bash -c '
+    OMC_TEST_LIB_ONLY=1; source "'"$STATUSLINE"'"
+    declare -F cached_account_fields >/dev/null || { echo "NOFUNC"; exit 1; }   # no vacuous passes while RED
+    cached_account_fields; resolve_account
+    printf "%s|%s|%s|%s|%s\n" "$ACCOUNT" "$ACC_NAME" "$ACC_FULL" "$ACC_EMAIL" "$ACC_ORG"' | tr -d '\r'
+}
+acct1() { acct "$@" | cut -d'|' -f1; }
+# mkfx <path> <displayName> <fullName> <email> <org> [age_sec=10]
+mkfx() {
+  mkdir -p "$(dirname "$1")"
+  "$REAL_JQ" -nj --arg d "$2" --arg f "$3" --arg e "$4" --arg o "$5" \
+    '{oauthAccount:{displayName:$d,fullName:$f,emailAddress:$e,organizationName:$o}}' > "$1"
+  touch -d "@$(( $(date +%s) - ${6:-10} ))" "$1"
+}
+acache() { ls "$OMC_STATE_DIR"/account-* 2>/dev/null | grep -v '\.tmp\.' | head -1; }
+
+start_test "T3.1 each ACCOUNT_FORMAT picks the right field (bogus -> name)"
+FX="$AT/f1.json"; mkfx "$FX" willie willie_ttl w@x Org
+for pair in name:willie fullname:willie_ttl email:w@x org:Org bogus:willie; do
+  assert_eq "${pair#*:}" "$(acct1 "$FX" ACCOUNT_FORMAT="${pair%%:*}")" "format ${pair%%:*}"
+done
+end_test
+
+start_test "T3.2 fallback chains"
+FX="$AT/f2.json"
+mkfx "$FX" "" willie_ttl w@x Org
+assert_eq willie_ttl "$(acct1 "$FX")" "empty displayName -> fullName"
+rm -f "$OMC_STATE_DIR"/account-*
+mkfx "$FX" "" "" w@x Org
+assert_eq w@x "$(acct1 "$FX")" "empty name+full -> email"
+rm -f "$OMC_STATE_DIR"/account-*
+mkfx "$FX" willie willie_ttl w@x ""
+assert_eq w@x "$(acct1 "$FX" ACCOUNT_FORMAT=org)" "org empty -> email"
+rm -f "$OMC_STATE_DIR"/account-*
+mkfx "$FX" willie willie_ttl "" Org
+assert_eq "" "$(acct1 "$FX" ACCOUNT_FORMAT=email)" "email empty -> empty"
+end_test
+
+start_test "T3.3 first call writes cache ending in newline; second call is a hit"
+FX="$AT/f3.json"; mkfx "$FX" willie willie_ttl w@x Org; : > "$ALOG"
+assert_eq willie "$(acct1 "$FX" PATH="$ASHIM:$PATH")" "miss value"
+C=$(acache)
+[ -n "$C" ] || { printf '    FAIL: no account cache file\n' >&2; TEST_FAILED=1; }
+[ -n "$C" ] && assert_eq 0a "$(tail -c1 "$C" | od -An -tx1 | tr -d " ")" "cache ends with newline"
+assert_eq 1 "$(shim_count "$ALOG" "$FX")" "miss = one jq call"
+: > "$ALOG"
+assert_eq willie "$(acct1 "$FX" PATH="$ASHIM:$PATH")" "hit value"
+assert_eq 0 "$(shim_count "$ALOG" "$FX")" "hit = zero jq calls"
+end_test
+
+start_test "T3.4 source rewritten and newer re-runs jq"
+FX="$AT/f4.json"; mkfx "$FX" willie willie_ttl w@x Org
+acct1 "$FX" >/dev/null
+mkfx "$FX" neo willie_ttl w@x Org -5
+: > "$ALOG"
+assert_eq neo "$(acct1 "$FX" PATH="$ASHIM:$PATH")" "new name"
+assert_eq 1 "$(shim_count "$ALOG" "$FX")" "one jq call"
+end_test
+
+start_test "T3.5 format change reads cache only"
+FX="$AT/f5.json"; mkfx "$FX" willie willie_ttl w@x Org
+acct1 "$FX" >/dev/null; : > "$ALOG"
+assert_eq w@x "$(acct1 "$FX" ACCOUNT_FORMAT=email PATH="$ASHIM:$PATH")" "email from cache"
+assert_eq 0 "$(shim_count "$ALOG" "$FX")" "no jq"
+end_test
+
+start_test "T3.6 empty results are cached"
+FX="$AT/f6.json"; echo '{}' > "$FX"; touch -d "@$(( $(date +%s) - 10 ))" "$FX"; : > "$ALOG"
+assert_eq "" "$(acct1 "$FX" PATH="$ASHIM:$PATH")" "empty"
+C=$(acache)
+[ -n "$C" ] || { printf '    FAIL: no cache for empty result\n' >&2; TEST_FAILED=1; }
+[ -n "$C" ] && assert_eq 3 "$(tr -cd '\037' < "$C" | wc -c | tr -d ' ')" "three US separators"
+: > "$ALOG"; acct1 "$FX" PATH="$ASHIM:$PATH" >/dev/null
+assert_eq 0 "$(shim_count "$ALOG" "$FX")" "second call hit"
+end_test
+
+start_test "T3.7 source deleted -> empty despite cache"
+FX="$AT/f7.json"; mkfx "$FX" willie willie_ttl w@x Org
+acct1 "$FX" >/dev/null; rm -f "$FX"
+assert_eq "" "$(acct1 "$FX")" "empty"
+end_test
+
+start_test "T3.8 jq failure serves old cache, else empty"
+FX="$AT/f8.json"; mkfx "$FX" willie willie_ttl w@x Org
+assert_eq "" "$(acct1 "$FX" PATH="$AFAIL:$PATH")" "no cache + failing jq"
+assert_eq "" "$(acache)" "nothing written on failure"
+acct1 "$FX" >/dev/null
+mkfx "$FX" neo willie_ttl w@x Org -5
+assert_eq willie "$(acct1 "$FX" PATH="$AFAIL:$PATH")" "old cache served"
+end_test
+
+start_test "T3.9 0-byte source serves old cache, cache unchanged"
+FX="$AT/f9.json"; mkfx "$FX" willie willie_ttl w@x Org
+acct1 "$FX" >/dev/null; C=$(acache); before=$(od -c "$C")
+: > "$FX"; touch -d "@$(( $(date +%s) + 5 ))" "$FX"
+assert_eq willie "$(acct1 "$FX")" "old value"
+assert_eq "$before" "$(od -c "$C")" "cache bytes unchanged"
+end_test
+
+start_test "T3.10 non-object oauthAccount -> empty, cache written"
+FX="$AT/f10.json"; echo '{"oauthAccount":"x"}' > "$FX"; touch -d "@$(( $(date +%s) - 10 ))" "$FX"
+assert_eq "" "$(acct1 "$FX")" "empty"
+[ -n "$(acache)" ] || { printf '    FAIL: cache not written\n' >&2; TEST_FAILED=1; }
+end_test
+
+start_test "T3.11 missing state dir is created, no stderr"
+FX="$AT/f11.json"; mkfx "$FX" willie willie_ttl w@x Org
+ABS="$AT/absent"; rm -rf "$ABS"
+err=$(acct "$FX" OMC_STATE_DIR="$ABS" 2>&1 >/dev/null)
+assert_eq "" "$err" "stderr empty"
+if [ -d "$ABS" ] && ls "$ABS"/account-* >/dev/null 2>&1; then :; else printf '    FAIL: dir/cache not created\n' >&2; TEST_FAILED=1; fi
+end_test
+
+start_test "T3.12 CLAUDE_CONFIG_DIR is used when OMC_ACCOUNT_FILE is empty"
+mkfx "$AT/cfg/.claude.json" willie willie_ttl w@x Org
+assert_eq willie "$(acct1 '' CLAUDE_CONFIG_DIR="$AT/cfg")" "from config dir"
+end_test
+
+start_test "T3.13 source path with spaces (miss and hit)"
+FX="$AT/John Smith/.claude.json"; mkfx "$FX" willie willie_ttl w@x Org
+assert_eq willie "$(acct1 "$FX")" "miss"
+assert_eq willie "$(acct1 "$FX")" "hit"
+end_test
+
+start_test "T3.14 sanitization at field level; miss == hit"
+FX="$AT/f14.json"
+"$REAL_JQ" -nj '{oauthAccount:{displayName:"  \u001b[31mre\nd\\c\\b\u009bX  ",fullName:"f",emailAddress:"e",organizationName:"o"}}' > "$FX"
+touch -d "@$(( $(date +%s) - 10 ))" "$FX"
+m=$(acct "$FX"); h=$(acct "$FX")
+assert_eq "$m" "$h" "miss == hit"
+name="${m#*|}"; name="${name%%|*}"
+case "$name" in *$'\033'*|*$'\xc2\x9b'*) printf '    FAIL: ESC/CSI survived\n' >&2; TEST_FAILED=1;; esac
+assert_eq '[31mred\\c\\bX' "$name" "trimmed, controls stripped, backslashes doubled"
+end_test
+
+start_test "T3.15 whitespace-only displayName falls back to fullName"
+FX="$AT/f15.json"; mkfx "$FX" "   " willie_ttl w@x Org
+assert_eq willie_ttl "$(acct1 "$FX")" "fallback"
+end_test
+
+start_test "T3.16 ACCOUNT_SHOW=false: empty, no jq, no cache"
+FX="$AT/f16.json"; mkfx "$FX" willie willie_ttl w@x Org; : > "$ALOG"
+assert_eq "" "$(acct1 "$FX" ACCOUNT_SHOW=false PATH="$ASHIM:$PATH")" "empty"
+assert_eq 0 "$(shim_count "$ALOG" "$FX")" "no jq"
+assert_eq "" "$(acache)" "no cache"
+end_test
+
+start_test "T3.17 sweep removes stale account tmp files"
+printf x > "$OMC_STATE_DIR/account-x.tmp.123"
+touch -d "@$(( $(date +%s) - 60 ))" "$OMC_STATE_DIR/account-x.tmp.123"
+bash -c 'OMC_TEST_LIB_ONLY=1; source "'"$STATUSLINE"'"; _omc_sweep_stale_tmp'
+[ ! -f "$OMC_STATE_DIR/account-x.tmp.123" ] || { printf '    FAIL: tmp not swept\n' >&2; TEST_FAILED=1; }
+end_test
+
+rm -rf "$AT"
+
+
+# ---- Task 4: account segment in layouts ----
+ICON=$'\xef\x80\x87'
+render_layout() {  # $1=layout $2=fixture ('' -> none) $3=raw|strip ; extra conf via $EXTRA_CONF
+  printf 'LAYOUT=%s\n%s\n' "$1" "${EXTRA_CONF:-}" > "$OMC_STATE_DIR/l.conf"
+  local out nogit payload; nogit=$(mktemp -d)
+  payload="${4:-}"   # $4 = optional payload JSON (default: plain "M" model)
+  [ -n "$payload" ] || payload='{"session_id":"render-test-acc","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"}}'
+  out=$(cd "$nogit" && printf '%s\n' "$payload" \
+    | OMC_CONF="$OMC_STATE_DIR/l.conf" OMC_ACCOUNT_FILE="${2:-$OMC_STATE_DIR/no-such.json}" bash "$STATUSLINE" 2>/dev/null)
+  rm -rf "$nogit"
+  if [ "${3:-strip}" = raw ]; then printf '%s\n' "$out"; else printf '%s\n' "$out" | strip_ansi; fi
+}
+T4D=$(mktemp -d)
+jq -n '{oauthAccount:{displayName:"willie"}}' > "$T4D/w.json"
+touch -d "@$(( $(date +%s) - 10 ))" "$T4D/w.json"
+ARROW_GLYPH=$(printf '\xee\x82\xb0')
+LAYOUTS4="default fancy minimal powerline pure mygo"
+
+start_test "T4.1 account segment placement per layout"
+EXPECT_default="M ${ICON} willie "
+EXPECT_fancy="M · ${ICON} willie · "
+EXPECT_minimal="M | willie | /tmp/d"
+EXPECT_powerline=" ${ICON} willie ${ARROW_GLYPH}  /tmp/d"
+EXPECT_pure="M  willie  /tmp/d"
+EXPECT_mygo="★ M ♪ willie ♪ /tmp/d"
+for l in $LAYOUTS4; do
+  out=$(render_layout "$l" "$T4D/w.json" | head -1)
+  e="EXPECT_$l"
+  case "$out" in *"${!e}"*) ;; *) printf '    FAIL: %s: [%s] lacks [%s]\n' "$l" "$out" "${!e}" >&2; TEST_FAILED=1;; esac
+done
+out=$(render_layout powerline "$T4D/w.json" | head -1)
+case "$out" in " M ${ARROW_GLYPH}  ${ICON} willie ${ARROW_GLYPH}  /tmp/d "*) ;; *) printf '    FAIL: powerline start [%s]\n' "$out" >&2; TEST_FAILED=1;; esac
+end_test
+
+start_test "T4.2 (guard) empty account: identical to ACCOUNT_SHOW=false, no doubled separators"
+for l in $LAYOUTS4; do
+  a=$(render_layout "$l" '' raw); b=$(EXTRA_CONF="ACCOUNT_SHOW=false" render_layout "$l" "$T4D/w.json" raw)
+  assert_eq "$a" "$b" "$l raw equal"
+  case "$a" in *willie*) printf '    FAIL: %s shows willie\n' "$l" >&2; TEST_FAILED=1;; esac
+  s=$(render_layout "$l" '' | head -1)
+  case "$s" in *"| |"*|*"· ·"*|*"♪ ♪"*) printf '    FAIL: %s doubled sep [%s]\n' "$l" "$s" >&2; TEST_FAILED=1;; esac
+done
+end_test
+
+start_test "T4.3 ACCOUNT_ICON empty: no icon, no double space"
+out=$(EXTRA_CONF='ACCOUNT_ICON=""' render_layout default "$T4D/w.json" | head -1)
+case "$out" in "M willie "*) ;; *) printf '    FAIL: [%s]\n' "$out" >&2; TEST_FAILED=1;; esac
+end_test
+
+start_test "T4.4 hostile displayName: ESC stripped, miss==hit, backslash literal"
+jq -n '{oauthAccount:{displayName:"\u001b[31mx\nb\\c\\b"}}' > "$T4D/h.json"
+touch -d "@$(( $(date +%s) - 10 ))" "$T4D/h.json"
+r1=$(render_layout default "$T4D/h.json" raw); r2=$(render_layout default "$T4D/h.json" raw)
+assert_eq "$r1" "$r2" "miss == hit raw"
+case "$r1" in *$'\x1b[31m'*) printf '    FAIL: raw ESC[31m present\n' >&2; TEST_FAILED=1;; esac
+s=$(render_layout default "$T4D/h.json")
+case "$s" in *'[31m'*) ;; *) printf '    FAIL: no literal [31m in [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
+case "$s" in *'/tmp/d'*) ;; *) printf '    FAIL: dir missing\n' >&2; TEST_FAILED=1;; esac
+case "$s" in *'b\c'*) ;; *) printf '    FAIL: b\c missing in [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
+end_test
+
+start_test "T4.5 preview shows account; ACCOUNT_SHOW=false hides it"
+p=$(OMC_DIR="$REPO_ROOT" OMC_CONF=/dev/null bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
+if ! printf "%s" "$p" | grep -qw you; then printf '    FAIL: preview lacks you\n' >&2; TEST_FAILED=1; fi
+printf 'ACCOUNT_SHOW=false\n' > "$T4D/p.conf"
+p=$(OMC_DIR="$REPO_ROOT" OMC_CONF="$T4D/p.conf" bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
+if printf "%s" "$p" | grep -qw you; then printf '    FAIL: preview shows you when disabled\n' >&2; TEST_FAILED=1; fi
+end_test
+
+start_test "T4.6 [1M] tag shows in all 6 layouts; MODEL_CTX_TAG=false hides it"
+P1M=$(jq -n -c '{session_id:"render-test-acc",model:{display_name:"Opus 5.5 (1M context)"},workspace:{current_dir:"/tmp/d"},context_window:{context_window_size:1000000}}' | tr -d '\r')
+for l in $LAYOUTS4; do
+  s=$(render_layout "$l" '' strip "$P1M" | head -1)
+  case "$s" in *"Opus 5.5 [1M]"*) ;; *) printf '    FAIL: %s lacks tag [%s]\n' "$l" "$s" >&2; TEST_FAILED=1;; esac
+done
+s=$(EXTRA_CONF="MODEL_CTX_TAG=false" render_layout default '' strip "$P1M" | head -1)
+case "$s" in *"Opus 5.5"*) ;; *) printf '    FAIL: off: no model [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
+case "$s" in *"["*) printf '    FAIL: off: has [ in [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
+end_test
+
+rm -rf "$T4D"
 cleanup_render_state
 print_summary

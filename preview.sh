@@ -73,6 +73,9 @@ preview_layout() {
   LINES_ADD=$DEMO_LADD LINES_DEL=$DEMO_LDEL
   CTX_PCT=$DEMO_CTX RATE5_PCT=$DEMO_R5 RATE7_PCT=$DEMO_R7
   RATE5_SUFFIX="" RATE7_SUFFIX=""
+  ACCOUNT_ICON="${ACCOUNT_ICON-$'\xef\x80\x87'}"
+  ACCOUNT=""
+  [ "${ACCOUNT_SHOW:-true}" = true ] && ACCOUNT="you"
 
   # Indent render output
   render | sed 's/^/  /'
