@@ -29,16 +29,17 @@ Themeable statusline plugin for [Claude Code](https://claude.com/claude-code). M
 
 ## Workers
 
-When subagents (Task tool) or background shells (Bash with `run_in_background: true`) are running, they appear as dedicated lines at the top of the statusline:
+When background shells (Bash with `run_in_background: true`) are running, they appear as dedicated lines at the top of the statusline:
 
 ```
- claude-code-guide: research-statusline-feature              12s
  run-dev-server: npm run dev                              4m32s
 ◇ opus  ~/oh-my-claude  main +2 ~1
 ████░░░ 23%   ██░░░░░ 15%   █░░░░░ 8%
 ```
 
-Each line shows: nerd-font icon, optional `subagent_type` prefix, description, optional command (shells only), and elapsed time. Long lines are tail-truncated.
+Each line shows: nerd-font icon, description, command, and elapsed time. Long lines are tail-truncated.
+
+Agents are not tracked here. Use the CLI's built-in agent panel below the prompt, or `/tasks`.
 
 ### Configuration
 
@@ -46,15 +47,11 @@ Add to `~/.claude/oh-my-claude.conf`:
 
 ```bash
 WORKERS_ENABLED=true              # master toggle
-WORKERS_SHOW_AGENTS=true          # show subagent lines
 WORKERS_SHOW_SHELLS=true          # show background bash lines
-WORKERS_SHOW_TYPE=true            # show subagent_type prefix on agent lines
 WORKERS_SHOW_ELAPSED=true         # show elapsed time
 WORKERS_MAX=5                     # 0 = unlimited
-WORKERS_AGENT_ICON=""           # nf-fa-cogs
-WORKERS_SHELL_ICON=""           # nf-cod-terminal
+# WORKERS_SHELL_ICON=$'\xe2\x8f\xb3'  # optional override; default comes from the theme; "" hides the icon
 WORKERS_SHELL_MAX_AGE=3600        # seconds; older shells are dimmed and marked '?'
-WORKERS_AGENT_QUIET_SEC=60        # async-agent transcript idle window: within this, the agent is treated as alive (fast path) before the last-line check decides
 GIT_CACHE_TTL=3                   # git-info cache TTL (s); 0 = disable (always run git). See note below.
 ```
 
@@ -62,14 +59,37 @@ GIT_CACHE_TTL=3                   # git-info cache TTL (s); 0 = disable (always 
 
 - Two simultaneous bg commands sharing the first 60 chars of their command bind to a single PID. When one completes, both rows prune together.
 - PID reuse: a recycled PID for a long-dead bg row may falsely report "alive". Bounded by `WORKERS_SHELL_MAX_AGE` greying behavior.
-- bg-Bash liveness (when PID acquisition fails) and async-agent liveness are read at draw time by fingerprint/transcript inspection. A `ps` that doesn't list the process (or a non-MSYS `ps -ef` column layout) can false-prune a still-running worker; the grace window mitigates the common case. Primary target is git-bash/MSYS on Windows.
+- bg-Bash liveness (when PID acquisition fails) is read at draw time by fingerprint inspection. A `ps` that doesn't list the process (or a non-MSYS `ps -ef` column layout) can false-prune a still-running worker; the grace window mitigates the common case. Primary target is git-bash/MSYS on Windows.
 
 ### Limitations
 
 - Background shells that crash without being polled (`BashOutput`) may continue to show as running. After `WORKERS_SHELL_MAX_AGE` (default 1h) they are visually dimmed and marked with `?`. Use Claude Code's built-in `/bashes` command for the true running state.
-- Requires `jq` for hook side. Without it, the hook silently no-ops and no worker lines appear; the rest of the statusline is unaffected.
+- The statusline itself needs `jq` 1.7 or newer. The hooks need it too: without it the hook silently no-ops and no worker lines appear.
 - Plugin-only. The Workers section relies on the plugin's tool hooks, so it works only when oh-my-claude is installed as a plugin (marketplace or `--plugin-dir`). Standalone `install.sh` installs get the statusline but no worker rows.
-- For elapsed time to keep updating while the main agent waits on subagents, set `"refreshInterval": 3` in your `statusLine` settings (the `/oh-my-claude:setup` command does this automatically). 3 rather than 1 is deliberate — on Windows a 1-second tick can outpace a render and spawn overlapping statusline processes that contend for the worker-state lock. To keep frequent refreshes affordable, git info is cached for `GIT_CACHE_TTL` seconds (default 3) instead of running git on every tick. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
+- For elapsed time to keep updating while the main agent is idle, set `"refreshInterval": 3` in your `statusLine` settings (the `/oh-my-claude:setup` command does this automatically). 3 rather than 1 is deliberate — on Windows a 1-second tick can outpace a render and spawn overlapping statusline processes that contend for the worker-state lock. To keep frequent refreshes affordable, git info is cached for `GIT_CACHE_TTL` seconds (default 3) instead of running git on every tick. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
+
+## Account
+
+The statusline shows the logged-in Claude account right after the model name. It reads `oauthAccount` from `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set) and caches the result. It works for standalone installs too, because it needs no hooks. On API-key logins there is no `oauthAccount`, so the segment is hidden.
+
+It is **on by default**. Set `ACCOUNT_SHOW=false` when screen sharing.
+
+```bash
+ACCOUNT_SHOW=true                 # show the account segment
+ACCOUNT_FORMAT=name               # name | fullname | email | org
+# ACCOUNT_ICON=$'\xef\x80\x87'    # optional override (default nf-fa-user); "" hides the icon
+```
+
+The minimal, pure and mygo layouts never show an icon. If the chosen field is empty, the first non-empty fallback is used; if all are empty the segment is hidden:
+
+| `ACCOUNT_FORMAT` | Fallback chain                       |
+|------------------|--------------------------------------|
+| `name`           | displayName → fullName → email       |
+| `fullname`       | fullName → displayName → email       |
+| `email`          | email                                |
+| `org`            | organizationName → email             |
+
+An unknown `ACCOUNT_FORMAT` value is treated as `name`.
 
 ## Install
 
@@ -110,11 +130,11 @@ bash oh-my-claude/install.sh
 Restart Claude Code to see the statusline. Note: the standalone install
 provides the statusline only — the [Workers](#workers) section needs the
 plugin's tool hooks, so install via the marketplace or `--plugin-dir` if
-you want live subagent / background-shell rows.
+you want live background-shell rows.
 
 ### Upgrading
 
-If you installed oh-my-claude before 1.1.0, re-run `/oh-my-claude:setup` and accept the prompt to add `refreshInterval` to your `statusLine` settings — it enables the live elapsed-time / workers refresh (git info is cached for `GIT_CACHE_TTL` seconds so the 1-second refresh stays cheap). Existing themes/layouts are unaffected.
+If you installed oh-my-claude before 1.1.0, re-run `/oh-my-claude:setup` and accept the prompt to add `refreshInterval` to your `statusLine` settings — it enables the live background-shell elapsed-time refresh (git info is cached for `GIT_CACHE_TTL` seconds so the 1-second refresh stays cheap). Existing themes/layouts are unaffected.
 
 ## Usage
 

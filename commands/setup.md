@@ -22,7 +22,7 @@ Steps:
           "refreshInterval": 3
         }
         ```
-        The `refreshInterval: 3` keeps elapsed time in the workers section updating while the main agent waits on subagents. (It is deliberately 3, not 1: on Windows a 1-second tick can outpace a render and cause overlapping statusline processes.) If the user prefers no extra timer-driven refreshes, omit it.
+        The `refreshInterval: 3` keeps background-shell elapsed time updating while the main agent is idle. (It is deliberately 3, not 1: on Windows a 1-second tick can outpace a render and cause overlapping statusline processes.) If the user prefers no extra timer-driven refreshes, omit it.
 
    b) If "statusLine" already exists AND its command points to "oh-my-claude/statusline.sh":
       (Treat "statusLine" as the object at the top level of ~/.claude/settings.json.
@@ -39,8 +39,8 @@ Steps:
         - Show the user their current statusLine block.
         - If the AskUserQuestion tool is available, use it with options [Yes, No]
           to ask: "Your oh-my-claude statusLine is missing `refreshInterval`
-          (added in oh-my-claude 1.1.0 — keeps elapsed time in the workers
-          section updating while the main agent waits on subagents; optional).
+          (added in oh-my-claude 1.1.0 — keeps background-shell elapsed time
+          updating while the main agent is idle; optional).
           Add it?"
         - If AskUserQuestion is not available, ask in plain chat text instead.
         - If yes: add ONLY the key `"refreshInterval": 3` into the EXISTING
@@ -49,8 +49,8 @@ Steps:
           insertion — do NOT rewrite or reformat settings.json). Confirm to the
           user that you have added `"refreshInterval": 3` to their
           ~/.claude/settings.json statusLine object, then tell them: the
-          `refreshInterval: 3` keeps elapsed time updating while the main agent
-          waits on subagents; to disable the extra timer-driven refreshes,
+          `refreshInterval: 3` keeps background-shell elapsed time updating while the main agent
+          is idle; to disable the extra timer-driven refreshes,
           remove the `refreshInterval` line.
         - If no: leave ~/.claude/settings.json unchanged and continue.
 
@@ -68,7 +68,7 @@ Steps:
         skip this step (a fresh install already received the full template).
       - Read the bundled template `oh-my-claude.conf` from the plugin/repo
         root.
-      - Compute the missing keys: every `KEY=` assignment in the template
+      - Compute the missing keys: every uncommented `KEY=` assignment in the template (commented example lines are not keys)
         whose KEY does NOT appear in the user conf as an uncommented
         assignment. A key counts as PRESENT if any uncommented line matches
         the key allowing an optional `export ` prefix and whitespace around

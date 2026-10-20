@@ -182,4 +182,36 @@ assert_eq "0" "$rc" "hook exits 0 even with a broken template"
 assert_eq "" "$(cat "$sbox/out.txt")" "no notice on broken template"
 end_test
 
+
+# ============================================================
+# Template / version (Task 5)
+# ============================================================
+
+start_test "T5.1 template leaves icon keys unset"
+out=$(env -u ACCOUNT_ICON -u WORKERS_SHELL_ICON bash -c '. "$1"; printf "%s|%s" "${ACCOUNT_ICON-unset}" "${WORKERS_SHELL_ICON-unset}"' _ "$REPO_ROOT/oh-my-claude.conf")
+assert_eq "unset|unset" "$out" "icon lines must be commented examples"
+end_test
+
+start_test "T5.2 template defines account keys, no removed keys"
+out=$(env -u ACCOUNT_SHOW -u ACCOUNT_FORMAT bash -c '. "$1"; printf "%s|%s" "${ACCOUNT_SHOW-unset}" "${ACCOUNT_FORMAT-unset}"' _ "$REPO_ROOT/oh-my-claude.conf")
+assert_eq "true|name" "$out" "account defaults in template"
+rm_hits=$(grep -c -E 'WORKERS_SHOW_AGENTS|WORKERS_SHOW_TYPE|WORKERS_AGENT_' "$REPO_ROOT/oh-my-claude.conf")
+assert_eq "0" "$rm_hits" "no removed agent keys in template"
+end_test
+
+start_test "T5.3 empty user conf: missing lists account keys, not icons"
+: > "$OMC_STATE_DIR/empty.conf"
+miss=$(omc_missing_conf_keys "$REPO_ROOT/oh-my-claude.conf" "$OMC_STATE_DIR/empty.conf" | tr -d '\r')
+case "$miss" in *ACCOUNT_SHOW*) a=1;; *) a=0;; esac
+case "$miss" in *ACCOUNT_FORMAT*) b=1;; *) b=0;; esac
+case "$miss" in *_ICON*) c=1;; *) c=0;; esac
+assert_eq "1|1|0" "$a|$b|$c" "ACCOUNT_SHOW|ACCOUNT_FORMAT|icon"
+end_test
+
+start_test "T5.4 plugin.json and marketplace.json version is 1.2.0"
+v1=$(jq -j '.version' "$REPO_ROOT/.claude-plugin/plugin.json")
+v2=$(jq -j '.plugins[0].version' "$REPO_ROOT/.claude-plugin/marketplace.json")
+assert_eq "1.2.0|1.2.0" "$v1|$v2" "versions"
+end_test
+
 print_summary

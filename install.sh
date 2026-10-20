@@ -37,7 +37,7 @@ fi
 echo ""
 echo "oh-my-claude installed! Restart Claude Code to see the statusline."
 echo ""
-echo "Note: the Workers section (live subagent / background-shell rows)"
+echo "Note: the Workers section (live background-shell rows)"
 echo "needs the plugin's tool hooks and is not active for standalone installs."
 echo ""
 echo "Recommended: install as plugin for slash commands and Workers:"

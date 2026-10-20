@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.2.0 (2026-10-20)
+
+### Added
+- Account segment: the logged-in account is shown right after the model in all
+  six layouts. It reads `oauthAccount` from `~/.claude.json` (or
+  `$CLAUDE_CONFIG_DIR/.claude.json`), caches the result, and is hidden on
+  API-key logins. Keys: `ACCOUNT_SHOW`, `ACCOUNT_FORMAT`
+  (`name` | `fullname` | `email` | `org`) and `ACCOUNT_ICON`. It is **on by
+  default**; set `ACCOUNT_SHOW=false` when screen sharing. It also works for
+  standalone installs, since it needs no hooks.
+
+### Removed
+- Subagent (agent) rows from the Workers section. The CLI's agent panel below
+  the prompt and `/tasks` cover them. Workers now shows background shells
+  only. The keys `WORKERS_SHOW_AGENTS`, `WORKERS_SHOW_TYPE`,
+  `WORKERS_AGENT_ICON`, `WORKERS_AGENT_QUIET_SEC` and
+  `WORKERS_AGENT_TRANSCRIPT_ROOT` are gone; leftover lines in your conf are
+  harmless.
+
+### Changed
+- Hooks match only `Bash|KillShell` (pre) and `Bash|BashOutput` (post), run a
+  single jq pass, and exit before jq or the lock when `WORKERS_ENABLED` or
+  `WORKERS_SHOW_SHELLS` is not true.
+- The hooks need jq 1.7 or newer (the statusline already did).
+
+### Fixed
+- The conf template no longer blanks the shell icon: `WORKERS_SHELL_ICON` is
+  now a commented example, so the theme default applies. A conf copied from an
+  older template still has `WORKERS_SHELL_ICON=""`; delete that line to get
+  the theme icon.
+
 ## 1.1.2 (2026-10-05)
 
 ### Fixed
