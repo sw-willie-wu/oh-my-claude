@@ -17,13 +17,11 @@ LAYOUT="default"
 
 # Worker defaults (overridden by user's conf if set).
 : "${WORKERS_ENABLED:=true}"
-: "${WORKERS_SHOW_AGENTS:=true}"
 : "${WORKERS_SHOW_SHELLS:=true}"
-: "${WORKERS_SHOW_TYPE:=true}"
 : "${WORKERS_SHOW_ELAPSED:=true}"
 : "${WORKERS_MAX:=5}"
-# WORKERS_AGENT_ICON / WORKERS_SHELL_ICON default in each theme;
-# user conf overrides (use empty string to disable an icon).
+# WORKERS_SHELL_ICON defaults in each theme;
+# user conf overrides (use empty string to disable the icon).
 : "${WORKERS_SHELL_MAX_AGE:=3600}"
 # When `ps` is entirely unusable (no output from any ps form — e.g.
 # Windows/MSYS where ps -efww/-ef/-Wef return nothing), is_shell_alive
@@ -38,15 +36,6 @@ LAYOUT="default"
 # col7 still empty). Without it, a statusline tick inside either gap
 # false-prunes the row.
 : "${WORKERS_PLACEHOLDER_GRACE_SEC:=60}"
-# Async subagents have no completion hook. Liveness is read off the
-# subagent transcript JSONL: if its mtime is within this many seconds the
-# agent is treated as actively running (fast path); otherwise the last
-# transcript line's type/stop_reason decides. Set comfortably above the
-# observed worst-case inter-line gap (real transcripts show 30s+ pauses
-# across slow tool calls) to avoid false-pruning a stalled-but-working
-# agent.
-: "${WORKERS_AGENT_QUIET_SEC:=60}"
-: "${WORKERS_AGENT_TRANSCRIPT_ROOT:=$HOME/.claude/projects}"
 # git_info() result cache TTL (seconds). Makes a low statusLine
 # refreshInterval (recommended: 3) affordable by not running git every
 # tick. 0 = disable caching (always
@@ -159,53 +148,6 @@ is_shell_alive() {
     } END { exit !f }'
 }
 
-# Liveness for async subagents. Their transcript lives at
-#   $WORKERS_AGENT_TRANSCRIPT_ROOT/<wd_id>/<session_id>/subagents/agent-<id>.jsonl
-# where wd_id is the cwd with every non-alphanumeric char replaced by '-'
-# (Claude Code's project-dir slug; identical transform used for the tasks/
-# output path).
-#
-# Fast path: mtime within WORKERS_AGENT_QUIET_SEC → still emitting → alive.
-# Stale mtime: decide on the LAST non-empty transcript line:
-#   - a `user` line (tool_result delivered) → model owes a turn → alive
-#   - an `assistant` line with stop_reason=="tool_use" → tool call pending
-#     → alive
-#   - any other terminal `assistant` line (stop_reason end_turn/max_tokens/
-#     stop_sequence, or the trailing null-stop_reason answer text) → done
-# stop_reason alone is unreliable (a finished agent's last line is usually
-# stop_reason:null answer text, not end_turn), hence the line-type test.
-# Missing JSONL → cannot prove alive → treat as done (the render-side grace
-# window covers the brief pre-creation launch gap). jq absent → cannot parse
-# → degrade to "done" (consistent with the hook side's jq hard-dep stance);
-# the mtime fast-path still protects actively-emitting agents.
-is_agent_alive() {
-  local agent_id="$1"
-  [ -z "$agent_id" ] && return 1
-  local wd_id jsonl
-  wd_id=$(printf '%s' "$WORKDIR_RAW" | sed 's/[^A-Za-z0-9]/-/g')
-  jsonl="${WORKERS_AGENT_TRANSCRIPT_ROOT}/${wd_id}/${SESSION_ID}/subagents/agent-${agent_id}.jsonl"
-  [ -f "$jsonl" ] || return 1
-  local now_ts mtime
-  now_ts=$(date +%s)
-  mtime=$(stat -c %Y "$jsonl" 2>/dev/null)
-  [ -z "$mtime" ] && mtime=$(date -r "$jsonl" +%s 2>/dev/null)
-  if [ -n "$mtime" ] && [ $((now_ts - mtime)) -le "$WORKERS_AGENT_QUIET_SEC" ]; then
-    return 0
-  fi
-  command -v jq >/dev/null 2>&1 || return 1
-  local last type
-  last=$(grep -v '^[[:space:]]*$' "$jsonl" 2>/dev/null | tail -1)
-  [ -z "$last" ] && return 1
-  type=$(printf '%s' "$last" | jq -r '.type // empty' 2>/dev/null)
-  case "$type" in
-    user) return 0 ;;
-    assistant)
-      [ "$(printf '%s' "$last" | jq -r '.message.stop_reason // empty' 2>/dev/null)" = "tool_use" ]
-      ;;
-    *) return 1 ;;
-  esac
-}
-
 # Sweep crash-orphaned temp files (>30s old) from the state dir. A writer
 # SIGKILL'd between creating its temp file and the atomic rename leaves a
 # `*.prune.<pid>` (prune_state_and_emit) or a `gitcache-*.tmp.<pid>`
@@ -236,6 +178,7 @@ prune_state_and_emit() {
   : > "$tmp"
   while IFS=$'\t' read -r kind tool_use_id col3 desc col5 col6 col7 || [ -n "$kind" ]; do
     [ -z "$kind" ] && continue
+    [ "$kind" = "shell" ] || continue   # 1.2.0: only shell rows are tracked; anything else is dropped
     local keep=true
     if [ "$kind" = "shell" ]; then
       if [ -n "$col7" ] && [ "$col7" -gt 0 ] 2>/dev/null; then
@@ -278,42 +221,11 @@ prune_state_and_emit() {
           # sa == 0 → keep (alive)
         fi
       fi
-    elif [ "$kind" = "agent" ]; then
-      if [ -z "$col6" ]; then
-        : # legacy 5-col row → keep (sync agents are removed by Post hook)
-      else
-        # 6-col row: col6 is the '-' placeholder or a real agentId.
-        # Within the grace window from start_unix (col5) always keep —
-        # covers the Pre→Post gap and the brief window before the
-        # subagent JSONL is created. Beyond grace, a still-'-' col6 means
-        # Post never patched it → reap; otherwise liveness-check.
-        local now_ts age within_grace=false
-        now_ts=$(date +%s)
-        if [ -n "$col5" ] && [ "$col5" -gt 0 ] 2>/dev/null; then
-          age=$((now_ts - col5))
-          [ "$age" -le "$WORKERS_PLACEHOLDER_GRACE_SEC" ] && within_grace=true
-        fi
-        if [ "$within_grace" = "true" ]; then
-          : # keep
-        elif [ "$col6" = "-" ]; then
-          keep=false
-        else
-          is_agent_alive "$col6" || keep=false
-        fi
-      fi
     fi
     [ "$keep" = "true" ] || continue
-    if [ "$kind" = "agent" ]; then
-      # Preserve col6 (agentId / '-' placeholder) when present; legacy
-      # 5-col rows have no col6 and stay 5-col.
-      printf '%s\t%s\t%s\t%s\t%s' "$kind" "$tool_use_id" "$col3" "$desc" "$col5" >> "$tmp"
-      [ -n "$col6" ] && printf '\t%s' "$col6" >> "$tmp"
-      printf '\n' >> "$tmp"
-    else
-      printf '%s\t%s\t%s\t%s\t%s\t%s' "$kind" "$tool_use_id" "$col3" "$desc" "$col5" "$col6" >> "$tmp"
-      [ -n "$col7" ] && printf '\t%s' "$col7" >> "$tmp"
-      printf '\n' >> "$tmp"
-    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s' "$kind" "$tool_use_id" "$col3" "$desc" "$col5" "$col6" >> "$tmp"
+    [ -n "$col7" ] && printf '\t%s' "$col7" >> "$tmp"
+    printf '\n' >> "$tmp"
   done < "$sf"
   mv "$tmp" "$sf"
   cat "$sf"
@@ -321,35 +233,12 @@ prune_state_and_emit() {
 
 emit_workers() {
   [ "$WORKERS_ENABLED" != "true" ] && return 0
+  [ "$WORKERS_SHOW_SHELLS" != "true" ] && return 0
   [ -z "$SESSION_ID" ] && return 0
   [ -f "$WORKERS_STATE_FILE" ] || return 0
 
   local rendered
   rendered="$(omc_with_lock prune_state_and_emit)"
-  [ -z "$rendered" ] && return 0
-
-  # Group rows by kind (col1). Group order is decided by the caller (layout)
-  # via positional args; no args → default `agent shell`. Within each group
-  # the original state-file order (== launch order) is preserved — awk is a
-  # stable single pass. Unknown arg tokens never match a row and are inert;
-  # any kind not named in the order is appended last in first-seen order so a
-  # future new kind can't silently vanish. The downstream WORKERS_MAX cap and
-  # width truncation then apply to this regrouped sequence unchanged.
-  # Contract: each arg is a single whitespace-free, backslash-free kind name
-  # (the awk `split(order," ")` and `awk -v` escaping assume this — true for
-  # the only kinds, `agent`/`shell`).
-  [ "$#" -eq 0 ] && set -- agent shell
-  local g order=""
-  for g in "$@"; do
-    case " $order " in *" $g "*) ;; *) order="${order:+$order }$g" ;; esac
-  done
-  rendered="$(printf '%s\n' "$rendered" | awk -F'\t' -v order="$order" '
-    BEGIN { maxr = split(order, ord, " "); for (i = 1; i <= maxr; i++) rank[ord[i]] = i }
-    $0 == "" { next }
-    { k = $1; if (!(k in rank)) rank[k] = ++maxr
-      r = rank[k]; bucket[r] = bucket[r] $0 ORS }
-    END { for (i = 1; i <= maxr; i++) if (i in bucket) printf "%s", bucket[i] }
-  ')"
   [ -z "$rendered" ] && return 0
 
   local now count=0
@@ -358,47 +247,27 @@ emit_workers() {
 
   printf '%s\n' "$rendered" | while IFS=$'\t' read -r kind tool_use_id col3 desc col5 col6 col7; do
     [ -z "$kind" ] && continue
+    [ "$kind" = "shell" ] || continue
     [ "$WORKERS_MAX" != "0" ] && [ "$count" -ge "$WORKERS_MAX" ] && break
 
     local start icon detail elapsed_str body_plain tail_plain total_len
-    case "$kind" in
-      agent)
-        [ "$WORKERS_SHOW_AGENTS" != "true" ] && continue
-        start="$col5"
-        local subagent_type
-        subagent_type="$(unescape_field "$col3")"
-        local desc_u
-        desc_u="$(unescape_field "$desc")"
-        if [ "$WORKERS_SHOW_TYPE" = "true" ] && [ -n "$subagent_type" ]; then
-          detail="${subagent_type}: ${desc_u}"
-        else
-          detail="$desc_u"
-        fi
-        icon="$WORKERS_AGENT_ICON"
-        local color="$C_PRIMARY"
-        ;;
-      shell)
-        [ "$WORKERS_SHOW_SHELLS" != "true" ] && continue
-        start="$col6"
-        local desc_u cmd_u
-        desc_u="$(unescape_field "$desc")"
-        cmd_u="$(unescape_field "$col5")"
-        if [ -n "$desc_u" ]; then
-          detail="${desc_u}: ${cmd_u}"
-        else
-          detail="$cmd_u"
-        fi
-        icon="$WORKERS_SHELL_ICON"
-        local color="$C_ACCENT"
-        ;;
-      *) continue ;;
-    esac
+    start="$col6"
+    local desc_u cmd_u
+    desc_u="$(unescape_field "$desc")"
+    cmd_u="$(unescape_field "$col5")"
+    if [ -n "$desc_u" ]; then
+      detail="${desc_u}: ${cmd_u}"
+    else
+      detail="$cmd_u"
+    fi
+    icon="$WORKERS_SHELL_ICON"
+    local color="$C_ACCENT"
 
     if [ -z "$start" ] || ! [[ "$start" =~ ^[0-9]+$ ]]; then
       continue
     fi
     local age=$((now - start))
-    if [ "$kind" = "shell" ] && [ "$age" -gt "$WORKERS_SHELL_MAX_AGE" ]; then
+    if [ "$age" -gt "$WORKERS_SHELL_MAX_AGE" ]; then
       color="$C_SUBTEXT"
       detail="${detail} ?"
     fi
@@ -484,7 +353,7 @@ git_info() {
 }
 
 # Short-TTL on-disk cache around git_info(), keyed by $PWD (the dir git runs
-# in — NOT $WORKDIR_RAW/current_dir, which are display-only and differ from
+# in — NOT current_dir (display-only), which differs from
 # $PWD under MSYS). Makes a low statusLine refreshInterval affordable. OMC_STATE_DIR
 # is already in scope (set by lib/state-lock.sh, sourced above). Stale-write
 # safety: per-cwd file + atomic tmp+mv (no lock — independent of worker state;
@@ -578,8 +447,6 @@ parse_status_json() {
   MODEL="${MODEL%% (*}"                              # strip " (…)" suffix
   SANITIZED_SID="${SESSION_ID//[^A-Za-z0-9_-]/_}"    # tr -c equivalent, no fork
   WORKERS_STATE_FILE="$HOME/.claude/oh-my-claude/state/state-${SANITIZED_SID}.tsv"
-  WORKDIR_RAW="$DIR"                                 # raw jq value, single backslashes
-  [ -n "${OMC_DEBUG_DUMP_WORKDIR_RAW:-}" ] && printf 'WORKDIR_RAW=%s\n' "$WORKDIR_RAW" >&2
   # Windows path → ~/relative (display). Faithfully reproduces the old
   # `sed 's|\\|/|g; s|C:/Users/[^/]*/|~/|i'`: drive C only (case-insensitive),
   # Users case-insensitive, one segment; other drives unchanged.
