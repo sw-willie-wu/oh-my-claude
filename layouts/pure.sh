@@ -15,6 +15,7 @@ pct_indicator() {
 
 render() {
   local LINE="${C_PRIMARY}${MODEL}${RESET}"
+  [ -n "$ACCOUNT" ] && LINE+="  ${C_SUBTEXT}${ACCOUNT}${RESET}"
   LINE+="  ${C_SECONDARY}${DIR}${RESET}"
 
   if [ -n "$BRANCH" ]; then

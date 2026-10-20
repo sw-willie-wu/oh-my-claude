@@ -27,7 +27,9 @@ render() {
   local BRANCH_ICON=$(printf '\xee\x82\xa0')
 
   # Line 1: ★ model ♪ dir | branch stats
-  local LINE1="${C_PRIMARY}${STAR} ${MODEL}${RESET} ${C_SUBTEXT}${NOTE}${RESET} ${C_SECONDARY}${DIR}${RESET}"
+  local LINE1="${C_PRIMARY}${STAR} ${MODEL}${RESET}"
+  [ -n "$ACCOUNT" ] && LINE1+=" ${C_SUBTEXT}${NOTE}${RESET} ${C_SUBTEXT}${ACCOUNT}${RESET}"
+  LINE1+=" ${C_SUBTEXT}${NOTE}${RESET} ${C_SECONDARY}${DIR}${RESET}"
 
   if [ -n "$BRANCH" ]; then
     LINE1+=" ${C_SUBTEXT}│${RESET} ${C_ACCENT}${BRANCH_ICON} ${BRANCH}${RESET}"

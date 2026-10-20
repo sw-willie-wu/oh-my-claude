@@ -13,6 +13,7 @@ pct_color() {
 
 render() {
   local LINE="${C_PRIMARY}${MODEL}${RESET}"
+  [ -n "$ACCOUNT" ] && LINE+=" ${C_SUBTEXT}|${RESET} ${C_SUBTEXT}${ACCOUNT}${RESET}"
   LINE+=" ${C_SUBTEXT}|${RESET} ${C_SECONDARY}${DIR}${RESET}"
 
   if [ -n "$BRANCH" ]; then

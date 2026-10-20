@@ -24,7 +24,9 @@ render() {
   local FOLDER_ICON=$(printf '\xef\x81\xbb')
   local BRANCH_ICON=$(printf '\xee\x82\xa0')
 
-  local LINE1="${C_PRIMARY}${MODEL}${RESET} ${C_SECONDARY}${FOLDER_ICON} ${DIR}${RESET}"
+  local LINE1="${C_PRIMARY}${MODEL}${RESET}"
+  [ -n "$ACCOUNT" ] && LINE1+=" ${C_SUBTEXT}${ACCOUNT_ICON:+$ACCOUNT_ICON }${ACCOUNT}${RESET}"
+  LINE1+=" ${C_SECONDARY}${FOLDER_ICON} ${DIR}${RESET}"
 
   if [ -n "$BRANCH" ]; then
     LINE1="${LINE1} | ${C_ACCENT}${BRANCH_ICON} ${BRANCH}${RESET}"

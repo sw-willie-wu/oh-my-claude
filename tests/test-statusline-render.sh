@@ -1169,5 +1169,74 @@ end_test
 
 rm -rf "$AT"
 
+
+# ---- Task 4: account segment in layouts ----
+ICON=$'\xef\x80\x87'
+render_layout() {  # $1=layout $2=fixture ('' -> none) $3=raw|strip ; extra conf via $EXTRA_CONF
+  printf 'LAYOUT=%s\n%s\n' "$1" "${EXTRA_CONF:-}" > "$OMC_STATE_DIR/l.conf"
+  local out nogit; nogit=$(mktemp -d)
+  out=$(cd "$nogit" && echo '{"session_id":"render-test-acc","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"}}' \
+    | OMC_CONF="$OMC_STATE_DIR/l.conf" OMC_ACCOUNT_FILE="${2:-$OMC_STATE_DIR/no-such.json}" bash "$STATUSLINE" 2>/dev/null)
+  rm -rf "$nogit"
+  if [ "${3:-strip}" = raw ]; then printf '%s\n' "$out"; else printf '%s\n' "$out" | strip_ansi; fi
+}
+T4D=$(mktemp -d)
+jq -n '{oauthAccount:{displayName:"willie"}}' > "$T4D/w.json"
+touch -d "@$(( $(date +%s) - 10 ))" "$T4D/w.json"
+ARROW_GLYPH=$(printf '\xee\x82\xb0')
+LAYOUTS4="default fancy minimal powerline pure mygo"
+
+start_test "T4.1 account segment placement per layout"
+EXPECT_default="M ${ICON} willie "
+EXPECT_fancy="M · ${ICON} willie · "
+EXPECT_minimal="M | willie | /tmp/d"
+EXPECT_powerline=" ${ICON} willie ${ARROW_GLYPH}  /tmp/d"
+EXPECT_pure="M  willie  /tmp/d"
+EXPECT_mygo="★ M ♪ willie ♪ /tmp/d"
+for l in $LAYOUTS4; do
+  out=$(render_layout "$l" "$T4D/w.json" | head -1)
+  e="EXPECT_$l"
+  case "$out" in *"${!e}"*) ;; *) printf '    FAIL: %s: [%s] lacks [%s]\n' "$l" "$out" "${!e}" >&2; TEST_FAILED=1;; esac
+done
+out=$(render_layout powerline "$T4D/w.json" | head -1)
+case "$out" in " M ${ARROW_GLYPH}  ${ICON} willie ${ARROW_GLYPH}  /tmp/d "*) ;; *) printf '    FAIL: powerline start [%s]\n' "$out" >&2; TEST_FAILED=1;; esac
+end_test
+
+start_test "T4.2 (guard) empty account: identical to ACCOUNT_SHOW=false, no doubled separators"
+for l in $LAYOUTS4; do
+  a=$(render_layout "$l" '' raw); b=$(EXTRA_CONF="ACCOUNT_SHOW=false" render_layout "$l" "$T4D/w.json" raw)
+  assert_eq "$a" "$b" "$l raw equal"
+  case "$a" in *willie*) printf '    FAIL: %s shows willie\n' "$l" >&2; TEST_FAILED=1;; esac
+  s=$(render_layout "$l" '' | head -1)
+  case "$s" in *"| |"*|*"· ·"*|*"♪ ♪"*) printf '    FAIL: %s doubled sep [%s]\n' "$l" "$s" >&2; TEST_FAILED=1;; esac
+done
+end_test
+
+start_test "T4.3 ACCOUNT_ICON empty: no icon, no double space"
+out=$(EXTRA_CONF='ACCOUNT_ICON=""' render_layout default "$T4D/w.json" | head -1)
+case "$out" in "M willie "*) ;; *) printf '    FAIL: [%s]\n' "$out" >&2; TEST_FAILED=1;; esac
+end_test
+
+start_test "T4.4 hostile displayName: ESC stripped, miss==hit, backslash literal"
+jq -n '{oauthAccount:{displayName:"\u001b[31mx\nb\\c\\b"}}' > "$T4D/h.json"
+touch -d "@$(( $(date +%s) - 10 ))" "$T4D/h.json"
+r1=$(render_layout default "$T4D/h.json" raw); r2=$(render_layout default "$T4D/h.json" raw)
+assert_eq "$r1" "$r2" "miss == hit raw"
+case "$r1" in *$'\x1b[31m'*) printf '    FAIL: raw ESC[31m present\n' >&2; TEST_FAILED=1;; esac
+s=$(render_layout default "$T4D/h.json")
+case "$s" in *'[31m'*) ;; *) printf '    FAIL: no literal [31m in [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
+case "$s" in *'/tmp/d'*) ;; *) printf '    FAIL: dir missing\n' >&2; TEST_FAILED=1;; esac
+case "$s" in *'b\c'*) ;; *) printf '    FAIL: b\c missing in [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
+end_test
+
+start_test "T4.5 preview shows account; ACCOUNT_SHOW=false hides it"
+p=$(OMC_DIR="$REPO_ROOT" OMC_CONF=/dev/null bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
+case "$p" in *willie*) ;; *) printf '    FAIL: preview lacks willie\n' >&2; TEST_FAILED=1;; esac
+printf 'ACCOUNT_SHOW=false\n' > "$T4D/p.conf"
+p=$(OMC_DIR="$REPO_ROOT" OMC_CONF="$T4D/p.conf" bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
+case "$p" in *willie*) printf '    FAIL: preview shows willie when disabled\n' >&2; TEST_FAILED=1;; esac
+end_test
+
+rm -rf "$T4D"
 cleanup_render_state
 print_summary
