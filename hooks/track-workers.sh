@@ -26,17 +26,6 @@ sanitize_id() {
   printf '%s' "$1" | tr -c 'A-Za-z0-9-_' '_'
 }
 
-# Extract a top-level field from the payload. Uses jq if available; empty on miss.
-get_field() {
-  local field="$1"
-  if command -v jq >/dev/null 2>&1; then
-    printf '%s' "$PAYLOAD" | jq -r ".${field} // empty" 2>/dev/null
-  else
-    log "jq not installed; track-workers degraded to no-op"
-    return 1
-  fi
-}
-
 state_file_for() {
   local sid="$(sanitize_id "$1")"
   [ -z "$sid" ] && return 1
@@ -120,9 +109,43 @@ update_col() {
   omc_with_lock _do
 }
 
+# Workers display off => nothing to track. Source the conf (best effort, quiet,
+# tolerant of unset vars) and bail out before jq or the lock. session-start is
+# exempt (it only truncates the state file and sweeps old files).
+OMC_CONF="${OMC_CONF:-$HOME/.claude/oh-my-claude.conf}"
+if [ "$ARG" != session-start ] && [ -f "$OMC_CONF" ]; then
+  set +u; . "$OMC_CONF" >/dev/null 2>&1; set -u
+fi
+: "${WORKERS_ENABLED:=true}" "${WORKERS_SHOW_SHELLS:=true}"
+case "$ARG" in pre|post)
+  { [ "$WORKERS_ENABLED" != true ] || [ "$WORKERS_SHOW_SHELLS" != true ]; } && exit 0 ;;
+esac
+
+command -v jq >/dev/null 2>&1 || { log "jq not installed; track-workers no-op"; exit 0; }
+
+# One jq pass for every field the dispatcher needs (NUL-separated, so values
+# may hold newlines/tabs). Every field uses `// ""`/`// false`, never
+# `// empty`, which would emit nothing and shift later fields. jq failure
+# leaves every field empty => SESSION_ID empty => degraded no-op.
+SESSION_ID="" TOOL_NAME="" TOOL_USE_ID="" BG="" DESCRIPTION="" COMMAND=""
+KILL_ID="" OUT_ID="" BG_TASK_ID="" STATUS=""
+{
+  IFS= read -r -d '' SESSION_ID; IFS= read -r -d '' TOOL_NAME
+  IFS= read -r -d '' TOOL_USE_ID; IFS= read -r -d '' BG
+  IFS= read -r -d '' DESCRIPTION; IFS= read -r -d '' COMMAND
+  IFS= read -r -d '' KILL_ID; IFS= read -r -d '' OUT_ID
+  IFS= read -r -d '' BG_TASK_ID; IFS= read -r -d '' STATUS
+} < <(printf '%s' "$PAYLOAD" | jq --raw-output0 '
+    (.session_id? // ""), (.tool_name? // ""), (.tool_use_id? // ""),
+    (.tool_input.run_in_background? // false | tostring),
+    (.tool_input.description? // ""), (.tool_input.command? // ""),
+    (.tool_input.task_id? // .tool_input.shell_id? // ""),
+    (.tool_input.task_id? // .tool_input.agentId? // .tool_input.bash_id? // ""),
+    (.tool_response.backgroundTaskId? // ""), (.tool_response.status? // "")
+    | tostring' 2>/dev/null) || true
+
 case "$ARG" in
   session-start)
-    SESSION_ID="$(get_field session_id || true)"
     if [ -n "$SESSION_ID" ]; then
       SF="$(state_file_for "$SESSION_ID")"
       : > "$SF"
@@ -136,30 +159,11 @@ case "$ARG" in
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'gitcache-*' -type f -mmin +1440 -delete 2>/dev/null
     ;;
   pre)
-    SESSION_ID="$(get_field session_id || true)"
-    TOOL_NAME="$(get_field tool_name || true)"
-    TOOL_USE_ID="$(get_field tool_use_id || true)"
     [ -z "$SESSION_ID" ] && exit 0
     SF="$(state_file_for "$SESSION_ID")" || exit 0
     case "$TOOL_NAME" in
-      Task|Agent)
-        SUBAGENT_TYPE="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)"
-        DESCRIPTION="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.description // empty' 2>/dev/null)"
-        # col6 is a placeholder ('-') reserved for the agentId, which the
-        # Post hook patches in for async launches. Sync calls are removed
-        # wholesale by Post and never see col6 patched.
-        ROW=$(printf 'agent\t%s\t%s\t%s\t%s\t-' \
-          "$TOOL_USE_ID" \
-          "$(escape_field "$SUBAGENT_TYPE")" \
-          "$(escape_field "$DESCRIPTION")" \
-          "$(now_unix)")
-        append_row "$SF" "$ROW"
-        ;;
       Bash)
-        BG=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.run_in_background // false' 2>/dev/null)
         if [ "$BG" = "true" ]; then
-          DESCRIPTION="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.description // empty' 2>/dev/null)"
-          COMMAND="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.command // empty' 2>/dev/null)"
           ROW=$(printf 'shell\t%s\t-\t%s\t%s\t%s' \
             "$TOOL_USE_ID" \
             "$(escape_field "$DESCRIPTION")" \
@@ -169,47 +173,20 @@ case "$ARG" in
         fi
         ;;
       KillShell)
-        ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.task_id // .tool_input.shell_id // empty' 2>/dev/null)
-        [ -n "$ID" ] && remove_by_kind "$SF" shell 3 "$ID"
+        [ -n "$KILL_ID" ] && remove_by_kind "$SF" shell 3 "$KILL_ID"
         ;;
     esac
     ;;
   post)
-    SESSION_ID="$(get_field session_id || true)"
-    TOOL_NAME="$(get_field tool_name || true)"
-    TOOL_USE_ID="$(get_field tool_use_id || true)"
     [ -z "$SESSION_ID" ] && exit 0
     SF="$(state_file_for "$SESSION_ID")" || exit 0
     case "$TOOL_NAME" in
-      Task|Agent)
-        # Async Task|Agent fires PostToolUse at launch (not subagent
-        # completion). Patch col6 with tool_response.agentId so the render
-        # side can liveness-check the subagent; sync calls complete here and
-        # are removed outright.
-        BG=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.run_in_background // false' 2>/dev/null)
-        if [ "$BG" = "true" ]; then
-          AGENT_ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.agentId // empty' 2>/dev/null)
-          if [ -n "$AGENT_ID" ] && [ -n "$TOOL_USE_ID" ]; then
-            update_col "$SF" 2 "$TOOL_USE_ID" 6 "$AGENT_ID"
-          else
-            # col6 stays '-': the render side will reap this row as an
-            # orphaned placeholder once the grace window expires. Log so
-            # the (rare) lost-agentId case is diagnosable rather than a
-            # silent vanish.
-            log "async Agent post: no agentId (tuid='$TOOL_USE_ID'); row stays placeholder and will be reaped at grace"
-          fi
-        elif [ -n "$TOOL_USE_ID" ]; then
-          remove_by_kind "$SF" agent 2 "$TOOL_USE_ID"
-        fi
-        ;;
       Bash)
-        BG_TASK_ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.backgroundTaskId // empty' 2>/dev/null)
         if [ -n "$BG_TASK_ID" ] && [ -n "$TOOL_USE_ID" ]; then
           update_col "$SF" 2 "$TOOL_USE_ID" 3 "$BG_TASK_ID"
           # Acquire PID by ps fingerprint (best-effort fast path). Failure
           # -> PID=0; render side (is_shell_alive) re-checks liveness by
           # command fingerprint at draw time.
-          COMMAND="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.command // empty' 2>/dev/null)"
           FP="${COMMAND:0:60}"
           PID=0
           if command -v ps >/dev/null 2>&1 && [ -n "$FP" ]; then
@@ -234,12 +211,10 @@ case "$ARG" in
         fi
         ;;
       BashOutput)
-        ID=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.task_id // .tool_input.agentId // .tool_input.bash_id // empty' 2>/dev/null)
-        STATUS=$(printf '%s' "$PAYLOAD" | jq -r '.tool_response.status // empty' 2>/dev/null)
         # Terminal statuses (verified primary + defensive fallback set).
         case "$STATUS" in
           completed|failed|killed|exited|stopped|terminated)
-            [ -n "$ID" ] && remove_by_kind "$SF" shell 3 "$ID"
+            [ -n "$OUT_ID" ] && remove_by_kind "$SF" shell 3 "$OUT_ID"
             ;;
         esac
         ;;
