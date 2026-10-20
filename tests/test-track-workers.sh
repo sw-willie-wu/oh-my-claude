@@ -25,121 +25,6 @@ STATE_FILE="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
 assert_line_count "$STATE_FILE" 0 "fresh state file should be empty"
 end_test
 
-start_test "PreToolUse(Task) appends agent row"
-SESSION_ID="test-session-002"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-: > "$SF"  # ensure empty start
-cat <<'EOF' | OMC_STATE_DIR="$OMC_STATE_DIR" bash "$TRACK_WORKERS" pre
-{
-  "session_id": "test-session-002",
-  "hook_event_name": "PreToolUse",
-  "tool_name": "Task",
-  "tool_use_id": "toolu_a1",
-  "tool_input": {
-    "subagent_type": "claude-code-guide",
-    "description": "research statusline feature",
-    "prompt": "..."
-  }
-}
-EOF
-assert_line_count "$SF" 1 "expected one agent row"
-assert_file_contains "$SF" "agent	toolu_a1	claude-code-guide	research statusline feature"
-end_test
-
-start_test "PostToolUse(Task) removes agent row"
-SESSION_ID="test-session-003"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-printf 'agent\ttoolu_a1\tgeneral-purpose\ttest description\t1735000000\n' > "$SF"
-cat <<'EOF' | bash "$TRACK_WORKERS" post
-{
-  "session_id": "test-session-003",
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Task",
-  "tool_use_id": "toolu_a1",
-  "tool_input": {},
-  "tool_response": {}
-}
-EOF
-assert_line_count "$SF" 0 "expected row to be removed"
-end_test
-
-start_test "PostToolUse(Task, run_in_background:true) keeps agent row (async launch)"
-SESSION_ID="test-session-003-async"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-printf 'agent\ttoolu_a2\tgeneral-purpose\tasync description\t1735000000\n' > "$SF"
-cat <<'EOF' | bash "$TRACK_WORKERS" post
-{
-  "session_id": "test-session-003-async",
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Task",
-  "tool_use_id": "toolu_a2",
-  "tool_input": { "run_in_background": true },
-  "tool_response": {}
-}
-EOF
-assert_line_count "$SF" 1 "async Task post must not remove the row (subagent still running in background)"
-assert_file_contains "$SF" "agent	toolu_a2	general-purpose	async description"
-end_test
-
-# Claude Code renamed the Task tool to Agent at some point after the original
-# spec was written (verified live: tool_name="Agent" arrives at the hook even
-# though the legacy matcher still says "Task").
-start_test "PreToolUse(Agent) appends agent row (current tool_name)"
-SESSION_ID="test-session-agent-pre"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-: > "$SF"
-cat <<'EOF' | bash "$TRACK_WORKERS" pre
-{
-  "session_id": "test-session-agent-pre",
-  "hook_event_name": "PreToolUse",
-  "tool_name": "Agent",
-  "tool_use_id": "toolu_ag1",
-  "tool_input": {
-    "subagent_type": "Explore",
-    "description": "agent rename probe",
-    "prompt": "..."
-  }
-}
-EOF
-assert_line_count "$SF" 1 "expected one agent row for tool_name=Agent"
-assert_file_contains "$SF" "agent	toolu_ag1	Explore	agent rename probe"
-end_test
-
-start_test "PostToolUse(Agent) sync removes agent row"
-SESSION_ID="test-session-agent-post-sync"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-printf 'agent\ttoolu_ag2\tgeneral-purpose\tsync agent\t1735000000\n' > "$SF"
-cat <<'EOF' | bash "$TRACK_WORKERS" post
-{
-  "session_id": "test-session-agent-post-sync",
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Agent",
-  "tool_use_id": "toolu_ag2",
-  "tool_input": {},
-  "tool_response": {}
-}
-EOF
-assert_line_count "$SF" 0 "sync Agent post should remove the row"
-end_test
-
-start_test "PostToolUse(Agent, run_in_background:true) keeps agent row"
-SESSION_ID="test-session-agent-post-async"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-printf 'agent\ttoolu_ag3\tExplore\tasync agent\t1735000000\n' > "$SF"
-cat <<'EOF' | bash "$TRACK_WORKERS" post
-{
-  "session_id": "test-session-agent-post-async",
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Agent",
-  "tool_use_id": "toolu_ag3",
-  "tool_input": { "run_in_background": true },
-  "tool_response": {}
-}
-EOF
-assert_line_count "$SF" 1 "async Agent post must not remove the row"
-assert_file_contains "$SF" "agent	toolu_ag3	Explore	async agent"
-end_test
-
 start_test "PreToolUse(Bash, run_in_background:true) appends shell row"
 SESSION_ID="test-session-004"
 SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
@@ -337,9 +222,15 @@ echo "{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"SessionStart\",\"sou
 [ ! -f "$GC_OLD" ] || { printf '    FAIL: stale gitcache file should have been deleted\n' >&2; TEST_FAILED=1; }
 [ ! -f "$GC_TMP_OLD" ] || { printf '    FAIL: stale gitcache .tmp leftover should have been deleted\n' >&2; TEST_FAILED=1; }
 [ -f "$GC_FRESH" ] || { printf '    FAIL: fresh gitcache file unexpectedly deleted\n' >&2; TEST_FAILED=1; }
+GC_ACC_OLD="$OMC_STATE_DIR/account-some-src"; GC_ACC_NEW="$OMC_STATE_DIR/account-fresh-src"
+printf x > "$GC_ACC_OLD"; printf x > "$GC_ACC_NEW"; touch -t "$GC_STALE_TS" "$GC_ACC_OLD"
+echo "{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" \
+  | bash "$TRACK_WORKERS" session-start
+[ ! -f "$GC_ACC_OLD" ] || { printf '    FAIL: stale account-* file should have been deleted\n' >&2; TEST_FAILED=1; }
+[ -f "$GC_ACC_NEW" ] || { printf '    FAIL: fresh account-* file unexpectedly deleted\n' >&2; TEST_FAILED=1; }
 end_test
 
-start_test "10 concurrent PreToolUse(Task) writers all land"
+start_test "10 concurrent PreToolUse(Bash bg) writers all land"
 SESSION_ID="test-session-concurrent"
 SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
 : > "$SF"
@@ -348,9 +239,9 @@ for i in $(seq 1 10); do
 {
   "session_id": "$SESSION_ID",
   "hook_event_name": "PreToolUse",
-  "tool_name": "Task",
+  "tool_name": "Bash",
   "tool_use_id": "toolu_c${i}",
-  "tool_input": { "subagent_type": "general-purpose", "description": "task ${i}" }
+  "tool_input": { "command": "sleep ${i}", "description": "task ${i}", "run_in_background": true }
 }
 EOF
 done
@@ -373,9 +264,9 @@ cat <<EOF | bash "$TRACK_WORKERS" pre
 {
   "session_id": "$SESSION_ID",
   "hook_event_name": "PreToolUse",
-  "tool_name": "Task",
+  "tool_name": "Bash",
   "tool_use_id": "toolu_stale",
-  "tool_input": { "subagent_type": "Plan", "description": "stale lock victim" }
+  "tool_input": { "command": "sleep 1", "description": "stale lock victim", "run_in_background": true }
 }
 EOF
 # The line count IS the guarantee: a row was written ⇒ the 30s-stale lock was
@@ -404,9 +295,9 @@ cat <<EOF | bash "$TRACK_WORKERS" pre
 {
   "session_id": "$SESSION_ID",
   "hook_event_name": "PreToolUse",
-  "tool_name": "Task",
+  "tool_name": "Bash",
   "tool_use_id": "toolu_deadpid",
-  "tool_input": { "subagent_type": "Plan", "description": "dead-holder victim" }
+  "tool_input": { "command": "sleep 1", "description": "dead-holder victim", "run_in_background": true }
 }
 EOF
 assert_line_count "$SF" 1 "writer should reclaim a lock whose holder PID is dead"
@@ -421,10 +312,11 @@ cat <<'EOF' | bash "$TRACK_WORKERS" pre
 {
   "session_id": "test-session-escape",
   "hook_event_name": "PreToolUse",
-  "tool_name": "Task",
+  "tool_name": "Bash",
   "tool_use_id": "toolu_esc",
   "tool_input": {
-    "subagent_type": "general-purpose",
+    "command": "sleep 1",
+    "run_in_background": true,
     "description": "a\tb\nc\\d"
   }
 }
@@ -434,6 +326,10 @@ assert_line_count "$SF" 1 "escape must keep row to single line"
 # State file should NOT contain a raw embedded newline inside the description (it'd split the row).
 RAW_LINES=$(awk 'END {print NR}' "$SF")
 assert_eq "1" "$RAW_LINES" "row must be one TSV line after escaping"
+# Shell row description is column 4; \t and \\ escapes present, round-trips.
+DESC_COL=$(awk -F'\t' '{print $4}' "$SF" | tr -d '\r')
+assert_eq 'a\tb\nc\\d' "$DESC_COL" "description column holds the escaped form"
+assert_eq "$(printf 'a\tb\nc\\d')" "$(printf '%b' "$DESC_COL")" "unescaping round-trips"
 end_test
 
 start_test "unescape_field reverses escape_field"
@@ -563,16 +459,6 @@ end_test
 # Bug A: Claude Code on Windows fires PreToolUse hooks twice for the same
 # tool_use_id (verified live via instrumented hook). The dispatcher must
 # absorb duplicates without emitting a second row.
-start_test "PreToolUse(Agent) fired twice for same tool_use_id appends only one row (dedup)"
-SESSION_ID="test-session-dedup-agent"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-: > "$SF"
-PAYLOAD='{"session_id":"test-session-dedup-agent","hook_event_name":"PreToolUse","tool_name":"Agent","tool_use_id":"toolu_dedup1","tool_input":{"subagent_type":"Explore","description":"d","prompt":"x","run_in_background":true}}'
-printf '%s' "$PAYLOAD" | bash "$TRACK_WORKERS" pre
-printf '%s' "$PAYLOAD" | bash "$TRACK_WORKERS" pre
-assert_line_count "$SF" 1 "second identical Pre must not append a second row"
-end_test
-
 start_test "PreToolUse(Bash bg) fired twice for same tool_use_id appends only one row (dedup)"
 SESSION_ID="test-session-dedup-bash"
 SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
@@ -583,122 +469,101 @@ printf '%s' "$PAYLOAD" | bash "$TRACK_WORKERS" pre
 assert_line_count "$SF" 1 "second identical bg-Bash Pre must not append a second row"
 end_test
 
-start_test "PreToolUse(Agent) different tool_use_id appends both rows (regression guard)"
+start_test "PreToolUse(Bash bg) different tool_use_id appends both rows (regression guard)"
 SESSION_ID="test-session-dedup-distinct"
 SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
 : > "$SF"
-printf '%s' '{"session_id":"test-session-dedup-distinct","hook_event_name":"PreToolUse","tool_name":"Agent","tool_use_id":"toolu_d1","tool_input":{"subagent_type":"Explore","description":"a","prompt":"x","run_in_background":true}}' \
+printf '%s' '{"session_id":"test-session-dedup-distinct","hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_d1","tool_input":{"command":"sleep 1","description":"a","run_in_background":true}}' \
   | bash "$TRACK_WORKERS" pre
-printf '%s' '{"session_id":"test-session-dedup-distinct","hook_event_name":"PreToolUse","tool_name":"Agent","tool_use_id":"toolu_d2","tool_input":{"subagent_type":"Explore","description":"b","prompt":"x","run_in_background":true}}' \
+printf '%s' '{"session_id":"test-session-dedup-distinct","hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_d2","tool_input":{"command":"sleep 2","description":"b","run_in_background":true}}' \
   | bash "$TRACK_WORKERS" pre
 assert_line_count "$SF" 2 "distinct tool_use_ids must each append"
 end_test
 
-# --- Task 2: Pre Task|Agent writes a 6-col row with col6=- placeholder ---
-start_test "PreToolUse(Agent) writes 6-col row with col6=- placeholder"
-SESSION_ID="test-session-agent-6col"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-: > "$SF"
-cat <<'EOF' | bash "$TRACK_WORKERS" pre
-{
-  "session_id": "test-session-agent-6col",
-  "hook_event_name": "PreToolUse",
-  "tool_name": "Agent",
-  "tool_use_id": "toolu_6c1",
-  "tool_input": {
-    "subagent_type": "Explore",
-    "description": "six col probe",
-    "prompt": "x",
-    "run_in_background": true
-  }
-}
-EOF
-COL_COUNT=$(awk -F'\t' '{print NF}' "$SF")
-assert_eq "6" "$COL_COUNT" "Pre Agent row must have 6 columns"
-COL6=$(awk -F'\t' '{print $6}' "$SF")
-assert_eq "-" "$COL6" "col6 must be the '-' placeholder"
-assert_file_contains "$SF" "agent	toolu_6c1	Explore	six col probe"
+# --- 1.2.0: agent tracking removed, one jq pass, early exit when disabled ---
+SHIMROOT="$(mktemp -d -t omc-shim-XXXXXX)"
+SHIM="$SHIMROOT/bin"
+LOG="$SHIMROOT/jq.log"
+make_jq_shim "$SHIM" "$LOG"
+BG_BASH_PAYLOAD='{"session_id":"t1-sess","hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_t1","tool_input":{"command":"sleep 5","description":"d","run_in_background":true}}'
+FG_BASH_PAYLOAD='{"session_id":"t1-sess","hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_t1fg","tool_input":{"command":"ls","description":"d"}}'
+POST_BASH_PAYLOAD='{"session_id":"t1-sess","hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"toolu_t1","tool_input":{"command":"sleep 5","run_in_background":true},"tool_response":{"backgroundTaskId":"bash_t1"}}'
+
+start_test "hooks.json: no matcher token is exactly Agent or Task"
+toks=$(jq -r '.hooks[][]?.matcher // empty' "$REPO_ROOT/hooks/hooks.json" | tr -d '\r' | tr '|' '\n')
+assert_eq "" "$(printf '%s\n' "$toks" | grep -xE 'Agent|Task')" "agent matchers removed"
 end_test
 
-start_test "PreToolUse(Task) legacy tool_name also writes 6-col row"
-SESSION_ID="test-session-task-6col"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-: > "$SF"
-cat <<'EOF' | bash "$TRACK_WORKERS" pre
-{
-  "session_id": "test-session-task-6col",
-  "hook_event_name": "PreToolUse",
-  "tool_name": "Task",
-  "tool_use_id": "toolu_6c2",
-  "tool_input": { "subagent_type": "general-purpose", "description": "legacy probe", "prompt": "x" }
-}
-EOF
-assert_eq "6" "$(awk -F'\t' '{print NF}' "$SF")" "Pre Task row must have 6 columns"
-assert_eq "-" "$(awk -F'\t' '{print $6}' "$SF")" "col6 must be the '-' placeholder"
+start_test "pre/post Agent payload leaves state file unchanged"
+SF="$OMC_STATE_DIR/state-t1-sess.tsv"
+printf 'shell\ttoolu_seed\tbash_seed\tdesc\tsleep 9\t1735000000\t0\n' > "$SF"
+cp "$SF" "$OMC_STATE_DIR/seed.copy"
+printf '%s' '{"session_id":"t1-sess","tool_name":"Agent","tool_use_id":"toolu_ag","tool_input":{"subagent_type":"Explore","description":"x","run_in_background":true},"tool_response":{"agentId":"a_1","status":"completed"}}' | bash "$TRACK_WORKERS" pre
+printf '%s' '{"session_id":"t1-sess","tool_name":"Agent","tool_use_id":"toolu_ag","tool_input":{"subagent_type":"Explore","description":"x","run_in_background":true},"tool_response":{"agentId":"a_1","status":"completed"}}' | bash "$TRACK_WORKERS" post
+cmp -s "$SF" "$OMC_STATE_DIR/seed.copy" || { printf '    FAIL: state file changed by Agent payload\n' >&2; TEST_FAILED=1; }
 end_test
 
-# --- Task 3: Post Task|Agent async patches col6 with tool_response.agentId ---
-start_test "PostToolUse(Agent, run_in_background:true) patches col6 with agentId"
-SESSION_ID="test-session-agent-patch"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-printf 'agent\ttoolu_p1\tExplore\tasync probe\t1735000000\t-\n' > "$SF"
-cat <<'EOF' | bash "$TRACK_WORKERS" post
-{
-  "session_id": "test-session-agent-patch",
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Agent",
-  "tool_use_id": "toolu_p1",
-  "tool_input": { "run_in_background": true },
-  "tool_response": {
-    "isAsync": true,
-    "status": "async_launched",
-    "agentId": "a_PATCH_ME",
-    "outputFile": "/dev/null",
-    "canReadOutputFile": true
-  }
-}
-EOF
-assert_eq "a_PATCH_ME" "$(awk -F'\t' '{print $6}' "$SF")" "col6 must be patched to the agentId"
-assert_line_count "$SF" 1 "async post must keep the row"
-end_test
+for FLAG in WORKERS_ENABLED WORKERS_SHOW_SHELLS; do
+  start_test "$FLAG=false: pre bg-Bash writes no row, zero jq calls"
+  SF="$OMC_STATE_DIR/state-t1-sess.tsv"
+  conf="$OMC_STATE_DIR/c.conf"; printf '%s=false\n' "$FLAG" > "$conf"
+  : > "$LOG"
+  PATH="$SHIM:$PATH" OMC_CONF="$conf" bash "$TRACK_WORKERS" pre <<< "$BG_BASH_PAYLOAD"
+  assert_line_count "$SF" 0 "no row written"
+  assert_eq 0 "$(shim_count "$LOG")" "zero jq calls"
+  end_test
 
-start_test "PostToolUse(Agent) sync still removes the 6-col row"
-SESSION_ID="test-session-agent-sync6"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-printf 'agent\ttoolu_s6\tExplore\tsync probe\t1735000000\t-\n' > "$SF"
-cat <<'EOF' | bash "$TRACK_WORKERS" post
-{
-  "session_id": "test-session-agent-sync6",
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Agent",
-  "tool_use_id": "toolu_s6",
-  "tool_input": {},
-  "tool_response": { "status": "completed", "agentId": "a_ignored" }
-}
-EOF
-assert_line_count "$SF" 0 "sync Agent post must still remove the row"
-end_test
+  start_test "$FLAG=false: post leaves placeholder row byte-identical, zero jq calls"
+  SF="$OMC_STATE_DIR/state-t1-sess.tsv"
+  conf="$OMC_STATE_DIR/c.conf"; printf '%s=false\n' "$FLAG" > "$conf"
+  printf 'shell\ttoolu_t1\t-\td\tsleep 5\t1735000000\t-\n' > "$SF"
+  cp "$SF" "$OMC_STATE_DIR/seed.copy"
+  : > "$LOG"
+  PATH="$SHIM:$PATH" OMC_CONF="$conf" bash "$TRACK_WORKERS" post <<< "$POST_BASH_PAYLOAD"
+  cmp -s "$SF" "$OMC_STATE_DIR/seed.copy" || { printf '    FAIL: state file changed\n' >&2; TEST_FAILED=1; }
+  assert_eq 0 "$(shim_count "$LOG")" "zero jq calls"
+  end_test
+done
 
-# --- I2: async post with no agentId keeps placeholder + logs (diagnosable) ---
-start_test "PostToolUse(Agent async) without agentId leaves col6=- and logs"
-SESSION_ID="test-session-agent-noid"
-SF="$OMC_STATE_DIR/state-${SESSION_ID}.tsv"
-LOG="$OMC_STATE_DIR/track-workers.log"
+start_test "foreground pre Bash: exactly one jq call, OMC_STATE_DIR not created"
+ABSENT="$(dirname "$OMC_STATE_DIR")/omc-absent-$$"
 : > "$LOG"
-printf 'agent\ttoolu_ni\tExplore\tno id probe\t1735000000\t-\n' > "$SF"
-cat <<'EOF' | OMC_STATE_DIR="$OMC_STATE_DIR" OMC_LOG_FILE="$OMC_STATE_DIR/track-workers.log" bash "$TRACK_WORKERS" post
-{
-  "session_id": "test-session-agent-noid",
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Agent",
-  "tool_use_id": "toolu_ni",
-  "tool_input": { "run_in_background": true },
-  "tool_response": { "isAsync": true, "status": "async_launched" }
-}
-EOF
-assert_eq "-" "$(awk -F'\t' '{print $6}' "$SF")" "col6 stays '-' when agentId absent"
-assert_line_count "$SF" 1 "row must remain (reaped later by render grace)"
-assert_file_contains "$LOG" "no agentId" "missing-agentId case must be logged"
+PATH="$SHIM:$PATH" OMC_STATE_DIR="$ABSENT" bash "$TRACK_WORKERS" pre <<< "$FG_BASH_PAYLOAD"
+assert_eq 1 "$(shim_count "$LOG")" "exactly one jq call"
+[ ! -e "$ABSENT" ] || { printf '    FAIL: state dir was created\n' >&2; TEST_FAILED=1; }
+rm -rf "$ABSENT"
 end_test
+
+start_test "conf with unset var + stdout echo: hook exits 0, empty stdout, row written"
+SF="$OMC_STATE_DIR/state-t1-sess.tsv"
+: > "$SF"
+conf="$OMC_STATE_DIR/c.conf"; printf 'X=$UNSET_VAR_XYZ; echo noisy\n' > "$conf"
+out=$(OMC_CONF="$conf" bash "$TRACK_WORKERS" pre <<< "$BG_BASH_PAYLOAD"); rc=$?
+assert_eq 0 "$rc" "exit 0"
+assert_eq "" "$out" "empty stdout"
+assert_line_count "$SF" 1 "row written with defaults enabled"
+end_test
+
+start_test "quoted and export-form disable both short-circuit"
+SF="$OMC_STATE_DIR/state-t1-sess.tsv"
+conf="$OMC_STATE_DIR/c.conf"
+for line in 'WORKERS_ENABLED="false"' 'export WORKERS_ENABLED=false'; do
+  printf '%s\n' "$line" > "$conf"
+  : > "$SF"; : > "$LOG"
+  PATH="$SHIM:$PATH" OMC_CONF="$conf" bash "$TRACK_WORKERS" pre <<< "$BG_BASH_PAYLOAD"
+  assert_line_count "$SF" 0 "no row for: $line"
+  assert_eq 0 "$(shim_count "$LOG")" "zero jq calls for: $line"
+done
+end_test
+
+start_test "empty stdin: pre/post/session-start exit 0, no stderr"
+for a in pre post session-start; do
+  err=$(bash "$TRACK_WORKERS" "$a" </dev/null 2>&1 >/dev/null); rc=$?
+  assert_eq "" "$err" "no stderr for $a"
+  assert_eq 0 "$rc" "exit 0 for $a"
+done
+end_test
+
+rm -rf "$SHIMROOT"
 
 print_summary
