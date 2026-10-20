@@ -91,6 +91,14 @@ The minimal, pure and mygo layouts never show an icon. If the chosen field is em
 
 An unknown `ACCOUNT_FORMAT` value is treated as `name`.
 
+## Model context tag
+
+When Claude Code reports a context window of 1,000,000 tokens or more, the model name gets a tag such as `Opus 5.5 [1M]` (2,000,000 gives `[2M]`; sizes in between round down). A 200K session shows no tag. Set `MODEL_CTX_TAG=false` to turn it off.
+
+```bash
+MODEL_CTX_TAG=true                # append [1M] to the model name for 1M+ contexts
+```
+
 ## Install
 
 ### Via Marketplace (recommended)
@@ -208,7 +216,7 @@ Replace `R;G;B` with your color values (0-255). The first comment line is used a
 
 Add a `.sh` file to `layouts/` that defines a `render()` function. Available variables:
 
-- `$MODEL`, `$DIR`, `$BRANCH` - basic info
+- `$MODEL`, `$DIR`, `$BRANCH` - basic info (`$MODEL` may end in ` [NM]`, e.g. ` [1M]`, for large context windows)
 - `$ADD_FILES`, `$MOD_FILES`, `$DEL_FILES` - git file counts
 - `$LINES_ADD`, `$LINES_DEL` - git line counts
 - `$CTX_PCT`, `$RATE5_PCT`, `$RATE7_PCT` - usage percentages

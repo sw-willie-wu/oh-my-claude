@@ -10,6 +10,9 @@
   (`name` | `fullname` | `email` | `org`) and `ACCOUNT_ICON`. It is **on by
   default**; set `ACCOUNT_SHOW=false` when screen sharing. It also works for
   standalone installs, since it needs no hooks.
+- Model context tag: the model name gets ` [1M]` (or `[2M]`, ...) when the
+  context window is 1,000,000 tokens or more, in all six layouts. A 200K
+  session shows no tag. Set `MODEL_CTX_TAG=false` to turn it off.
 
 ### Removed
 - Subagent (agent) rows from the Workers section. The CLI's agent panel below

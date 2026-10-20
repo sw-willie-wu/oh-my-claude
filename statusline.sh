@@ -44,6 +44,8 @@ LAYOUT="default"
 # Account segment (spec §3.1). ACCOUNT_ICON is dash form: explicit "" disables it.
 : "${ACCOUNT_SHOW:=true}"
 : "${ACCOUNT_FORMAT:=name}"
+# Model context tag (spec §8): append " [NM]" to MODEL when context size >= 1M.
+: "${MODEL_CTX_TAG:=true}"
 ACCOUNT_ICON="${ACCOUNT_ICON-$'\xef\x80\x87'}"
 
 LIB_DIR="${OMC_DIR}/lib"
@@ -417,7 +419,7 @@ cached_git_info() {
 # effects) so the lib loader can test it. §8.3 Task B: ONE `jq --raw-output0`
 # pass replaces ~30 `echo|grep -o` forks (spec §4.1–§4.4). jq is a render-side
 # hard dep (already a hook-side one); on jq absent/too-old/malformed input the
-# 8 reads leave SESSION_ID empty and the render gate emits the §4.6 notice.
+# 9 reads leave SESSION_ID empty and the render gate emits the §4.6 notice.
 # SANITIZED_SID/WORKERS_STATE_FILE are kept here as fork-free var assignments
 # (no I/O); the gate's empty-SESSION_ID guard exits before anything WRITES
 # state-*.tsv, preserving spec §4.6 (deviation noted in spec §10).
@@ -431,9 +433,10 @@ parse_status_json() {
     ((.rate_limits.five_hour.used_percentage // "") | (if type=="number" then floor else . end)),
     (.rate_limits.five_hour.resets_at // ""),
     ((.rate_limits.seven_day.used_percentage // "") | (if type=="number" then floor else . end)),
-    (.rate_limits.seven_day.resets_at // "")'
+    (.rate_limits.seven_day.resets_at // ""),
+    ((.context_window.context_window_size // 0) | (if type=="number" and . >= 0 and . < 1e15 then floor else 0 end))'
   SESSION_ID=""; MODEL=""; DIR=""; CTX_PCT=""
-  RATE5_PCT=""; RATE5_RESET=""; RATE7_PCT=""; RATE7_RESET=""
+  RATE5_PCT=""; RATE5_RESET=""; RATE7_PCT=""; RATE7_RESET=""; CTX_SIZE=""
   # --raw-output0: raw scalars (backslashes stay SINGLE — no @tsv re-doubling)
   # NUL-delimited (no \n, so winget jq's CRLF line-xlate never runs). Not
   # chained with ||/&& (spec §4.7): a normal "rate_limits absent" payload
@@ -447,6 +450,7 @@ parse_status_json() {
     IFS= read -r -d '' RATE5_RESET
     IFS= read -r -d '' RATE7_PCT
     IFS= read -r -d '' RATE7_RESET
+    IFS= read -r -d '' CTX_SIZE
   } < <(printf '%s' "$input" | jq --raw-output0 "$_jqfilter")
   MODEL="${MODEL%% (*}"                              # strip " (…)" suffix
   SANITIZED_SID="${SESSION_ID//[^A-Za-z0-9_-]/_}"    # tr -c equivalent, no fork
@@ -457,6 +461,17 @@ parse_status_json() {
   DIR="${DIR//\\//}"
   if [[ "$DIR" =~ ^[Cc]:/[Uu][Ss][Ee][Rr][Ss]/[^/]*/(.*)$ ]]; then
     DIR="~/${BASH_REMATCH[1]}"
+  fi
+}
+
+# Model context tag (spec §8.2). Pure, builtin-only, `set -u` safe. The regex
+# check precedes any arithmetic so CTX_SIZE is never evaluated unchecked.
+apply_model_ctx_tag() {
+  [ "${MODEL_CTX_TAG-}" = true ] || return 0
+  [ -n "${MODEL-}" ] || return 0
+  [[ ${CTX_SIZE-} =~ ^[1-9][0-9]{0,14}$ ]] || return 0
+  if [ "$CTX_SIZE" -ge 1000000 ]; then
+    MODEL="${MODEL} [$((CTX_SIZE / 1000000))M]"
   fi
 }
 
@@ -535,6 +550,7 @@ if [ -z "$SESSION_ID" ]; then
   printf 'oh-my-claude: jq required (winget install jqlang.jq)\n'
   exit 0
 fi
+apply_model_ctx_tag
 # Reap any crash-orphaned temp files before this render writes its own.
 _omc_sweep_stale_tmp
 GI_LINE=$(cached_git_info)

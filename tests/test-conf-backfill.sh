@@ -195,6 +195,8 @@ end_test
 start_test "T5.2 template defines account keys, no removed keys"
 out=$(env -u ACCOUNT_SHOW -u ACCOUNT_FORMAT bash -c '. "$1"; printf "%s|%s" "${ACCOUNT_SHOW-unset}" "${ACCOUNT_FORMAT-unset}"' _ "$REPO_ROOT/oh-my-claude.conf")
 assert_eq "true|name" "$out" "account defaults in template"
+out=$(env -u MODEL_CTX_TAG bash -c '. "$1"; printf "%s" "${MODEL_CTX_TAG-unset}"' _ "$REPO_ROOT/oh-my-claude.conf")
+assert_eq "true" "$out" "MODEL_CTX_TAG default in template"
 rm_hits=$(grep -c -E 'WORKERS_SHOW_AGENTS|WORKERS_SHOW_TYPE|WORKERS_AGENT_' "$REPO_ROOT/oh-my-claude.conf")
 assert_eq "0" "$rm_hits" "no removed agent keys in template"
 end_test
@@ -206,6 +208,8 @@ case "$miss" in *ACCOUNT_SHOW*) a=1;; *) a=0;; esac
 case "$miss" in *ACCOUNT_FORMAT*) b=1;; *) b=0;; esac
 case "$miss" in *_ICON*) c=1;; *) c=0;; esac
 assert_eq "1|1|0" "$a|$b|$c" "ACCOUNT_SHOW|ACCOUNT_FORMAT|icon"
+case "$miss" in *MODEL_CTX_TAG*) d=1;; *) d=0;; esac
+assert_eq "1" "$d" "MODEL_CTX_TAG listed as missing"
 end_test
 
 start_test "T5.4 plugin.json and marketplace.json version is 1.2.0"

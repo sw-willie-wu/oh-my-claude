@@ -740,9 +740,10 @@ call_parse() {  # $1=json → pipe-joined parsed fields
     OMC_TEST_LIB_ONLY=1
     source "'"$STATUSLINE"'"
     parse_status_json "$1"
-    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n" \
+    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" \
       "$SESSION_ID" "$SANITIZED_SID" "$MODEL" "$DIR" \
-      "$CTX_PCT" "$RATE5_PCT" "$RATE5_RESET" "$RATE7_PCT" "$RATE7_RESET"
+      "$CTX_PCT" "$RATE5_PCT" "$RATE5_RESET" "$RATE7_PCT" "$RATE7_RESET" \
+      "$CTX_SIZE"
   ' _ "$1"
 }
 call_split() {  # $1=GI_LINE → pipe-joined 6 git vars
@@ -759,7 +760,7 @@ start_test "parse_status_json: docs fixture → fields match current grep behavi
 GOT=$(call_parse "$DOCS_JSON")
 # session|sanitized(.→_)|model|dir(norm)|ctx|r5%|r5reset|r7%|r7reset
 # old grep: ctx=first used_percentage=8; r5%=grep[0-9]* of 23.5 → 23; r7%=41
-assert_eq 'abc123...|abc123___|Opus|/c/w/d|8|23|1738425600|41|1738857600' \
+assert_eq 'abc123...|abc123___|Opus|/c/w/d|8|23|1738425600|41|1738857600|0' \
   "$GOT" "parse_status_json must reproduce current grep extraction byte-for-byte"
 end_test
 
@@ -799,28 +800,70 @@ end_test
 
 start_test "parse_status_json: C:/c: → ~/, D: kept"
 GOT=$(call_parse '{"session_id":"w","model":{"display_name":"X"},"workspace":{"current_dir":"C:\\Users\\willie\\proj"}}')
-assert_eq 'w|w|X|~/proj|0||||' "$GOT" "C:\\Users\\ → ~/"
+assert_eq 'w|w|X|~/proj|0|||||0' "$GOT" "C:\\Users\\ → ~/"
 GOT=$(call_parse '{"session_id":"w","model":{"display_name":"X"},"workspace":{"current_dir":"c:\\users\\bob\\x"}}')
-assert_eq 'w|w|X|~/x|0||||' "$GOT" "lowercase c:/users collapses (case-insensitive, old i flag)"
+assert_eq 'w|w|X|~/x|0|||||0' "$GOT" "lowercase c:/users collapses (case-insensitive, old i flag)"
 GOT=$(call_parse '{"session_id":"w","model":{"display_name":"X"},"workspace":{"current_dir":"D:\\Users\\bob\\x"}}')
-assert_eq 'w|w|X|D:/Users/bob/x|0||||' "$GOT" "non-C drive NOT collapsed (old behaviour)"
+assert_eq 'w|w|X|D:/Users/bob/x|0|||||0' "$GOT" "non-C drive NOT collapsed (old behaviour)"
 end_test
 
 start_test "parse_status_json: display_name \" (…)\" stripped; null context → CTX 0"
 GOT=$(call_parse '{"session_id":"s2","model":{"display_name":"Opus 4.7 (1M context)"},"workspace":{"current_dir":"/home/u/p"},"context_window":{"used_percentage":null}}')
-assert_eq 's2|s2|Opus 4.7|/home/u/p|0||||' "$GOT" "suffix stripped; null used_percentage → 0 (// 0 | floor)"
+assert_eq 's2|s2|Opus 4.7|/home/u/p|0|||||0' "$GOT" "suffix stripped; null used_percentage → 0 (// 0 | floor)"
 end_test
 
 start_test "parse_status_json: absent context_window does NOT mis-grab a rate used_percentage"
 GOT=$(call_parse '{"session_id":"s1","rate_limits":{"five_hour":{"used_percentage":50,"resets_at":111},"seven_day":{"used_percentage":60,"resets_at":222}}}')
-assert_eq 's1|s1|||0|50|111|60|222' "$GOT" "CTX=0 via jq path, not 50 (old positional-grep bug); rates intact"
+assert_eq 's1|s1|||0|50|111|60|222|0' "$GOT" "CTX=0 via jq path, not 50 (old positional-grep bug); rates intact"
 end_test
 
 start_test "parse_status_json: fractional used_percentage floors; SANITIZED_SID maps non-alnum"
 GOT=$(call_parse '{"session_id":"f","model":{"display_name":"Opus"},"workspace":{"current_dir":"/c/w/d"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":23.5,"resets_at":1738425600},"seven_day":{"used_percentage":41.2,"resets_at":1738857600}}}')
-assert_eq 'f|f|Opus|/c/w/d|8|23|1738425600|41|1738857600' "$GOT" "23.5→23, 41.2→41 (floor), byte-identical to old grep [0-9]*"
+assert_eq 'f|f|Opus|/c/w/d|8|23|1738425600|41|1738857600|0' "$GOT" "23.5→23, 41.2→41 (floor), byte-identical to old grep [0-9]*"
 GOT=$(call_parse '{"session_id":"a/b.c d","model":{"display_name":"X"},"workspace":{"current_dir":"/x"},"context_window":{"used_percentage":8}}')
-assert_eq 'a/b.c d|a_b_c_d|X|/x|8||||' "$GOT" "SANITIZED_SID: non-alnum → _ (tr -c equivalent)"
+assert_eq 'a/b.c d|a_b_c_d|X|/x|8|||||0' "$GOT" "SANITIZED_SID: non-alnum → _ (tr -c equivalent)"
+end_test
+
+# --- [1M] model context tag (spec §8.3): CTX_SIZE parse + apply_model_ctx_tag ---
+start_test "parse_status_json: CTX_SIZE clamp table (spec §8.3.2)"
+for pair in '1000000=1000000' '200000=200000' 'null=0' '"abc"=0' '-5=0' '1e20=0' \
+            '9223372036854775807=0' '1500000.5=1500000'; do
+  v="${pair%=*}"; want="${pair##*=}"
+  js=$(jq -n -c --argjson v "$v" '{session_id:"c",model:{display_name:"X"},workspace:{current_dir:"/x"},context_window:{context_window_size:$v}}' | tr -d '\r')
+  got=$(call_parse "$js"); got="${got##*|}"
+  assert_eq "$want" "$got" "context_window_size=$v"
+done
+end_test
+
+call_tag() {  # $1=MODEL $2=CTX_SIZE [$3=MODEL_CTX_TAG] → "MODEL|stderr"
+  local errf; errf=$(mktemp)
+  local out
+  out=$(bash -c '
+    OMC_TEST_LIB_ONLY=1
+    source "'"$STATUSLINE"'"
+    set -u
+    MODEL="$1"; CTX_SIZE="$2"
+    [ -n "${3-}" ] && MODEL_CTX_TAG="$3"
+    apply_model_ctx_tag
+    printf "%s" "$MODEL"
+  ' _ "$1" "$2" "${3-}" 2>"$errf")
+  printf '%s|%s' "$out" "$(cat "$errf")"; rm -f "$errf"
+}
+start_test "apply_model_ctx_tag: table (spec §8.3.3), stderr empty"
+assert_eq 'X [1M]|' "$(call_tag X 1000000)" "1000000"
+assert_eq 'X [2M]|' "$(call_tag X 2000000)" "2000000"
+assert_eq 'X [1M]|' "$(call_tag X 1500000)" "1500000"
+assert_eq 'X|' "$(call_tag X 200000)" "200000"
+assert_eq 'X|' "$(call_tag X '')" "empty"
+assert_eq 'X|' "$(call_tag X 08)" "08"
+assert_eq 'X|' "$(call_tag X 99999999999999999999)" "huge"
+assert_eq 'X|' "$(call_tag X 1000000 false)" "tag off"
+assert_eq '|' "$(call_tag '' 1000000)" "empty MODEL"
+end_test
+
+start_test "apply_model_ctx_tag: set -u safe with CTX_SIZE/MODEL/MODEL_CTX_TAG unset"
+err=$(bash -c 'OMC_TEST_LIB_ONLY=1; source "'"$STATUSLINE"'"; set -u; unset CTX_SIZE MODEL MODEL_CTX_TAG; apply_model_ctx_tag; echo done' 2>&1 >/dev/null)
+assert_eq "" "$err" "no unbound variable error"
 end_test
 
 # Gate-level: jq failure (malformed input) and empty session_id both collapse
@@ -1174,8 +1217,10 @@ rm -rf "$AT"
 ICON=$'\xef\x80\x87'
 render_layout() {  # $1=layout $2=fixture ('' -> none) $3=raw|strip ; extra conf via $EXTRA_CONF
   printf 'LAYOUT=%s\n%s\n' "$1" "${EXTRA_CONF:-}" > "$OMC_STATE_DIR/l.conf"
-  local out nogit; nogit=$(mktemp -d)
-  out=$(cd "$nogit" && echo '{"session_id":"render-test-acc","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"}}' \
+  local out nogit payload; nogit=$(mktemp -d)
+  payload="${4:-}"   # $4 = optional payload JSON (default: plain "M" model)
+  [ -n "$payload" ] || payload='{"session_id":"render-test-acc","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"}}'
+  out=$(cd "$nogit" && printf '%s\n' "$payload" \
     | OMC_CONF="$OMC_STATE_DIR/l.conf" OMC_ACCOUNT_FILE="${2:-$OMC_STATE_DIR/no-such.json}" bash "$STATUSLINE" 2>/dev/null)
   rm -rf "$nogit"
   if [ "${3:-strip}" = raw ]; then printf '%s\n' "$out"; else printf '%s\n' "$out" | strip_ansi; fi
@@ -1235,6 +1280,17 @@ if ! printf "%s" "$p" | grep -qw you; then printf '    FAIL: preview lacks you\n
 printf 'ACCOUNT_SHOW=false\n' > "$T4D/p.conf"
 p=$(OMC_DIR="$REPO_ROOT" OMC_CONF="$T4D/p.conf" bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
 if printf "%s" "$p" | grep -qw you; then printf '    FAIL: preview shows you when disabled\n' >&2; TEST_FAILED=1; fi
+end_test
+
+start_test "T4.6 [1M] tag shows in all 6 layouts; MODEL_CTX_TAG=false hides it"
+P1M=$(jq -n -c '{session_id:"render-test-acc",model:{display_name:"Opus 5.5 (1M context)"},workspace:{current_dir:"/tmp/d"},context_window:{context_window_size:1000000}}' | tr -d '\r')
+for l in $LAYOUTS4; do
+  s=$(render_layout "$l" '' strip "$P1M" | head -1)
+  case "$s" in *"Opus 5.5 [1M]"*) ;; *) printf '    FAIL: %s lacks tag [%s]\n' "$l" "$s" >&2; TEST_FAILED=1;; esac
+done
+s=$(EXTRA_CONF="MODEL_CTX_TAG=false" render_layout default '' strip "$P1M" | head -1)
+case "$s" in *"Opus 5.5"*) ;; *) printf '    FAIL: off: no model [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
+case "$s" in *"["*) printf '    FAIL: off: has [ in [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
 end_test
 
 rm -rf "$T4D"
