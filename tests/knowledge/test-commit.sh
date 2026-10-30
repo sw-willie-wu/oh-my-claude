@@ -158,7 +158,7 @@ echo t > "$KB/global/real.md"
 run 'typo' global/reel.md
 assert_eq "2" "$RC" "exit"
 grep -qF "commit.sh: ignored global/reel.md (not found and not tracked)" "$T/out" || { echo "    FAIL: missing ignored line" >&2; TEST_FAILED=1; }
-assert_eq "" "$(git -C "$KB" ls-files global/real.md | tr -d '')" "real.md not committed"
+assert_eq "" "$(git -C "$KB" ls-files global/real.md | tr -d '\r')" "real.md not committed"
 end_test
 
 start_test "move whose old path was never committed succeeds"

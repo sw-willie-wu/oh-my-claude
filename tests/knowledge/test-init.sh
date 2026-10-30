@@ -196,7 +196,7 @@ for f in SCHEMA.md index.md log.md inbox.md rules/INDEX.md; do [ -s "$KB/$f" ] |
 assert_eq "oh-my-knowledge@localhost" "$(git -C "$KB" config user.email)" "local identity set"
 assert_eq "oh-my-knowledge" "$(git -C "$KB" config user.name)" "local name"
 assert_eq "" "$(cat "$GIT_CONFIG_GLOBAL")" "global git config untouched"
-assert_eq "* text=auto eol=lf" "$(cat "$KB/.gitattributes" | tr -d '')" ".gitattributes content"
+assert_eq "* text=auto eol=lf" "$(cat "$KB/.gitattributes" | tr -d '\r')" ".gitattributes content"
 assert_eq "1" "$(wc -l < "$KB/.gitattributes" | tr -d ' ')" ".gitattributes is exactly one line"
 assert_eq "19" "$(wc -c < "$KB/.gitattributes" | tr -d ' ')" ".gitattributes bytes (LF only)"
 end_test
@@ -266,7 +266,7 @@ assert_eq "already initialized $(call omk_resolve_dir "$EX")" "$out" "message"
 a="$(snap | grep -vE 'rules/INDEX.md|.gitattributes')"
 assert_eq "$b" "$a" "existing files byte-identical"
 for d in rules lint _retired; do [ -d "$EX/$d" ] || { printf '    FAIL: dir %s not added\n' "$d" >&2; TEST_FAILED=1; }; done
-assert_eq "* text=auto eol=lf" "$(tr -d '' < "$EX/.gitattributes")" ".gitattributes added to copied KB"
+assert_eq "* text=auto eol=lf" "$(tr -d '\r' < "$EX/.gitattributes")" ".gitattributes added to copied KB"
 assert_eq "$cfgb" "$(cat "$EX/.git/config")" ".git/config unchanged when identity resolvable"
 end_test
 
