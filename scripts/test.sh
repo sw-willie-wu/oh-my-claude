@@ -19,4 +19,10 @@ fi
 echo
 echo "=== marketplace tests ==="
 bash "$REPO_ROOT/tests/test-marketplace.sh" || FAIL=1
+echo
+echo "=== knowledge init tests ==="
+bash "$REPO_ROOT/tests/knowledge/test-init.sh" || FAIL=1
+echo
+echo "=== knowledge commit tests ==="
+bash "$REPO_ROOT/tests/knowledge/test-commit.sh" || FAIL=1
 exit "$FAIL"

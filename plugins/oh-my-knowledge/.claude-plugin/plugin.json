@@ -1,9 +1,79 @@
 {
   "name": "oh-my-knowledge",
-  "description": "Knowledge-base plugin for Claude Code (work in progress).",
+  "description": "A local, git-versioned knowledge base for Claude Code: look up, distill, lint and hand off durable knowledge instead of letting it rot in auto memory.",
   "author": {
     "name": "SW.Willie.Wu"
   },
   "repository": "https://github.com/sw-willie-wu/oh-my-claude",
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": ["knowledge-base", "memory", "wiki", "handoff"],
+  "userConfig": {
+    "knowledge_dir": {
+      "type": "directory",
+      "title": "Knowledge base directory",
+      "description": "Local folder (a git repo) that holds the knowledge base. Must not contain a single quote. Run the setup skill after changing it.",
+      "default": "~/knowledge",
+      "required": true
+    },
+    "lookup_reminder": {
+      "type": "boolean",
+      "title": "Lookup reminder",
+      "description": "At session start, remind Claude to search the knowledge base before answering problems or errors.",
+      "default": true
+    },
+    "auto_handoff": {
+      "type": "boolean",
+      "title": "Automatic handoff",
+      "description": "When context usage reaches the threshold, ask Claude to run a handoff automatically.",
+      "default": true
+    },
+    "auto_handoff_threshold": {
+      "type": "number",
+      "title": "Automatic handoff threshold (%)",
+      "description": "Context usage percentage at which the automatic handoff triggers.",
+      "default": 70,
+      "min": 30,
+      "max": 90
+    },
+    "lint_stale_days": {
+      "type": "number",
+      "title": "Lint: stale after (days)",
+      "description": "A page whose verified date is older than this is reported as stale by lint.",
+      "default": 90,
+      "min": 1,
+      "max": 3650
+    },
+    "lint_flag_days": {
+      "type": "number",
+      "title": "Lint: flag review window (days)",
+      "description": "How long a flagged finding waits before lint raises it again.",
+      "default": 14,
+      "min": 1,
+      "max": 3650
+    },
+    "lint_remind_after_distills": {
+      "type": "number",
+      "title": "Lint reminder: after N distills",
+      "description": "Remind to run lint after this many distill runs since the last lint.",
+      "default": 10,
+      "min": 1,
+      "max": 1000
+    },
+    "max_file_kb": {
+      "type": "number",
+      "title": "Max page size (KB)",
+      "description": "Topic pages and sub-indexes larger than this are flagged for splitting.",
+      "default": 8,
+      "min": 1,
+      "max": 64
+    },
+    "max_index_line_chars": {
+      "type": "number",
+      "title": "Max index line length (characters)",
+      "description": "Index lines longer than this many characters (not bytes) are flagged.",
+      "default": 200,
+      "min": 80,
+      "max": 1000
+    }
+  }
 }
