@@ -232,7 +232,7 @@ for f in global/broken_link global/broken_link_stub global/missing_page projects
   global/name_mismatch global/orphan global/not_indexed global/missing_frontmatter global/oversize global/index_long_index_line \
   global/slug_shadows_global projects/beta/slug_shadows_global rules/rules_not_in_index; do rm -f "$T/kb7/$f.md"; done
 grep -v 'rules_import_missing' "$T/kb7/rules/INDEX.md" > "$T/idx" && cp "$T/idx" "$T/kb7/rules/INDEX.md"
-run "$T/kb7"
+run "$T/kb7" --checks structure
 assert_eq "[]" "$(qc .findings)" "findings == []"
 end_test
 
@@ -262,9 +262,9 @@ end_test
 
 start_test "--checks structure|content|all"
 run "$KB" --checks structure; S1="$(q '.findings | length')"
-run "$KB" --checks all; S2="$(q '.findings | length')"
+run "$KB" --checks all; S2="$(q '[.findings[] | select(.check | IN("progress_leak","stale","unverified_overdue","missing_path","project_marker_invalid","project_marker_missing","project_marker_misplaced","stub_unreferenced","ext_link_missing","unharvested_auto_memory","promote_candidate","auto_memory_link_broken") | not)] | length')"
 assert_eq "$S1" "$S2" "all includes structure"
-run "$KB" --checks content; assert_eq 0 "$RC" "content exit"; assert_eq 0 "$(q '.findings | length')" "content-only: no structural findings yet"
+run "$KB" --checks content; assert_eq 0 "$RC" "content exit"; assert_eq 0 "$(q '[.findings[] | select(.check == "orphan" or .check == "broken_link" or .check == "not_indexed" or .check == "missing_frontmatter")] | length')" "content-only: no structural findings"; assert_eq 0 "$(q '.groups | length')" "content-only: no groups"
 assert_eq 1 "$(q .version)" "content-only keeps shape"
 end_test
 
@@ -390,6 +390,34 @@ assert_eq none "$(finding not_indexed global/index_old.md)" "stub index exempt"
 printf -- '- [[g:index_ca]] x\n- [[k:projects/p1/index]] p\n' >> "$T/kb15/index.md"
 run "$T/kb15"
 assert_eq 0 "$(count_check not_indexed)" "reachable from root: clean"
+end_test
+
+start_test "links into _retired/ and lint/ resolve (existence only); those pages get no other check"
+fresh "$T/kb20"; mkdir -p "$T/kb20/_retired/2026-10-30/global" "$T/kb20/lint"
+printf 'no frontmatter, orphan\n' > "$T/kb20/_retired/2026-10-30/global/gone.md"
+printf 'report\n' > "$T/kb20/lint/lint-2026-10-30.md"
+printf -- '---\nname: s\ndescription: d\n---\n> Moved: [[k:_retired/2026-10-30/global/gone]]\n' > "$T/kb20/global/s.md"
+page "$T/kb20/global/t.md" t "See [[k:lint/lint-2026-10-30]] and [[k:_retired/2026-10-30/global/missing]]"
+printf -- '- [[t]] x\n- [[s]] y\n' > "$T/kb20/global/index_a.md"; printf -- '- [[g:index_a]] a\n' >> "$T/kb20/index.md"
+run "$T/kb20" --checks structure
+assert_eq none "$(finding broken_link global/s.md)" "stub to _retired target resolves"
+assert_eq "red:9" "$(finding broken_link global/t.md)" "missing retired target still broken, existing lint/ target fine"
+assert_eq 0 "$(q '[.findings[] | select(.file | startswith("_retired/") or startswith("lint/"))] | length')" "no findings on _retired/ lint/"
+end_test
+
+start_test "fences (structure): a 4-backtick block holds 3-backtick lines; an info-string fence does not close it"
+fresh "$T/kb21"
+{ printf -- '---\nname: g1\ndescription: d\nmetadata:\n  type: user\n  verified: 2026-10-01\n  evidence: tested\n---\n'
+  printf '%s\n' '````' '```' '[[nope-example]]' '````' 'after [[real-broken]]'
+} > "$T/kb21/global/g1.md"
+{ printf -- '---\nname: g2\ndescription: d\nmetadata:\n  type: user\n  verified: 2026-10-01\n  evidence: tested\n---\n'
+  printf '%s\n' '````' '```bash' '[[inside-1]]' '````' '[[outside-1]]'
+} > "$T/kb21/global/g2.md"
+run "$T/kb21" --checks structure
+assert_eq "red:13" "$(finding broken_link global/g1.md)" "only the link after the 4-backtick block"
+has "$(detail broken_link global/g1.md)" "real-broken" "target" || true
+assert_eq "red:13" "$(finding broken_link global/g2.md)" "info-string fence inside a 4-backtick fence does not close it"
+has "$(detail broken_link global/g2.md)" "outside-1" "target" || true
 end_test
 
 print_summary

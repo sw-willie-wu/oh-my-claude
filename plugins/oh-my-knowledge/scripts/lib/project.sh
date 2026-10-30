@@ -18,6 +18,7 @@ omk_project_marker_status() {
   f="$dir/MEMORY.md"
   names="$(LC_ALL=C awk '
     { sub(/\r$/, "") }
+    NR == 1 { sub(/^\357\273\277/, "") }
     match($0, /^- Knowledge base project: \[\[k:projects\/[^\/\]]+\/index\]\] \(omk-project\)$/) {
       s = $0
       sub(/^- Knowledge base project: \[\[k:projects\//, "", s)

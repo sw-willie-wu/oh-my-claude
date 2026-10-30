@@ -109,11 +109,11 @@ BEGINFILE {
     body++
     if (line ~ /^> Moved: \[\[[^]]+\]\](, *\[\[[^]]+\]\])* *$/) moved++
   }
-  if (match(line, /^[ 	]*(```|~~~)/, fmk)) {
-    mk = substr(fmk[0], length(fmk[0]) - 2)
-    if (infence == "") infence = mk
-    else if (infence == mk) infence = ""
-    next
+  # fences: closes only with the same character, at least as long, and nothing after it
+  if (match(line, /^[ \t]*(`{3,}|~{3,})/, fmk)) {
+    frun = fmk[1]
+    if (infence == "") { infence = substr(frun, 1, 1); fenlen = length(frun); next }
+    if (substr(frun, 1, 1) == infence && length(frun) >= fenlen && substr(line, RSTART + RLENGTH) ~ /^[ \t]*$/) { infence = ""; next }
   }
   if (infence != "") next
   if (isidx && line ~ /^[ \t]*[-*+] / && maxch > 0 && length(line) > maxch)
