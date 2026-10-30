@@ -28,4 +28,7 @@ bash "$REPO_ROOT/tests/knowledge/test-commit.sh" || FAIL=1
 echo
 echo "=== knowledge search tests ==="
 bash "$REPO_ROOT/tests/knowledge/test-search.sh" || FAIL=1
+echo
+echo "=== knowledge lint (structure) tests ==="
+bash "$REPO_ROOT/tests/knowledge/test-lint-structure.sh" || FAIL=1
 exit "$FAIL"

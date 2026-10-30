@@ -63,7 +63,7 @@ metadata:
 ---
 ```
 
-Read the type from `metadata.type`, else from a top-level `type:` (auto memory uses both). To change a type, edit the key that exists; never add a second. Meta files need no frontmatter: `SCHEMA.md`, `index.md`, `log.md`, `inbox.md`, every `index*.md`, `rules/INDEX.md`, `_retired/**`, `lint/**`.
+Read the type from `metadata.type`, else from a top-level `type:` (auto memory uses both). To change a type, edit the key that exists; never add a second. Meta files need no frontmatter: `SCHEMA.md`, `index.md`, `log.md`, `inbox.md`, every `index_*.md`, `rules/INDEX.md`, `_retired/**`, `lint/**`.
 
 ## Markers
 
