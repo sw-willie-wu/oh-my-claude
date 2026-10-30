@@ -32,6 +32,15 @@ echo
 echo "=== knowledge lint (structure) tests ==="
 bash "$REPO_ROOT/tests/knowledge/test-lint-structure.sh" || FAIL=1
 echo
+echo "=== knowledge config tests ==="
+bash "$REPO_ROOT/tests/knowledge/test-config.sh" || FAIL=1
+echo
+echo "=== knowledge hooks tests ==="
+bash "$REPO_ROOT/tests/knowledge/test-hooks.sh" || FAIL=1
+echo
+echo "=== cross-plugin contract tests ==="
+bash "$REPO_ROOT/tests/test-cross-plugin-contract.sh" || FAIL=1
+echo
 echo "=== knowledge lint (content) tests ==="
 bash "$REPO_ROOT/tests/knowledge/test-lint-content.sh" || FAIL=1
 exit "$FAIL"

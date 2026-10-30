@@ -54,6 +54,7 @@ render() {
 
   echo -e "$LINE1"
   [ -n "$LINE2" ] && echo -e "$LINE2"
+  [ -n "$HANDOFF_BADGE" ] && LINE3+="  ${C_GREEN}${HANDOFF_BADGE}${RESET}"
   echo -e "$LINE3"
   emit_workers
 }

@@ -2,28 +2,52 @@
 # oh-my-knowledge shared helpers: path normalisation and configuration.
 # Source this file; it defines functions only. Requirements: bash, gawk, GNU date, jq.
 
+_OMK_UP=ABCDEFGHIJKLMNOPQRSTUVWXYZ
+_OMK_LO=abcdefghijklmnopqrstuvwxyz
+
+# _omk_resolve_into <outvar> <path>: fork-free core of omk_resolve_dir.
+_omk_resolve_into() {
+  local _p="$2" _q _pre _dl _old _hadold _oo
+  case "$_p" in
+    "~") _p="$HOME" ;;
+    "~/"*) _p="$HOME/${_p#\~/}" ;;
+  esac
+  _p="${_p//\\//}"
+  if [[ "$_p" =~ ^([A-Za-z]):(/.*)?$ ]]; then
+    _dl="${BASH_REMATCH[1]}"
+    _q="${BASH_REMATCH[2]}"
+    _pre="${_OMK_UP%%"$_dl"*}"
+    if [ "${#_pre}" -lt 26 ]; then _dl="${_OMK_LO:${#_pre}:1}"; fi
+    _p="/$_dl$_q"
+  fi
+  while [ "${#_p}" -gt 1 ] && [ "${_p%/}" != "$_p" ]; do _p="${_p%/}"; done
+  if [ -d "$_p" ]; then
+    _old="$PWD"
+    if [ -d "$_old" ]; then
+      # Fork-free canonicalisation; caller's PWD and OLDPWD are restored.
+      _hadold="${OLDPWD+set}"; _oo="${OLDPWD-}"
+      if CDPATH= cd -P -- "$_p" 2>/dev/null; then
+        _p="$PWD"
+        cd -- "$_old" 2>/dev/null
+      fi
+      if [ "$_hadold" = set ]; then OLDPWD="$_oo"; else unset OLDPWD; fi
+    else
+      # Caller's cwd is gone (cd back impossible): canonicalise in a subshell.
+      _q="$(CDPATH= cd -P -- "$_p" 2>/dev/null && pwd -P)" && _p="$_q"
+    fi
+  fi
+  printf -v "$1" '%s' "$_p"
+}
+
 # omk_resolve_dir <path>
 # Canonical absolute POSIX path used for every comparison. Expands a leading
 # ~/, turns C:\a\b / C:/a/b / c:/a/b into /c/a/b, strips trailing slashes, and
-# (when the directory exists) canonicalises it with pwd -P so /tmp/x, 8.3 short
+# (when the directory exists) canonicalises it with cd -P so /tmp/x, 8.3 short
 # names and symlinks all map to the same string as the long path.
 omk_resolve_dir() {
-  local p="$1" q
-  case "$p" in
-    "~") p="$HOME" ;;
-    "~/"*) p="$HOME/${p#\~/}" ;;
-  esac
-  p="${p//\\//}"
-  if [[ "$p" =~ ^([A-Za-z]):(/.*)?$ ]]; then
-    local dl="${BASH_REMATCH[1]}"
-    dl="$(printf %s "$dl" | tr A-Z a-z)"
-    p="/$dl${BASH_REMATCH[2]}"
-  fi
-  while [ "${#p}" -gt 1 ] && [ "${p%/}" != "$p" ]; do p="${p%/}"; done
-  if [ -d "$p" ]; then
-    if q="$(CDPATH= cd -P -- "$p" 2>/dev/null && pwd -P)"; then p="$q"; fi
-  fi
-  printf '%s' "$p"
+  local _r
+  _omk_resolve_into _r "$1"
+  printf '%s' "$_r"
 }
 
 # omk_native_path <path>
@@ -32,7 +56,7 @@ omk_resolve_dir() {
 # 8.3 names); elsewhere pwd -P. Non-existent paths: best-effort conversion.
 omk_native_path() {
   local p q r
-  p="$(omk_resolve_dir "$1")"
+  _omk_resolve_into p "$1"
   case "${OSTYPE:-}" in
     msys*|cygwin*)
       if [ -d "$p" ] && q="$(CDPATH= cd -P -- "$p" 2>/dev/null && pwd -W)"; then
@@ -41,7 +65,7 @@ omk_native_path() {
       fi
       if [[ "$p" =~ ^/([a-z])(/.*)?$ ]]; then
         r="${BASH_REMATCH[1]}"
-        r="$(printf %s "$r" | tr a-z A-Z)"
+        _omk_upper_into r "$r"
         printf "%s:%s" "$r" "${BASH_REMATCH[2]:-/}"
       else
         printf '%s' "$p"
@@ -82,7 +106,7 @@ omk_encode_path() {
   omk_encode_name "$(omk_native_path "$1")"
 }
 
-# _omk_unset_literal <value>: true when empty or still a literal ${user_config.…}.
+# _omk_unset <value>: true when empty or still a literal ${user_config.…}.
 _omk_unset() {
   case "$1" in
     "" | *'${user_config.'*) return 0 ;;
@@ -90,50 +114,75 @@ _omk_unset() {
   return 1
 }
 
-# _omk_pick <ENV_VAR> <option_key> <default>: env > CLAUDE_PLUGIN_OPTION_<KEY> > default.
+# _omk_upper_into <outvar> <string>: ASCII upper-case without forking.
+_omk_upper_into() {
+  local _s="$2" _r="" _c _i _pre
+  for ((_i = 0; _i < ${#_s}; _i++)); do
+    _c="${_s:_i:1}"
+    case "$_c" in
+      [abcdefghijklmnopqrstuvwxyz]) _pre="${_OMK_LO%%"$_c"*}"; _c="${_OMK_UP:${#_pre}:1}" ;;
+    esac
+    _r+="$_c"
+  done
+  printf -v "$1" '%s' "$_r"
+}
+
+# _omk_pick <outvar> <ENV_VAR> <option_key> <default>:
+# env > CLAUDE_PLUGIN_OPTION_<UPPER key> > CLAUDE_PLUGIN_OPTION_<key as given> > default.
+# Both option lookups derive from the one key argument.
 _omk_pick() {
-  local var="$1" key="$2" def="$3" v o
-  v="${!var:-}"
-  if _omk_unset "$v"; then
-    o="CLAUDE_PLUGIN_OPTION_$(printf %s "$key" | tr a-z A-Z)"; v="${!o:-}"
-    if _omk_unset "$v"; then
-      o="CLAUDE_PLUGIN_OPTION_${key}"; v="${!o:-}"
+  local _var="$2" _key="$3" _def="$4" _v _o _up
+  _v="${!_var:-}"
+  if _omk_unset "$_v"; then
+    _omk_upper_into _up "$_key"
+    _o="CLAUDE_PLUGIN_OPTION_$_up"; _v="${!_o:-}"
+    if _omk_unset "$_v"; then
+      _o="CLAUDE_PLUGIN_OPTION_${_key}"; _v="${!_o:-}"
     fi
   fi
-  if _omk_unset "$v"; then v="$def"; fi
-  printf '%s' "$v"
+  if _omk_unset "$_v"; then _v="$_def"; fi
+  printf -v "$1" '%s' "$_v"
 }
 
-_omk_bool() { # <value> <default>
-  case "$(printf %s "$1" | tr A-Z a-z)" in
-    true|1|yes|on|y) printf true ;;
-    false|0|no|off|n) printf false ;;
-    *) printf '%s' "$2" ;;
+_omk_bool() { # <outvar> <value> <default>
+  case "$2" in
+    [Tt][Rr][Uu][Ee]|1|[Yy][Ee][Ss]|[Oo][Nn]|[Yy]) printf -v "$1" true ;;
+    [Ff][Aa][Ll][Ss][Ee]|0|[Nn][Oo]|[Oo][Ff][Ff]|[Nn]) printf -v "$1" false ;;
+    *) printf -v "$1" '%s' "$3" ;;
   esac
 }
 
-_omk_int() { # <value> <default>
-  case "$1" in
-    ''|*[!0-9]*) printf '%s' "$2" ;;
-    *) printf '%s' "$((10#$1))" ;;
+_omk_int() { # <outvar> <value> <default>
+  case "$2" in
+    ''|*[!0-9]*) printf -v "$1" '%s' "$3" ;;
+    *) printf -v "$1" '%s' "$((10#$2))" ;;
   esac
+}
+
+# omk_today: set OMK_TODAY (env OMK_TODAY wins) and export it. Not part of
+# omk_config (it forks `date`); call it from scripts that need the date (lint).
+omk_today() {
+  OMK_TODAY="${OMK_TODAY:-}"
+  _omk_unset "$OMK_TODAY" && OMK_TODAY="$(date +%F)"
+  export OMK_TODAY
 }
 
 # omk_config: set and export every OMK_* setting (plus OMC_STATE_DIR).
 # Precedence: env var (if non-empty and not a literal ${user_config.…}) >
 # CLAUDE_PLUGIN_OPTION_<KEY> > spec default. The platform never applies
 # userConfig defaults, so the default branch is the normal path for unset options.
+# Fork-free (hooks run it on every event); OMK_TODAY is lazy, see omk_today.
 omk_config() {
-  local cc="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-  OMK_KNOWLEDGE_DIR="$(omk_resolve_dir "$(_omk_pick OMK_KNOWLEDGE_DIR knowledge_dir '~/knowledge')")"
-  OMK_LOOKUP_REMINDER="$(_omk_bool "$(_omk_pick OMK_LOOKUP_REMINDER lookup_reminder true)" true)"
-  OMK_AUTO_HANDOFF="$(_omk_bool "$(_omk_pick OMK_AUTO_HANDOFF auto_handoff true)" true)"
-  OMK_AUTO_HANDOFF_THRESHOLD="$(_omk_int "$(_omk_pick OMK_AUTO_HANDOFF_THRESHOLD auto_handoff_threshold 70)" 70)"
-  OMK_LINT_STALE_DAYS="$(_omk_int "$(_omk_pick OMK_LINT_STALE_DAYS lint_stale_days 90)" 90)"
-  OMK_LINT_FLAG_DAYS="$(_omk_int "$(_omk_pick OMK_LINT_FLAG_DAYS lint_flag_days 14)" 14)"
-  OMK_LINT_REMIND_AFTER_DISTILLS="$(_omk_int "$(_omk_pick OMK_LINT_REMIND_AFTER_DISTILLS lint_remind_after_distills 10)" 10)"
-  OMK_MAX_FILE_KB="$(_omk_int "$(_omk_pick OMK_MAX_FILE_KB max_file_kb 8)" 8)"
-  OMK_MAX_INDEX_LINE_CHARS="$(_omk_int "$(_omk_pick OMK_MAX_INDEX_LINE_CHARS max_index_line_chars 200)" 200)"
+  local cc="${CLAUDE_CONFIG_DIR:-$HOME/.claude}" t
+  _omk_pick t OMK_KNOWLEDGE_DIR knowledge_dir '~/knowledge'; _omk_resolve_into OMK_KNOWLEDGE_DIR "$t"
+  _omk_pick t OMK_LOOKUP_REMINDER lookup_reminder true; _omk_bool OMK_LOOKUP_REMINDER "$t" true
+  _omk_pick t OMK_AUTO_HANDOFF auto_handoff true; _omk_bool OMK_AUTO_HANDOFF "$t" true
+  _omk_pick t OMK_AUTO_HANDOFF_THRESHOLD auto_handoff_threshold 70; _omk_int OMK_AUTO_HANDOFF_THRESHOLD "$t" 70
+  _omk_pick t OMK_LINT_STALE_DAYS lint_stale_days 90; _omk_int OMK_LINT_STALE_DAYS "$t" 90
+  _omk_pick t OMK_LINT_FLAG_DAYS lint_flag_days 14; _omk_int OMK_LINT_FLAG_DAYS "$t" 14
+  _omk_pick t OMK_LINT_REMIND_AFTER_DISTILLS lint_remind_after_distills 10; _omk_int OMK_LINT_REMIND_AFTER_DISTILLS "$t" 10
+  _omk_pick t OMK_MAX_FILE_KB max_file_kb 8; _omk_int OMK_MAX_FILE_KB "$t" 8
+  _omk_pick t OMK_MAX_INDEX_LINE_CHARS max_index_line_chars 200; _omk_int OMK_MAX_INDEX_LINE_CHARS "$t" 200
   OMK_AUTO_MEMORY_DIR="${OMK_AUTO_MEMORY_DIR:-}"
   _omk_unset "$OMK_AUTO_MEMORY_DIR" && OMK_AUTO_MEMORY_DIR=""
   OMK_AUTO_MEMORY_GLOB="${OMK_AUTO_MEMORY_GLOB:-}"
@@ -143,7 +192,7 @@ omk_config() {
   OMC_STATE_DIR="${OMC_STATE_DIR:-}"
   _omk_unset "$OMC_STATE_DIR" && OMC_STATE_DIR="$HOME/.claude/oh-my-claude/state"
   OMK_TODAY="${OMK_TODAY:-}"
-  _omk_unset "$OMK_TODAY" && OMK_TODAY="$(date +%F)"
+  _omk_unset "$OMK_TODAY" && OMK_TODAY=""
   OMK_JQ="${OMK_JQ:-}"
   _omk_unset "$OMK_JQ" && OMK_JQ="jq"
   export OMK_KNOWLEDGE_DIR OMK_LOOKUP_REMINDER OMK_AUTO_HANDOFF OMK_AUTO_HANDOFF_THRESHOLD \

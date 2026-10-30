@@ -44,5 +44,6 @@ render() {
   LINE+="$(pct_color "${CTX_PCT:-0}") ${STATS} ${RESET}"
 
   emit_workers
+  [ -n "$HANDOFF_BADGE" ] && LINE+="  ${C_GREEN}${HANDOFF_BADGE}${RESET}"
   echo -e "$LINE"
 }

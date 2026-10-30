@@ -411,7 +411,7 @@ cached_git_info() {
   fi
   out=$(git_info)                                                  # MISS
   mkdir -p "$OMC_STATE_DIR" 2>/dev/null
-  printf '%s' "$out" > "$file.tmp.$$" && mv "$file.tmp.$$" "$file"  # atomic
+  { printf '%s' "$out" > "$file.tmp.$$" && mv "$file.tmp.$$" "$file"; } 2>/dev/null  # atomic
   printf '%s' "$out"
 }
 
@@ -503,7 +503,7 @@ cached_account_fields() {
     return 0
   fi
   [ -d "$OMC_STATE_DIR" ] || mkdir -p "$OMC_STATE_DIR" 2>/dev/null
-  printf '%s\n' "$raw" > "$cache.tmp.$$" 2>/dev/null && mv -f "$cache.tmp.$$" "$cache" 2>/dev/null
+  { printf '%s\n' "$raw" > "$cache.tmp.$$" && mv -f "$cache.tmp.$$" "$cache"; } 2>/dev/null
   IFS=$'\x1f' read -r ACC_NAME ACC_FULL ACC_EMAIL ACC_ORG <<<"$raw"
   return 0
 }
@@ -549,6 +549,13 @@ parse_status_json "$input"
 if [ -z "$SESSION_ID" ]; then
   printf 'oh-my-claude: jq required (winget install jqlang.jq)\n'
   exit 0
+fi
+# Usage file for oh-my-knowledge auto-handoff (builtins only) and handoff badge.
+[ -d "$OMC_STATE_DIR" ] || mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+[ -n "$CTX_PCT" ] && { printf '%s %s\n' "$CTX_PCT" "$CTX_SIZE" > "$OMC_STATE_DIR/ctx-$SANITIZED_SID"; } 2>/dev/null
+HANDOFF_BADGE=""
+if [ -e "$OMC_STATE_DIR/handoff-$SANITIZED_SID" ]; then
+  if [ "$LAYOUT_FILE" = "${OMC_DIR}/layouts/pure.sh" ]; then HANDOFF_BADGE="handoff ok"; else HANDOFF_BADGE="✓ handoff"; fi
 fi
 apply_model_ctx_tag
 # Reap any crash-orphaned temp files before this render writes its own.

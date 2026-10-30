@@ -14,6 +14,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$HERE/lib/common.sh"
 omk_config
+omk_today
 
 USAGE="usage: lint.sh [--checks structure|content|all]"
 CHECKS=all

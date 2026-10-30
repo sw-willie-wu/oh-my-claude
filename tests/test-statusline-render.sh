@@ -17,6 +17,7 @@ mkdir -p "$RENDER_STATE_DIR"
 
 cleanup_render_state() {
   rm -f "$RENDER_STATE_DIR"/state-render-test-*.tsv
+  rm -f "$RENDER_STATE_DIR"/ctx-render-test-* "$RENDER_STATE_DIR"/handoff-render-test-*
 }
 
 # Strip ANSI escape sequences so we can measure visible width and assert on text.
@@ -1292,6 +1293,21 @@ done
 s=$(EXTRA_CONF="MODEL_CTX_TAG=false" render_layout default '' strip "$P1M" | head -1)
 case "$s" in *"Opus 5.5"*) ;; *) printf '    FAIL: off: no model [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
 case "$s" in *"["*) printf '    FAIL: off: has [ in [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
+end_test
+
+start_test "handoff badge per layout (only with marker); ctx file written"
+for l in $LAYOUTS4; do
+  s=$(render_layout "$l" '' strip | tr '\n' ' ')
+  case "$s" in *handoff*) printf '    FAIL: %s badge without marker [%s]\n' "$l" "$s" >&2; TEST_FAILED=1;; esac
+done
+: > "$OMC_STATE_DIR/handoff-render-test-acc"
+for l in $LAYOUTS4; do
+  s=$(render_layout "$l" '' strip | tr '\n' ' ')
+  if [ "$l" = pure ]; then want='handoff ok'; else want='✓ handoff'; fi
+  case "$s" in *"$want"*) ;; *) printf '    FAIL: %s lacks badge %s [%s]\n' "$l" "$want" "$s" >&2; TEST_FAILED=1;; esac
+done
+rm -f "$OMC_STATE_DIR/handoff-render-test-acc"
+[ -f "$OMC_STATE_DIR/ctx-render-test-acc" ] || { printf '    FAIL: ctx file missing\n' >&2; TEST_FAILED=1; }
 end_test
 
 rm -rf "$T4D"

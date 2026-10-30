@@ -18,7 +18,7 @@
     "lookup_reminder": {
       "type": "boolean",
       "title": "Lookup reminder",
-      "description": "At session start, remind Claude to search the knowledge base before answering problems or errors.",
+      "description": "On each prompt that looks like a problem or error, remind Claude to search the knowledge base before answering.",
       "default": true
     },
     "auto_handoff": {
