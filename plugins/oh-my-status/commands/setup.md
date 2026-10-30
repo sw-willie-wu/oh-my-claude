@@ -90,7 +90,7 @@ Steps:
           - First ensure the file ends with exactly one newline (if its last
             byte is not a newline, add one).
           - Then append a single header comment line
-            `# --- added by /oh-my-claude:setup (YYYY-MM-DD) ---` using
+            `# --- added by /oh-my-status:setup (YYYY-MM-DD) ---` using
             today's date, followed by one `KEY=<template default>` line per
             missing key.
           - Do NOT rewrite, reorder, or reformat any existing line. This is a
@@ -102,5 +102,5 @@ Steps:
 
 4. After updating (or skipping), tell the user:
    - Restart Claude Code to see the statusline
-   - `/oh-my-claude:list-themes` to preview themes and layouts
-   - `/oh-my-claude:set-theme <theme> <layout>` to switch
+   - `/oh-my-status:list-themes` to preview themes and layouts
+   - `/oh-my-status:set-theme <theme> <layout>` to switch

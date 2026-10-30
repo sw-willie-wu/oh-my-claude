@@ -5,14 +5,21 @@
     "email": "ab30722@gmail.com"
   },
   "metadata": {
-    "description": "Themeable statusline plugin for Claude Code with multiple color themes and layouts"
+    "description": "Claude Code plugins: a themeable statusline (oh-my-status) and a knowledge-base plugin (oh-my-knowledge)"
+  },
+  "renames": {
+    "oh-my-claude": "oh-my-status"
   },
   "plugins": [
     {
-      "name": "oh-my-claude",
-      "source": "./",
-      "description": "Themeable statusline for Claude Code. 9 color themes and 6 layouts.",
-      "version": "1.2.0"
+      "name": "oh-my-status",
+      "source": "./plugins/oh-my-status",
+      "description": "Themeable statusline for Claude Code. 9 color themes and 6 layouts."
+    },
+    {
+      "name": "oh-my-knowledge",
+      "source": "./plugins/oh-my-knowledge",
+      "description": "Knowledge-base plugin for Claude Code (work in progress)."
     }
   ]
 }

@@ -8,7 +8,7 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=test-helpers.sh
 . "$SCRIPT_DIR/test-helpers.sh"
 
-STATUSLINE="$REPO_ROOT/statusline.sh"
+STATUSLINE="$REPO_ROOT/plugins/oh-my-status/statusline.sh"
 
 # Each test sets up its own session_id and state file under ~/.claude/oh-my-claude/state/
 # (real path, since statusline.sh derives it from $HOME). Cleanup after each test.
@@ -1043,7 +1043,8 @@ end_test
 
 start_test "no workdir-raw variable left in tests or statusline"
 tok=WORKDIR; tok+=_RAW   # built at runtime so this test's own source never matches
-assert_eq "" "$(grep -rn -- "$tok" "$REPO_ROOT/tests" "$REPO_ROOT/statusline.sh")" "variable removed"
+[ -f "$REPO_ROOT/plugins/oh-my-status/statusline.sh" ] || { printf '    FAIL: statusline.sh missing\n' >&2; TEST_FAILED=1; }
+assert_eq "" "$(grep -rn -- "$tok" "$REPO_ROOT/tests" "$REPO_ROOT/plugins/oh-my-status/statusline.sh")" "variable removed"
 end_test
 
 # ---------------------------------------------------------------------------
@@ -1275,10 +1276,10 @@ case "$s" in *'b\c'*) ;; *) printf '    FAIL: b\c missing in [%s]\n' "$s" >&2; T
 end_test
 
 start_test "T4.5 preview shows account; ACCOUNT_SHOW=false hides it"
-p=$(OMC_DIR="$REPO_ROOT" OMC_CONF=/dev/null bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
+p=$(OMC_DIR="$REPO_ROOT/plugins/oh-my-status" OMC_CONF=/dev/null bash "$REPO_ROOT/plugins/oh-my-status/preview.sh" layouts 2>/dev/null | strip_ansi)
 if ! printf "%s" "$p" | grep -qw you; then printf '    FAIL: preview lacks you\n' >&2; TEST_FAILED=1; fi
 printf 'ACCOUNT_SHOW=false\n' > "$T4D/p.conf"
-p=$(OMC_DIR="$REPO_ROOT" OMC_CONF="$T4D/p.conf" bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
+p=$(OMC_DIR="$REPO_ROOT/plugins/oh-my-status" OMC_CONF="$T4D/p.conf" bash "$REPO_ROOT/plugins/oh-my-status/preview.sh" layouts 2>/dev/null | strip_ansi)
 if printf "%s" "$p" | grep -qw you; then printf '    FAIL: preview shows you when disabled\n' >&2; TEST_FAILED=1; fi
 end_test
 

@@ -17,4 +17,4 @@ After running the script, tell the user:
 
 Press `ctrl+o` on the command output above to expand and see the full color preview.
 
-To switch theme/layout: `/oh-my-claude:set-theme <theme> <layout>`
+To switch theme/layout: `/oh-my-status:set-theme <theme> <layout>`

@@ -21,7 +21,7 @@ cp "$SCRIPT_DIR/generate-preview.sh" "$OMC_DIR/"
 
 # --- conf-key detection (read-only; never writes the conf) -----------------
 # Surface template keys missing from an existing user conf so Claude can
-# suggest /oh-my-claude:setup. Per the Claude Code hooks docs, SessionStart
+# suggest /oh-my-status:setup. Per the Claude Code hooks docs, SessionStart
 # stdout (exit 0) is added to Claude's context (not shown to the user) — so
 # the notice is phrased as a context note for Claude to relay. Fully
 # non-fatal: any failure degrades to "no notice" and the hook still exits 0.
@@ -35,7 +35,7 @@ if [ -r "$SCRIPT_DIR/lib/conf-keys.sh" ]; then
   if [ -n "$missing" ]; then
     n="$(printf '%s\n' "$missing" | awk 'END{print NR}')"
     keys_csv="$(printf '%s' "$missing" | paste -sd, -)"
-    printf '%s\n' "[oh-my-claude] Context for the assistant: ${n} new config option(s) (${keys_csv}) exist in the bundled template but are not in the user's ~/.claude/oh-my-claude.conf. At a natural moment, mention to the user once (not repeatedly within this session) that running /oh-my-claude:setup will add the new options with safe defaults while preserving existing values."
+    printf '%s\n' "[oh-my-claude] Context for the assistant: ${n} new config option(s) (${keys_csv}) exist in the bundled template but are not in the user's ~/.claude/oh-my-claude.conf. At a natural moment, mention to the user once (not repeatedly within this session) that running /oh-my-status:setup will add the new options with safe defaults while preserving existing values."
   fi
 fi
 

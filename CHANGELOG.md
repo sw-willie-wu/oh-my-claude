@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased (2026-10-31)
+
+### Changed (breaking)
+- Split the repository into two plugins under `plugins/`: `oh-my-status` (the
+  statusline, formerly `oh-my-claude`) and `oh-my-knowledge` (a new
+  knowledge-base plugin; manifest stub only for now). The marketplace is still
+  named `oh-my-claude`.
+- Slash commands moved from the old `oh-my-claude` prefix to `/oh-my-status:`
+  (`/oh-my-status:setup`, `/oh-my-status:set-theme`, `/oh-my-status:list-themes`).
+- Plugin manifests and marketplace entries no longer carry a `version`.
+  All plugins in this marketplace update together on each release.
+- The marketplace declares `renames: {"oh-my-claude": "oh-my-status"}`, so
+  enabled installs migrate automatically.
+- The 24 h SessionStart sweep also removes stale `ctx-*` and `handoff-*`
+  files from the state directory.
+
+### Upgrading
+- Update the marketplace (or wait for auto-update), then close all sessions and
+  restart Claude Code twice: the first restart installs `oh-my-status` in the
+  background, the second makes it active. An old session's SessionStart would
+  copy the old files back, so do not leave one running.
+- Runtime paths are unchanged (`~/.claude/oh-my-claude/`,
+  `~/.claude/oh-my-claude.conf`).
+- If you had `oh-my-claude` disabled: run
+  `/plugin uninstall oh-my-claude@oh-my-claude`, then
+  `/plugin install oh-my-status@oh-my-claude`.
+
 ## 1.2.0 (2026-10-20)
 
 ### Added

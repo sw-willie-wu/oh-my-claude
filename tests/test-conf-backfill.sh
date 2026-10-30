@@ -9,10 +9,10 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=test-helpers.sh
 . "$SCRIPT_DIR/test-helpers.sh"
 
-# shellcheck source=../lib/conf-keys.sh
-. "$REPO_ROOT/lib/conf-keys.sh"
+# shellcheck source=../plugins/oh-my-status/lib/conf-keys.sh
+. "$REPO_ROOT/plugins/oh-my-status/lib/conf-keys.sh"
 
-SETUP_SH="$REPO_ROOT/setup.sh"
+SETUP_SH="$REPO_ROOT/plugins/oh-my-status/setup.sh"
 
 printf 'Running conf-backfill tests in: %s\n\n' "$OMC_STATE_DIR"
 
@@ -125,7 +125,7 @@ custom_conf="$sbox/custom-oh-my-claude.conf"
 HOME="$sbox/home" \
   OMC_DIR="$sbox/omc" \
   OMC_CONF="$custom_conf" \
-  OMC_CONF_TEMPLATE="$REPO_ROOT/oh-my-claude.conf" \
+  OMC_CONF_TEMPLATE="$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" \
   bash "$SETUP_SH" >/dev/null 2>&1
 [ -f "$custom_conf" ] || { printf '    FAIL: conf not written to OMC_CONF override path\n' >&2; TEST_FAILED=1; }
 assert_file_contains "$custom_conf" "WORKERS_MAX" "template copied to override conf path"
@@ -144,7 +144,7 @@ printf 'THEME=catppuccin\n' > "$uc"   # non-empty partial conf (LAYOUT etc. miss
 out="$(HOME="$sbox/home" \
   OMC_DIR="$sbox/omc" \
   OMC_CONF="$uc" \
-  OMC_CONF_TEMPLATE="$REPO_ROOT/oh-my-claude.conf" \
+  OMC_CONF_TEMPLATE="$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" \
   bash "$SETUP_SH" 2>/dev/null)"
 case "$out" in
   *"[oh-my-claude]"*"LAYOUT"*) ;;
@@ -158,11 +158,11 @@ start_test "setup.sh is silent when the conf has all template keys"
 sbox="$OMC_STATE_DIR/sbox-detect-full"
 mkdir -p "$sbox/home"
 uc="$sbox/oh-my-claude.conf"
-cp "$REPO_ROOT/oh-my-claude.conf" "$uc"   # conf == template → nothing missing
+cp "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" "$uc"   # conf == template → nothing missing
 out="$(HOME="$sbox/home" \
   OMC_DIR="$sbox/omc" \
   OMC_CONF="$uc" \
-  OMC_CONF_TEMPLATE="$REPO_ROOT/oh-my-claude.conf" \
+  OMC_CONF_TEMPLATE="$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" \
   bash "$SETUP_SH" 2>/dev/null)"
 assert_eq "" "$out" "no notice when conf is complete"
 end_test
@@ -188,22 +188,22 @@ end_test
 # ============================================================
 
 start_test "T5.1 template leaves icon keys unset"
-out=$(env -u ACCOUNT_ICON -u WORKERS_SHELL_ICON bash -c '. "$1"; printf "%s|%s" "${ACCOUNT_ICON-unset}" "${WORKERS_SHELL_ICON-unset}"' _ "$REPO_ROOT/oh-my-claude.conf")
+out=$(env -u ACCOUNT_ICON -u WORKERS_SHELL_ICON bash -c '. "$1"; printf "%s|%s" "${ACCOUNT_ICON-unset}" "${WORKERS_SHELL_ICON-unset}"' _ "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
 assert_eq "unset|unset" "$out" "icon lines must be commented examples"
 end_test
 
 start_test "T5.2 template defines account keys, no removed keys"
-out=$(env -u ACCOUNT_SHOW -u ACCOUNT_FORMAT bash -c '. "$1"; printf "%s|%s" "${ACCOUNT_SHOW-unset}" "${ACCOUNT_FORMAT-unset}"' _ "$REPO_ROOT/oh-my-claude.conf")
+out=$(env -u ACCOUNT_SHOW -u ACCOUNT_FORMAT bash -c '. "$1"; printf "%s|%s" "${ACCOUNT_SHOW-unset}" "${ACCOUNT_FORMAT-unset}"' _ "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
 assert_eq "true|name" "$out" "account defaults in template"
-out=$(env -u MODEL_CTX_TAG bash -c '. "$1"; printf "%s" "${MODEL_CTX_TAG-unset}"' _ "$REPO_ROOT/oh-my-claude.conf")
+out=$(env -u MODEL_CTX_TAG bash -c '. "$1"; printf "%s" "${MODEL_CTX_TAG-unset}"' _ "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
 assert_eq "true" "$out" "MODEL_CTX_TAG default in template"
-rm_hits=$(grep -c -E 'WORKERS_SHOW_AGENTS|WORKERS_SHOW_TYPE|WORKERS_AGENT_' "$REPO_ROOT/oh-my-claude.conf")
+rm_hits=$(grep -c -E 'WORKERS_SHOW_AGENTS|WORKERS_SHOW_TYPE|WORKERS_AGENT_' "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
 assert_eq "0" "$rm_hits" "no removed agent keys in template"
 end_test
 
 start_test "T5.3 empty user conf: missing lists account keys, not icons"
 : > "$OMC_STATE_DIR/empty.conf"
-miss=$(omc_missing_conf_keys "$REPO_ROOT/oh-my-claude.conf" "$OMC_STATE_DIR/empty.conf" | tr -d '\r')
+miss=$(omc_missing_conf_keys "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" "$OMC_STATE_DIR/empty.conf" | tr -d '\r')
 case "$miss" in *ACCOUNT_SHOW*) a=1;; *) a=0;; esac
 case "$miss" in *ACCOUNT_FORMAT*) b=1;; *) b=0;; esac
 case "$miss" in *_ICON*) c=1;; *) c=0;; esac
@@ -212,10 +212,16 @@ case "$miss" in *MODEL_CTX_TAG*) d=1;; *) d=0;; esac
 assert_eq "1" "$d" "MODEL_CTX_TAG listed as missing"
 end_test
 
-start_test "T5.4 plugin.json and marketplace.json version is 1.2.0"
-v1=$(jq -j '.version' "$REPO_ROOT/.claude-plugin/plugin.json")
-v2=$(jq -j '.plugins[0].version' "$REPO_ROOT/.claude-plugin/marketplace.json")
-assert_eq "1.2.0|1.2.0" "$v1|$v2" "versions"
+start_test "T5.4 no version key in any plugin.json or marketplace entry"
+vcount=0
+for pj in "$REPO_ROOT"/plugins/*/.claude-plugin/plugin.json; do
+  [ -f "$pj" ] || { printf '    FAIL: no plugin.json at %s\n' "$pj" >&2; TEST_FAILED=1; continue; }
+  [ "$(jq 'has("version")' "$pj" | tr -d '\r')" = false ] || vcount=$((vcount + 1))
+done
+mv_count=$(jq '[.plugins[] | has("version")] | map(select(.)) | length' "$REPO_ROOT/.claude-plugin/marketplace.json" 2>/dev/null | tr -d '\r')
+case "$mv_count" in (""|*[!0-9]*) mv_count=999 ;; esac   # missing/unparseable -> clean FAIL
+vcount=$((vcount + mv_count))
+assert_eq "0" "$vcount" "version keys found"
 end_test
 
 print_summary

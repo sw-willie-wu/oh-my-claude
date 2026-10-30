@@ -1,6 +1,8 @@
 # oh-my-claude
 
-Themeable statusline plugin for [Claude Code](https://claude.com/claude-code). Mix and match **9 color themes** with **6 layouts**.
+This marketplace (`oh-my-claude`) ships two plugins: **oh-my-status** (a themeable statusline) and **oh-my-knowledge** (a knowledge-base plugin, work in progress). All plugins in this marketplace update together on each release.
+
+`oh-my-status` is a themeable statusline plugin for [Claude Code](https://claude.com/claude-code). Mix and match **9 color themes** with **6 layouts**.
 
 ## Themes
 
@@ -65,8 +67,8 @@ GIT_CACHE_TTL=3                   # git-info cache TTL (s); 0 = disable (always 
 
 - Background shells that crash without being polled (`BashOutput`) may continue to show as running. After `WORKERS_SHELL_MAX_AGE` (default 1h) they are visually dimmed and marked with `?`. Use Claude Code's built-in `/tasks` command for the true running state.
 - The statusline itself needs `jq` 1.7 or newer. The hooks need it too: without it the hook silently no-ops and no worker lines appear.
-- Plugin-only. The Workers section relies on the plugin's tool hooks, so it works only when oh-my-claude is installed as a plugin (marketplace or `--plugin-dir`). Standalone `install.sh` installs get the statusline but no worker rows.
-- For elapsed time to keep updating while the main agent is idle, set `"refreshInterval": 3` in your `statusLine` settings (the `/oh-my-claude:setup` command does this automatically). 3 rather than 1 is deliberate — on Windows a 1-second tick can outpace a render and spawn overlapping statusline processes that contend for the worker-state lock. To keep frequent refreshes affordable, git info is cached for `GIT_CACHE_TTL` seconds (default 3) instead of running git on every tick. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
+- Plugin-only. The Workers section relies on the plugin's tool hooks, so it works only when oh-my-status is installed as a plugin (marketplace or `--plugin-dir`). Standalone `install.sh` installs get the statusline but no worker rows.
+- For elapsed time to keep updating while the main agent is idle, set `"refreshInterval": 3` in your `statusLine` settings (the `/oh-my-status:setup` command does this automatically). 3 rather than 1 is deliberate — on Windows a 1-second tick can outpace a render and spawn overlapping statusline processes that contend for the worker-state lock. To keep frequent refreshes affordable, git info is cached for `GIT_CACHE_TTL` seconds (default 3) instead of running git on every tick. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
 
 ## Account
 
@@ -107,14 +109,14 @@ In Claude Code, run:
 
 ```
 /plugin marketplace add sw-willie-wu/oh-my-claude
-/plugin install oh-my-claude@oh-my-claude
+/plugin install oh-my-status@oh-my-claude
 /reload-plugins
 ```
 
 Then run setup to configure the statusline:
 
 ```
-/oh-my-claude:setup
+/oh-my-status:setup
 ```
 
 Restart Claude Code to see the statusline.
@@ -123,10 +125,10 @@ Restart Claude Code to see the statusline.
 
 ```bash
 git clone https://github.com/sw-willie-wu/oh-my-claude.git
-claude --plugin-dir ./oh-my-claude
+claude --plugin-dir ./oh-my-claude/plugins/oh-my-status
 ```
 
-Then run `/oh-my-claude:setup` and restart Claude Code.
+Then run `/oh-my-status:setup` and restart Claude Code.
 
 ### Standalone (no plugin system)
 
@@ -140,17 +142,27 @@ provides the statusline only — the [Workers](#workers) section needs the
 plugin's tool hooks, so install via the marketplace or `--plugin-dir` if
 you want live background-shell rows.
 
+### Upgrading from oh-my-claude
+
+The statusline plugin was renamed from `oh-my-claude` to `oh-my-status`, and the repository now holds its plugins under `plugins/`. The marketplace name stays `oh-my-claude`, and runtime paths (`~/.claude/oh-my-claude/`, `~/.claude/oh-my-claude.conf`) are unchanged, so your theme, layout and config carry over.
+
+1. Update the marketplace (or wait for auto-update).
+2. Close all running Claude Code sessions, then start Claude Code and restart it once more. The first start installs `oh-my-status` in the background; the second makes it active. Do not keep an old session open: its SessionStart hook would copy the old files back.
+3. Slash commands moved from the old `oh-my-claude` prefix to `/oh-my-status:` (for example `/oh-my-status:setup`).
+
+If you had `oh-my-claude` disabled, the rename does not migrate it. Run `/plugin uninstall oh-my-claude@oh-my-claude`, then `/plugin install oh-my-status@oh-my-claude`.
+
 ### Upgrading
 
-If you installed oh-my-claude before 1.1.0, re-run `/oh-my-claude:setup` and accept the prompt to add `refreshInterval` to your `statusLine` settings — it enables the live background-shell elapsed-time refresh (git info is cached for `GIT_CACHE_TTL` seconds so the 3-second refresh stays cheap). Existing themes/layouts are unaffected.
+If you installed oh-my-claude before 1.1.0, re-run `/oh-my-status:setup` and accept the prompt to add `refreshInterval` to your `statusLine` settings — it enables the live background-shell elapsed-time refresh (git info is cached for `GIT_CACHE_TTL` seconds so the 3-second refresh stays cheap). Existing themes/layouts are unaffected.
 
 ## Usage
 
 ### Switch theme / layout
 
 ```
-/oh-my-claude:set-theme dracula        # Switch theme only
-/oh-my-claude:set-theme dracula fancy  # Switch theme and layout
+/oh-my-status:set-theme dracula        # Switch theme only
+/oh-my-status:set-theme dracula fancy  # Switch theme and layout
 ```
 
 Theme and layout changes take effect on the next statusline refresh (no restart needed).
@@ -158,7 +170,7 @@ Theme and layout changes take effect on the next statusline refresh (no restart 
 ### Preview all themes and layouts
 
 ```
-/oh-my-claude:list-themes
+/oh-my-status:list-themes
 ```
 
 Press `ctrl+o` on the output to expand and see the full color preview.
@@ -182,7 +194,7 @@ LAYOUT="powerline"
 
 - **Plugin install** registers slash commands (`setup`, `set-theme`, `list-themes`)
 - **SessionStart hook** syncs themes/layouts from the plugin to `~/.claude/oh-my-claude/` (auto-updates when plugin updates)
-- **`/oh-my-claude:setup`** adds the `statusLine` config to your `~/.claude/settings.json` (asks before overwriting existing config)
+- **`/oh-my-status:setup`** adds the `statusLine` config to your `~/.claude/settings.json` (asks before overwriting existing config)
 - **Config file** (`~/.claude/oh-my-claude.conf`) stores your theme/layout choice and is preserved across updates
 
 ## File locations
@@ -195,7 +207,7 @@ LAYOUT="powerline"
 
 ## Create your own theme
 
-Add a `.sh` file to `themes/` with 9 color variables:
+Add a `.sh` file to `plugins/oh-my-status/themes/` with 9 color variables:
 
 ```bash
 # My Custom Theme
@@ -214,7 +226,7 @@ Replace `R;G;B` with your color values (0-255). The first comment line is used a
 
 ## Create your own layout
 
-Add a `.sh` file to `layouts/` that defines a `render()` function. Available variables:
+Add a `.sh` file to `plugins/oh-my-status/layouts/` that defines a `render()` function. Available variables:
 
 - `$MODEL`, `$DIR`, `$BRANCH` - basic info (`$MODEL` may end in ` [NM]`, e.g. ` [1M]`, for large context windows)
 - `$ADD_FILES`, `$MOD_FILES`, `$DEL_FILES` - git file counts
@@ -223,7 +235,7 @@ Add a `.sh` file to `layouts/` that defines a `render()` function. Available var
 - `$ACCOUNT`, `$ACCOUNT_ICON` - account segment (`$ACCOUNT` is empty when hidden; safe for `echo -e`)
 - `$C_PRIMARY`, `$C_SECONDARY`, etc. - theme colors
 
-See existing layouts in `layouts/` for examples.
+See existing layouts in `plugins/oh-my-status/layouts/` for examples.
 
 ## License
 

@@ -155,9 +155,12 @@ case "$ARG" in
     # crashed-write gitcache-*.tmp.<pid> leftovers — same dir, same age policy.
     # An actively-used cache is mtime-bumped on every miss, so only caches for
     # dirs not visited in 24h are swept.
+    # The ctx-* and handoff-* files (written by oh-my-knowledge) are swept too.
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'state-*.tsv' -type f -mmin +1440 -delete 2>/dev/null
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'gitcache-*' -type f -mmin +1440 -delete 2>/dev/null
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'account-*' -type f -mmin +1440 -delete 2>/dev/null
+    find "$OMC_STATE_DIR" -maxdepth 1 -name 'ctx-*' -type f -mmin +1440 -delete 2>/dev/null
+    find "$OMC_STATE_DIR" -maxdepth 1 -name 'handoff-*' -type f -mmin +1440 -delete 2>/dev/null
     ;;
   pre)
     [ -z "$SESSION_ID" ] && exit 0

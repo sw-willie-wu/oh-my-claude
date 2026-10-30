@@ -1,0 +1,9 @@
+{
+  "name": "oh-my-knowledge",
+  "description": "Knowledge-base plugin for Claude Code (work in progress).",
+  "author": {
+    "name": "SW.Willie.Wu"
+  },
+  "repository": "https://github.com/sw-willie-wu/oh-my-claude",
+  "license": "MIT"
+}

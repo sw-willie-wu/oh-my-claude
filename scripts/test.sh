@@ -16,4 +16,7 @@ if [ -f "$REPO_ROOT/tests/test-conf-backfill.sh" ]; then
   echo "=== conf-backfill tests ==="
   bash "$REPO_ROOT/tests/test-conf-backfill.sh" || FAIL=1
 fi
+echo
+echo "=== marketplace tests ==="
+bash "$REPO_ROOT/tests/test-marketplace.sh" || FAIL=1
 exit "$FAIL"

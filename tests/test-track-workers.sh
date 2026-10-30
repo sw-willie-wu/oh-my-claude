@@ -9,7 +9,7 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 . "$SCRIPT_DIR/test-helpers.sh"
 
 # Path to the dispatcher under test.
-TRACK_WORKERS="$REPO_ROOT/hooks/track-workers.sh"
+TRACK_WORKERS="$REPO_ROOT/plugins/oh-my-status/hooks/track-workers.sh"
 
 printf 'Running track-workers tests in: %s\n\n' "$OMC_STATE_DIR"
 
@@ -490,7 +490,7 @@ FG_BASH_PAYLOAD='{"session_id":"t1-sess","hook_event_name":"PreToolUse","tool_na
 POST_BASH_PAYLOAD='{"session_id":"t1-sess","hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"toolu_t1","tool_input":{"command":"sleep 5","run_in_background":true},"tool_response":{"backgroundTaskId":"bash_t1"}}'
 
 start_test "hooks.json: no matcher token is exactly Agent or Task"
-toks=$(jq -r '.hooks[][]?.matcher // empty' "$REPO_ROOT/hooks/hooks.json" | tr -d '\r' | tr '|' '\n')
+toks=$(jq -r '.hooks[][]?.matcher // empty' "$REPO_ROOT/plugins/oh-my-status/hooks/hooks.json" | tr -d '\r' | tr '|' '\n')
 assert_eq "" "$(printf '%s\n' "$toks" | grep -xE 'Agent|Task')" "agent matchers removed"
 end_test
 
