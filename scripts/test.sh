@@ -43,4 +43,7 @@ bash "$REPO_ROOT/tests/test-cross-plugin-contract.sh" || FAIL=1
 echo
 echo "=== knowledge lint (content) tests ==="
 bash "$REPO_ROOT/tests/knowledge/test-lint-content.sh" || FAIL=1
+echo
+echo "=== knowledge skills tests ==="
+bash "$REPO_ROOT/tests/knowledge/test-skills.sh" || FAIL=1
 exit "$FAIL"

@@ -237,6 +237,75 @@ grep -qF "ignored a (not found and not tracked)" "$T/out" || { echo "    FAIL: n
 assert_eq "x/a/z" "$(git -C "$KB" show --name-only --format= HEAD | tr -d '\r')" "x/a/z committed"
 end_test
 
+start_test "empty directory among listed paths is dropped; others committed"
+newkb empty
+mkdir -p "$KB/projects" "$KB/global/sub"
+echo e > "$KB/global/e1.md"
+n0=$(nlog)
+run 'existing pages' rules global projects index.md
+assert_eq "0" "$RC" "exit"
+grep -qF "commit.sh: ignored projects (empty directory)" "$T/out" || { echo "    FAIL: no ignored line for empty projects/" >&2; cat "$T/out" >&2; TEST_FAILED=1; }
+assert_eq "global/e1.md" "$(git -C "$KB" show --name-only --format= HEAD | tr -d '\r')" "global/e1.md committed"
+assert_eq "$((n0 + 1))" "$(nlog)" "one new commit"
+end_test
+
+start_test "only an empty directory -> exit 2"
+mkdir -p "$KB/lint/empty"
+run 'only empty' lint/empty
+assert_eq "2" "$RC" "exit"
+grep -qF "commit.sh: ignored lint/empty (empty directory)" "$T/out" || { echo "    FAIL: no ignored line" >&2; TEST_FAILED=1; }
+end_test
+
+start_test "deleted tracked directory (now empty) still commits the deletion"
+mkdir -p "$KB/global/gone"; echo g > "$KB/global/gone/a.md"
+run 'add gone' global/gone
+assert_eq "0" "$RC" "add"
+rm -f "$KB/global/gone/a.md"
+run 'rm gone' global/gone
+assert_eq "0" "$RC" "deletion exit"
+assert_eq "" "$(git -C "$KB" ls-files global/gone | tr -d '\r')" "deletion committed"
+end_test
+
+start_test "directory holding only a symlink is not empty; symlinked dir path is kept"
+newkb sym
+mkdir -p "$KB/global/links" "$KB/projects/real"; echo r > "$KB/projects/real/r.md"
+if MSYS=winsymlinks:nativestrict ln -s ../../projects/real/r.md "$KB/global/links/r-link.md" 2>/dev/null && [ -L "$KB/global/links/r-link.md" ]; then
+  run 'only symlink' global/links
+  assert_eq "0" "$RC" "dir with only a symlink"
+  assert_eq "global/links/r-link.md" "$(git -C "$KB" show --name-only --format= HEAD | tr -d '\r')" "symlink committed"
+  if MSYS=winsymlinks:nativestrict ln -s real "$KB/projects/real-link" 2>/dev/null && [ -L "$KB/projects/real-link" ]; then
+    run 'dir symlink' projects/real-link
+    assert_eq "0" "$RC" "symlink to a directory"
+    grep -qF 'empty directory' "$T/out" && { echo "    FAIL: symlink to dir dropped as empty" >&2; TEST_FAILED=1; }
+  fi
+else
+  echo "    (symlinks cannot be created here; skipped)"
+fi
+end_test
+
+start_test "Windows: path too long for git add -> exit 1, nothing committed"
+if [ "$IS_WIN" = 1 ]; then
+  newkb longp
+  seg="dddddddddddddddddddddddddddddddddddddddddddddddddd"   # 50 chars
+  rel="_retired/harvested/$seg/$seg/$seg/$seg/$seg/$seg"
+  if mkdir -p "$KB/$rel" 2>/dev/null && echo l > "$KB/$rel/long.md" 2>/dev/null; then
+    n0=$(nlog)
+    OMK_KNOWLEDGE_DIR="$KB" GIT_CONFIG_PARAMETERS="'core.longpaths=false'" bash "$COMMIT" 'long' _retired >"$T/out" 2>&1; RC=$?
+    if grep -qF 'Filename too long' "$T/out" || [ "$RC" != 0 ]; then
+      assert_eq "1" "$RC" "exit"
+      grep -qF 'commit.sh:' "$T/out" || { echo "    FAIL: no commit.sh message" >&2; TEST_FAILED=1; }
+      assert_eq "$n0" "$(nlog)" "nothing committed"
+    else
+      echo "    (git handled the long path here; nothing to assert)"
+    fi
+  else
+    echo "    (cannot create the long path here; skipped)"
+  fi
+else
+  echo "    (not Windows; skipped)"
+fi
+end_test
+
 start_test "common.sh stays bash-3.2 compatible"
 hits="$(grep -nE '\^\^|,,\}|declare -A|mapfile|readarray' "$PLUGIN/scripts/lib/common.sh")"
 assert_eq "" "$hits" "bash4-only constructs in common.sh"

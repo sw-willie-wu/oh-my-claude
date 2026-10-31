@@ -5,7 +5,11 @@
 # Exit: 0 committed | 3 nothing to commit (callers treat as success) |
 #       4 lock still held after retries |
 #       2 usage error, path outside the KB, a .git path, or no committable path |
-#       1 KB missing or any other git failure.
+#       1 KB missing, git add could not read a path (e.g. "Filename too long"
+#         on Windows without core.longpaths) or any other git failure.
+# A listed path that neither exists nor is tracked, or an empty directory (no
+# files or symlinks below it) with nothing tracked under it, is dropped with an
+# "ignored" line on stderr.
 # Nothing is committed on any non-zero exit.
 # Paths must be given in their on-disk case (the KB prefix of an absolute path
 # is matched case-insensitively on Windows; the rest is used as given).
@@ -83,8 +87,14 @@ while IFS= read -r -d '' f; do TRACKED+=("$f"); done \
   < <(LC_ALL=C LANGUAGE= git -C "$KB" -c core.quotepath=false ls-files -z -- "${RELS[@]}" 2>/dev/null)
 KEEP=()
 for rel in "${RELS[@]}"; do
-  ok=0
-  [ -e "$KB/$rel" ] && ok=1
+  ok=0 why="not found and not tracked"
+  if [ -d "$KB/$rel" ]; then
+    # a directory counts only when it holds a file or symlink (else git commit -- <dir> fails);
+    # a listed symlink to a directory matches -type l itself
+    if [ -n "$(find "$KB/$rel" \( -type f -o -type l \) -print -quit 2>/dev/null)" ]; then ok=1; else why="empty directory"; fi
+  elif [ -e "$KB/$rel" ]; then
+    ok=1
+  fi
   if [ "$ok" = 0 ]; then
     for f in ${TRACKED[@]+"${TRACKED[@]}"}; do
       case "$f" in "$rel"|"$rel"/*) ok=1; break ;; esac
@@ -93,7 +103,7 @@ for rel in "${RELS[@]}"; do
   if [ "$ok" = 1 ]; then
     KEEP+=("$rel")
   else
-    echo "commit.sh: ignored $rel (not found and not tracked)" >&2
+    echo "commit.sh: ignored $rel ($why)" >&2
   fi
 done
 [ "${#KEEP[@]}" -gt 0 ] || { echo "commit.sh: no committable path" >&2; exit 2; }
@@ -107,6 +117,13 @@ attempt=0
 while :; do
   rc=0
   if LC_ALL=C LANGUAGE= git -C "$KB" add -- "${RELS[@]}" >/dev/null 2>"$ERR"; then
+    # git add can succeed while skipping unreadable paths (only a warning)
+    if grep -qE 'Filename too long|^(error|fatal):' "$ERR"; then
+      LC_ALL=C LANGUAGE= git -C "$KB" reset -q -- "${RELS[@]}" >/dev/null 2>&1 || true
+      cat "$ERR" >&2
+      echo "commit.sh: git add could not read every path (path too long? enable long paths for git on Windows); nothing committed" >&2
+      exit 1
+    fi
     if LC_ALL=C LANGUAGE= git -C "$KB" diff --cached --quiet -- "${RELS[@]}" 2>>"$ERR"; then
       exit 3
     fi

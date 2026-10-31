@@ -1,0 +1,60 @@
+---
+name: handoff
+description: Use at the end of a work session, before context runs out mid-project, when the automatic-handoff hook asks for it, or when the user says /handoff, "update memory", "更新 memory", "交接", or "下個 session 見". Updates only the progress section of this project's auto memory, then runs distill.
+---
+
+# Handoff — progress only, then distill
+
+Assume the next session is a weak model with a small context: it reads `MEMORY.md` at start-up and must be able to act from the status section alone. Handoff owns only that section; knowledge goes to the knowledge base through distill. `<knowledge_dir>/SCHEMA.md` is the authority for writing rules (status-section boundary, marker line).
+
+## 1. Find MEMORY.md
+
+The current auto-memory dir is the one stated in this session's system prompt. If none is visible, run
+
+```bash
+OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' bash "${CLAUDE_PLUGIN_ROOT}/scripts/search.sh" omk-project
+```
+
+from the working directory and use its `== auto memory: <dir>` line (`(none)` → ask the user where this project's auto memory is). Read the whole `MEMORY.md`. Note the marker line `- Knowledge base project: [[k:projects/<p>/index]] (omk-project)` exactly, if there is one.
+
+## 2. Rewrite the status section only
+
+The status section is the block from the `## ⚡ 現況（YYYY-MM-DD）` heading through the end of its 已完成 (done) block. Write the heading and labels in the user's language (keep the wording of an existing heading). Schema, at most 20 lines, only work in flight:
+
+```
+## ⚡ 現況（YYYY-MM-DD）
+- 🎯 Goal: <one sentence>
+- git: <branch> @ <short hash>; uncommitted: <none | what>; unpushed: <commits ahead>
+- Verification: <what is green | what is still pending, and who verifies>
+- Next: ① ② ③ (directly executable actions, not wishes)
+- Waiting on user: <decisions or actions needed; omit when none>
+- Open issues: <one per line + pointer; omit when none>
+
+## 已完成
+- YYYY-MM-DD <one line> → <pointer>
+```
+
+- For the git line, check the project repository (the working directory's repository, never the knowledge base) now: current branch, HEAD, uncommitted changes, commits not pushed. Record what you see, not what you remember.
+- Rewrite, do not append. Finished or merged items move to the done block, one line each with a pointer.
+- Change nothing outside the section: replace exactly the old section text with Edit, so every other line — including the marker line — stays byte-identical.
+- No status section yet: insert it at the top of the file, before the marker line, followed by one blank line.
+- No conclusions or pitfalls here (they belong to distill); no stacked corrections; no session-only codes.
+
+Then Read the file again. If step 1 found a marker line: it must be present once, unchanged, after the status section with a blank line before it, within the first 200 lines. Restore it if lost or changed.
+
+## 3. Distill
+
+Run `oh-my-knowledge:distill` (Skill tool) for this session's knowledge and the harvest. Inside handoff, a lock or commit problem is reported, not a reason to stop.
+
+## 4. Mark the handoff
+
+So the automatic handoff does not ask again in this context window, write the state file `handoff-<sid>` (skipped when the session id was not substituted):
+
+```bash
+d="${OMC_STATE_DIR:-$HOME/.claude/oh-my-claude/state}"; sid='${CLAUDE_SESSION_ID}'
+case "$sid" in ''|*'{'*) echo "no session id; marker skipped" ;; *) mkdir -p "$d" && : > "$d/handoff-${sid//[^A-Za-z0-9_-]/_}" && echo "marker written" ;; esac
+```
+
+## 5. Report
+
+List what changed in `MEMORY.md`, what distill wrote and committed (or why not), anything waiting on the user. End with: you can now `/clear` or `/compact`.
