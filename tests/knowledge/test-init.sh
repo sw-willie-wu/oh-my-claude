@@ -90,8 +90,8 @@ rm -rf "$R" "$WT" "$NG"
 end_test
 
 start_test "omk_config defaults"
-out="$(bash -c '. "$1"; omk_config; for k in OMK_KNOWLEDGE_DIR OMK_LOOKUP_REMINDER OMK_AUTO_HANDOFF OMK_AUTO_HANDOFF_THRESHOLD OMK_LINT_STALE_DAYS OMK_LINT_FLAG_DAYS OMK_LINT_REMIND_AFTER_DISTILLS OMK_MAX_FILE_KB OMK_MAX_INDEX_LINE_CHARS OMK_AUTO_MEMORY_DIR OMK_AUTO_MEMORY_GLOB OMK_CLAUDE_MD OMC_STATE_DIR OMK_JQ; do echo "$k=${!k}"; done' _ "$COMMON" | tr -d '\r')"
-for kv in "OMK_KNOWLEDGE_DIR=$HOME/knowledge" OMK_LOOKUP_REMINDER=true OMK_AUTO_HANDOFF=true OMK_AUTO_HANDOFF_THRESHOLD=70 \
+out="$(bash -c '. "$1"; omk_config; for k in OMK_KNOWLEDGE_DIR OMK_LOOKUP_REMINDER OMK_AUTO_HANDOFF OMK_AUTO_HANDOFF_THRESHOLD OMK_AUTO_HANDOFF_REPEAT OMK_LINT_STALE_DAYS OMK_LINT_FLAG_DAYS OMK_LINT_REMIND_AFTER_DISTILLS OMK_MAX_FILE_KB OMK_MAX_INDEX_LINE_CHARS OMK_AUTO_MEMORY_DIR OMK_AUTO_MEMORY_GLOB OMK_CLAUDE_MD OMC_STATE_DIR OMK_JQ; do echo "$k=${!k}"; done' _ "$COMMON" | tr -d '\r')"
+for kv in "OMK_KNOWLEDGE_DIR=$HOME/knowledge" OMK_LOOKUP_REMINDER=true OMK_AUTO_HANDOFF=true OMK_AUTO_HANDOFF_THRESHOLD=70 OMK_AUTO_HANDOFF_REPEAT=20 \
   OMK_LINT_STALE_DAYS=90 OMK_LINT_FLAG_DAYS=14 OMK_LINT_REMIND_AFTER_DISTILLS=10 OMK_MAX_FILE_KB=8 OMK_MAX_INDEX_LINE_CHARS=200 \
   OMK_AUTO_MEMORY_DIR= "OMK_AUTO_MEMORY_GLOB=$HOME/.claude/projects/*/memory" "OMK_CLAUDE_MD=$HOME/.claude/CLAUDE.md" \
   "OMC_STATE_DIR=$T/state" OMK_JQ=jq; do
@@ -128,8 +128,8 @@ assert_eq "$(call omk_resolve_dir "$KB1")" "$(CLAUDE_PLUGIN_OPTION_KNOWLEDGE_DIR
 rm -rf "$KB1"
 end_test
 
-start_test "plugin.json userConfig: nine keys, ranges, defaults == omk_config defaults"
-KEYS="auto_handoff,auto_handoff_threshold,knowledge_dir,lint_flag_days,lint_remind_after_distills,lint_stale_days,lookup_reminder,max_file_kb,max_index_line_chars"
+start_test "plugin.json userConfig: ten keys, ranges, defaults == omk_config defaults"
+KEYS="auto_handoff,auto_handoff_repeat,auto_handoff_threshold,knowledge_dir,lint_flag_days,lint_remind_after_distills,lint_stale_days,lookup_reminder,max_file_kb,max_index_line_chars"
 assert_eq "$KEYS" "$(jq -r '.userConfig | keys | join(",")' "$PJ" | tr -d '\r')" "keys"
 assert_eq "false" "$(jq 'has("version")' "$PJ" | tr -d '\r')" "no version"
 assert_eq "knowledge_dir" "$(jq -r '[.userConfig | to_entries[] | select(.value.required==true) | .key] | join(",")' "$PJ" | tr -d '\r')" "required only knowledge_dir"
@@ -137,13 +137,15 @@ assert_eq "" "$(jq -r '[.userConfig | to_entries[] | select((.value.type==null) 
 assert_eq "directory,boolean,boolean,number" "$(jq -r '[.userConfig.knowledge_dir.type,.userConfig.lookup_reminder.type,.userConfig.auto_handoff.type,.userConfig.max_file_kb.type]|join(",")' "$PJ" | tr -d '\r')" "types"
 rng() { jq -r --arg k "$1" '.userConfig[$k] | "\(.min)-\(.max)"' "$PJ" | tr -d '\r'; }
 assert_eq "30-90" "$(rng auto_handoff_threshold)" "threshold range"
+assert_eq "10-60" "$(rng auto_handoff_repeat)" "repeat range"
 assert_eq "1-3650" "$(rng lint_stale_days)" "stale range"
 assert_eq "1-3650" "$(rng lint_flag_days)" "flag range"
 assert_eq "1-1000" "$(rng lint_remind_after_distills)" "distills range"
 assert_eq "1-64" "$(rng max_file_kb)" "kb range"
 assert_eq "80-1000" "$(rng max_index_line_chars)" "chars range"
 declare -A MAP=([knowledge_dir]=OMK_KNOWLEDGE_DIR [lookup_reminder]=OMK_LOOKUP_REMINDER [auto_handoff]=OMK_AUTO_HANDOFF \
-  [auto_handoff_threshold]=OMK_AUTO_HANDOFF_THRESHOLD [lint_stale_days]=OMK_LINT_STALE_DAYS [lint_flag_days]=OMK_LINT_FLAG_DAYS \
+  [auto_handoff_threshold]=OMK_AUTO_HANDOFF_THRESHOLD [auto_handoff_repeat]=OMK_AUTO_HANDOFF_REPEAT \
+  [lint_stale_days]=OMK_LINT_STALE_DAYS [lint_flag_days]=OMK_LINT_FLAG_DAYS \
   [lint_remind_after_distills]=OMK_LINT_REMIND_AFTER_DISTILLS [max_file_kb]=OMK_MAX_FILE_KB [max_index_line_chars]=OMK_MAX_INDEX_LINE_CHARS)
 for k in "${!MAP[@]}"; do
   jd="$(jq -r --arg k "$k" '.userConfig[$k].default' "$PJ" | tr -d '\r')"

@@ -156,11 +156,17 @@ case "$ARG" in
     # An actively-used cache is mtime-bumped on every miss, so only caches for
     # dirs not visited in 24h are swept.
     # The ctx-* and handoff-* files (written by oh-my-knowledge) are swept too.
+    # A handoff-<sid> marker (which records the usage % of its window) is only
+    # removed when ctx-<sid> is missing or also older than 24h, i.e. the session
+    # is gone; this runs before the ctx-* sweep so the check sees the real mtime.
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'state-*.tsv' -type f -mmin +1440 -delete 2>/dev/null
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'gitcache-*' -type f -mmin +1440 -delete 2>/dev/null
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'account-*' -type f -mmin +1440 -delete 2>/dev/null
+    find "$OMC_STATE_DIR" -maxdepth 1 -name 'handoff-*' -type f -mmin +1440 2>/dev/null | while IFS= read -r hf; do
+      hn="${hf##*/}"
+      [ -z "$(find "$OMC_STATE_DIR" -maxdepth 1 -name "ctx-${hn#handoff-}" -type f ! -mmin +1440 2>/dev/null)" ] && rm -f "$hf" 2>/dev/null
+    done
     find "$OMC_STATE_DIR" -maxdepth 1 -name 'ctx-*' -type f -mmin +1440 -delete 2>/dev/null
-    find "$OMC_STATE_DIR" -maxdepth 1 -name 'handoff-*' -type f -mmin +1440 -delete 2>/dev/null
     ;;
   pre)
     [ -z "$SESSION_ID" ] && exit 0

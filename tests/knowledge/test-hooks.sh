@@ -13,7 +13,7 @@ STATUSLINE="$REPO_ROOT/plugins/oh-my-status/statusline.sh"
 for v in $(compgen -e | grep -E '^(OMK_|CLAUDE_PLUGIN_OPTION_|CLAUDE_CONFIG_DIR$)'); do unset "$v"; done
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
-export HOME="$T/home"; mkdir -p "$HOME"
+export HOME="$T/home"; mkdir -p "$HOME/knowledge"; : > "$HOME/knowledge/SCHEMA.md"
 export OMC_STATE_DIR="$T/state"
 export OMC_CONF=/dev/null
 
@@ -107,8 +107,90 @@ printf ' 200000\n' > "$OMC_STATE_DIR/ctx-sess-C"
 stop_hook '{"session_id":"sess-C"}'; empty "$T/out" "empty pct field"
 printf '\n' > "$OMC_STATE_DIR/ctx-sess-C"
 stop_hook '{"session_id":"sess-C"}'; empty "$T/out" "blank ctx line"
-touch "$OMC_STATE_DIR/handoff-sess-A"
-stop_hook "$STOP"; empty "$T/out" "existing marker"
+printf '90\n' > "$OMC_STATE_DIR/handoff-sess-A"
+printf '90 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+stop_hook "$STOP"; empty "$T/out" "existing marker at 90%"
+end_test
+
+# fire_case <label> <marker content|-> <ctx pct> <expect fire|silent> [env...]
+# marker '-' = no marker file. On fire, the marker must then hold the ctx pct.
+fire_case() {
+  local label="$1" mk="$2" pct="$3" want="$4"; shift 4
+  reset_state
+  printf '%s 200000\n' "$pct" > "$OMC_STATE_DIR/ctx-sess-A"
+  [ "$mk" = - ] || printf '%b' "$mk" > "$OMC_STATE_DIR/handoff-sess-A"
+  stop_hook "$STOP" "$@"
+  assert_eq 0 "$RC" "$label exit"
+  if [ "$want" = fire ]; then
+    contains "$T/out" '"decision":"block"' "$label fires"
+    assert_eq "$pct" "$(head -n1 "$OMC_STATE_DIR/handoff-sess-A" 2>/dev/null)" "$label marker records pct"
+  else
+    empty "$T/out" "$label silent"
+  fi
+}
+
+start_test "auto-handoff firing rule (thr 70, repeat 20)"
+fire_case "no marker" - 70 fire
+assert_eq "70" "$(cat "$OMC_STATE_DIR/handoff-sess-A")" "marker content is the pct"
+fire_case "r<thr gap 4" '66\n' 70 silent
+fire_case "r<thr gap 5" '65\n' 70 fire
+fire_case "r<thr small r" '10\n' 70 fire
+fire_case "r>=thr gap repeat-1" '70\n' 89 silent
+fire_case "r>=thr gap repeat" '70\n' 90 fire
+fire_case "r+repeat>100" '85\n' 100 silent
+fire_case "r+repeat=100 (r=80)" '80\n' 100 fire
+fire_case "below threshold, no marker" - 69 silent
+end_test
+
+start_test "auto-handoff marker validity"
+fire_case "empty marker = 0" '' 70 fire
+fire_case "abc marker = 0" 'abc\n' 70 fire
+fire_case "150 marker = 0" '150\n' 70 fire
+fire_case "20-digit marker = 0" '00000000000000000090\n' 70 fire
+fire_case "CRLF marker 72 -> 72 (gap 18 silent)" '72\r\n' 90 silent
+fire_case "CRLF marker 72 -> 72 (gap 20 fires)" '72\r\n' 92 fire
+fire_case "first line only" '72\n10\n' 90 silent
+reset_state
+printf '100 200000\r\n' > "$OMC_STATE_DIR/ctx-sess-A"
+stop_hook "$STOP"; contains "$T/out" 'Context is at 100%' "CRLF ctx"
+reset_state
+printf '75\r\n' > "$OMC_STATE_DIR/ctx-sess-A"
+stop_hook "$STOP"; contains "$T/out" 'Context is at 75%' "CRLF ctx without size"
+assert_eq "75" "$(cat "$OMC_STATE_DIR/handoff-sess-A" 2>/dev/null)" "CRLF ctx records 75"
+reset_state
+printf '0075 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+stop_hook "$STOP"; empty "$T/out" "4-digit ctx 0075 invalid"
+reset_state
+printf '150 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+stop_hook "$STOP"; empty "$T/out" "invalid ctx 150"
+end_test
+
+start_test "auto-handoff repeat option is clamped 10-60"
+fire_case "repeat=5 acts as 10 (gap 9)" '70\n' 79 silent CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=5
+fire_case "repeat=5 acts as 10 (gap 10)" '70\n' 80 fire CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=5
+fire_case "repeat=99 acts as 60 (gap 59)" '30\n' 89 silent CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=99 CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_THRESHOLD=30
+fire_case "repeat=99 acts as 60 (gap 60)" '30\n' 90 fire CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=99 CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_THRESHOLD=30
+fire_case "env repeat=30 (gap 29)" '70\n' 99 silent OMK_AUTO_HANDOFF_REPEAT=30
+fire_case "env repeat=30 (gap 30)" '70\n' 100 fire OMK_AUTO_HANDOFF_REPEAT=30
+end_test
+
+start_test "auto-handoff unwritable marker and stop_hook_active stay silent"
+reset_state
+printf '80 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+mkdir "$OMC_STATE_DIR/handoff-sess-A"
+stop_hook "$STOP"; assert_eq 0 "$RC" "unwritable exit"; empty "$T/out" "unwritable marker (directory)"
+rmdir "$OMC_STATE_DIR/handoff-sess-A"
+stop_hook '{"session_id":"sess-A","stop_hook_active":true}'; empty "$T/out" "stop_hook_active true"
+[ -e "$OMC_STATE_DIR/handoff-sess-A" ] && { printf '    FAIL: marker written while stop_hook_active\n' >&2; TEST_FAILED=1; }
+stop_hook '{"session_id":"sess-A"}'; contains "$T/out" '"decision":"block"' "stop_hook_active absent fires"
+end_test
+
+start_test "auto-handoff: payload without session_id is silent; fields parsed with tab split"
+reset_state
+printf '80 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+stop_hook '{"stop_hook_active":false}'; empty "$T/out" "no session_id (active false)"
+stop_hook '{"stop_hook_active":true}'; empty "$T/out" "no session_id (active true)"
+stop_hook '{"session_id":"sess-A","stop_hook_active":null}'; contains "$T/out" '"decision":"block"' "null stop_hook_active"
 end_test
 
 start_test "auto-handoff honours threshold option and sanitises sid"
@@ -146,14 +228,25 @@ contains "$T/out" "Knowledge base: $(native "$KB")." "configured dir on resume"
 lacks "$T/out" 'MEMORY.md' "no reread on resume"
 end_test
 
-start_test "session-start: compact deletes marker + reread; clear keeps marker"
-touch "$OMC_STATE_DIR/handoff-sess-A"
+start_test "session-start: compact and clear delete marker + ctx and ask for reread"
+printf '70\n' > "$OMC_STATE_DIR/handoff-sess-A"
 printf '80 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
 start_hook clear CLAUDE_PLUGIN_OPTION_KNOWLEDGE_DIR="$KB"
-[ -f "$OMC_STATE_DIR/ctx-sess-A" ] || { printf '    FAIL: clear removed ctx file\n' >&2; TEST_FAILED=1; }
+[ -f "$OMC_STATE_DIR/ctx-sess-A" ] && { printf '    FAIL: clear kept ctx file\n' >&2; TEST_FAILED=1; }
 contains "$T/out" 'MEMORY.md' "clear reread"
 contains "$T/out" '[[k:path]]' "clear link defs"
-[ -f "$OMC_STATE_DIR/handoff-sess-A" ] || { printf '    FAIL: clear removed marker\n' >&2; TEST_FAILED=1; }
+[ -f "$OMC_STATE_DIR/handoff-sess-A" ] && { printf '    FAIL: clear kept marker\n' >&2; TEST_FAILED=1; }
+printf '70\n' > "$OMC_STATE_DIR/handoff-sess-A"
+printf '80 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+start_hook resume CLAUDE_PLUGIN_OPTION_KNOWLEDGE_DIR="$KB"
+[ -f "$OMC_STATE_DIR/handoff-sess-A" ] && [ -f "$OMC_STATE_DIR/ctx-sess-A" ] || { printf '    FAIL: resume cleared marker/ctx\n' >&2; TEST_FAILED=1; }
+printf '{"hook_event_name":"SessionStart","source":"compact"}' | bash "$HOOKS/session-start.sh" >"$T/out" 2>/dev/null
+contains "$T/out" 'MEMORY.md' "compact without session_id still asks reread"
+[ -f "$OMC_STATE_DIR/handoff-sess-A" ] || { printf '    FAIL: compact without sid removed another marker\n' >&2; TEST_FAILED=1; }
+printf '{"session_id":"sess-A","hook_event_name":"SessionStart"}' | bash "$HOOKS/session-start.sh" >"$T/out" 2>/dev/null
+contains "$T/out" 'Knowledge base:' "payload without source"
+lacks "$T/out" 'MEMORY.md' "no reread without source"
+[ -f "$OMC_STATE_DIR/handoff-sess-A" ] || { printf '    FAIL: no-source payload cleared marker\n' >&2; TEST_FAILED=1; }
 start_hook compact CLAUDE_PLUGIN_OPTION_KNOWLEDGE_DIR="$KB"
 contains "$T/out" 'MEMORY.md' "compact reread"
 contains "$T/out" '[[k:path]]' "compact link defs"

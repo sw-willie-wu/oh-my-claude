@@ -46,6 +46,7 @@ Change them in the `/plugin` settings of oh-my-knowledge, or ask `setup`. Unset 
 | `lookup_reminder` | `true` | On a prompt that looks like a problem or error, remind Claude to run lookup first. |
 | `auto_handoff` | `true` | When context usage reaches the threshold, ask Claude to run a handoff. |
 | `auto_handoff_threshold` | `70` (30-90) | Context usage percentage that triggers the automatic handoff. |
+| `auto_handoff_repeat` | `20` (10-60) | Once a handoff was requested at or above the threshold, ask again after usage has grown by this many percentage points. |
 | `lint_stale_days` | `90` (1-3650) | A page is reported as stale only when its `metadata.verified` date is older than this *and* its text mentions a version (`v1.2`, `1.2.3`) or time-sensitive wording (latest, current, as of, 目前, 最新). |
 | `lint_flag_days` | `14` (1-3650) | An `UNVERIFIED` flag older than this is reported as overdue (`unverified_overdue`); a flag with no date or an invalid date is reported too. |
 | `lint_remind_after_distills` | `10` (1-1000) | Distill reminds you to lint after this many distills since the last lint. |
@@ -57,11 +58,11 @@ Change them in the `/plugin` settings of oh-my-knowledge, or ask `setup`. Unset 
 Two hooks cooperate with the statusline plugin **oh-my-status**:
 
 1. The oh-my-status statusline writes the current context usage to `$OMC_STATE_DIR/ctx-<sid>` (percentage and window size).
-2. When Claude stops, the oh-my-knowledge Stop hook reads `ctx-<sid>`. If usage is at or above `auto_handoff_threshold` and no `handoff-<sid>` file exists yet, it creates `handoff-<sid>` and blocks the stop once with a request to run `oh-my-knowledge:handoff`.
-3. Handoff updates the status section, runs distill, and (re)writes `handoff-<sid>` so it will not ask again in this context window.
-4. After a compact, the SessionStart hook deletes both files for the session, so the next window can trigger again, and tells Claude to re-read the status section.
+2. `handoff-<sid>` holds the highest usage (percent) at which a handoff was requested or completed in this window. When Claude stops, the oh-my-knowledge Stop hook reads `ctx-<sid>` and the marker. It fires when usage is at or above `auto_handoff_threshold` and either there is no marker, or the marker is below the threshold and usage is at least 5 points past it (an early manual handoff does not suppress the automatic one), or the marker is at or above the threshold and usage has grown by `auto_handoff_repeat` points. It writes the usage into the marker, then blocks the stop once with a request to run `oh-my-knowledge:handoff`. If the marker cannot be written it stays silent.
+3. Handoff updates the status section, runs distill, and writes the higher of the marker and the current usage into `handoff-<sid>`, so it does not ask again until usage grows by `auto_handoff_repeat` points.
+4. After a compact or a `/clear`, the SessionStart hook deletes both files for the session, so the next window can trigger again, and tells Claude to re-read the status section.
 
-**Without oh-my-status installed, nothing writes `ctx-<sid>` and auto handoff silently does nothing.** Manual handoff works either way. Stale `ctx-*` and `handoff-*` files are swept after 24 hours. `$OMC_STATE_DIR` defaults to `~/.claude/oh-my-claude/state`.
+**Without oh-my-status installed, nothing writes `ctx-<sid>` and auto handoff silently does nothing.** Manual handoff works either way. Stale `ctx-*` files are swept after 24 hours; a `handoff-*` file older than 24 hours is swept only when its `ctx-*` is missing or also older than 24 hours. `$OMC_STATE_DIR` defaults to `~/.claude/oh-my-claude/state`.
 
 ## Lookup reminder
 
@@ -132,7 +133,7 @@ Other storage (a remote git repository, a cloud drive, an MCP notebook) is futur
 - **"knowledge base not found"** from lookup or lint: run `/oh-my-knowledge:setup`, or check `knowledge_dir`.
 - **Windows path too long (`commit.sh` exits 1 with a "Filename too long" hint, typically deep `_retired/harvested/…` paths):** run `git -C <knowledge_dir> config core.longpaths true` (repo-local), then re-run the commit.
 - **Changed a setting and nothing happened:** restart the session.
-- **Auto handoff never fires:** check that oh-my-status is installed and its statusline is active (it writes `ctx-<sid>`), that `auto_handoff` is `true`, and that the threshold is reachable. It fires once per context window.
+- **Auto handoff never fires:** check that oh-my-status is installed and its statusline is active (it writes `ctx-<sid>`), that `auto_handoff` is `true`, and that the threshold is reachable. After it fires (or after a handoff), it asks again only once usage has grown by `auto_handoff_repeat` points past the usage recorded in `handoff-<sid>` (5 points if that value is below the threshold); with a recorded value at or above the threshold and above `100 - auto_handoff_repeat` it does not ask again in that window. A compact or `/clear` starts a new window.
 - **`gawk is required`, or lint/search exit 2:** a tool from Requirements is missing, the knowledge base was not found, or the command was used wrongly. Hooks do nothing, silently, when `jq` is missing.
 - **Lock errors (commit exit 4):** `commit.sh` already retried 3 times. A stale `.git/index.lock` left by a crashed git can be removed once no git process is running.
 - **`knowledge_dir` rejected:** it must not contain `'`.
@@ -144,7 +145,7 @@ Environment variables override the settings for scripts and tests. Normal use ne
 
 | Variable | Default | Effect |
 |---|---|---|
-| `OMK_KNOWLEDGE_DIR`, `OMK_LOOKUP_REMINDER`, `OMK_AUTO_HANDOFF`, `OMK_AUTO_HANDOFF_THRESHOLD`, `OMK_LINT_STALE_DAYS`, `OMK_LINT_FLAG_DAYS`, `OMK_LINT_REMIND_AFTER_DISTILLS`, `OMK_MAX_FILE_KB`, `OMK_MAX_INDEX_LINE_CHARS` | the setting's value, else its default | One variable per setting. |
+| `OMK_KNOWLEDGE_DIR`, `OMK_LOOKUP_REMINDER`, `OMK_AUTO_HANDOFF`, `OMK_AUTO_HANDOFF_THRESHOLD`, `OMK_AUTO_HANDOFF_REPEAT`, `OMK_LINT_STALE_DAYS`, `OMK_LINT_FLAG_DAYS`, `OMK_LINT_REMIND_AFTER_DISTILLS`, `OMK_MAX_FILE_KB`, `OMK_MAX_INDEX_LINE_CHARS` | the setting's value, else its default | One variable per setting. |
 | `OMK_AUTO_MEMORY_DIR` | empty (derived from the working directory) | The current project's auto-memory directory. |
 | `OMK_AUTO_MEMORY_GLOB` | `$CLAUDE_CONFIG_DIR/projects/*/memory` (config dir defaults to `~/.claude`) | Where search, distill, handoff and lint find auto-memory directories (the current project is matched among them). |
 | `OMK_CLAUDE_MD` | `$CLAUDE_CONFIG_DIR/CLAUDE.md` | The `CLAUDE.md` that lint scans for `[[g:]]` / `[[k:]]` references (`ext_link_missing`, inbound references for `stub_unreferenced`). |

@@ -178,6 +178,7 @@ omk_config() {
   _omk_pick t OMK_LOOKUP_REMINDER lookup_reminder true; _omk_bool OMK_LOOKUP_REMINDER "$t" true
   _omk_pick t OMK_AUTO_HANDOFF auto_handoff true; _omk_bool OMK_AUTO_HANDOFF "$t" true
   _omk_pick t OMK_AUTO_HANDOFF_THRESHOLD auto_handoff_threshold 70; _omk_int OMK_AUTO_HANDOFF_THRESHOLD "$t" 70
+  _omk_pick t OMK_AUTO_HANDOFF_REPEAT auto_handoff_repeat 20; _omk_int OMK_AUTO_HANDOFF_REPEAT "$t" 20
   _omk_pick t OMK_LINT_STALE_DAYS lint_stale_days 90; _omk_int OMK_LINT_STALE_DAYS "$t" 90
   _omk_pick t OMK_LINT_FLAG_DAYS lint_flag_days 14; _omk_int OMK_LINT_FLAG_DAYS "$t" 14
   _omk_pick t OMK_LINT_REMIND_AFTER_DISTILLS lint_remind_after_distills 10; _omk_int OMK_LINT_REMIND_AFTER_DISTILLS "$t" 10
@@ -196,7 +197,7 @@ omk_config() {
   OMK_JQ="${OMK_JQ:-}"
   _omk_unset "$OMK_JQ" && OMK_JQ="jq"
   export OMK_KNOWLEDGE_DIR OMK_LOOKUP_REMINDER OMK_AUTO_HANDOFF OMK_AUTO_HANDOFF_THRESHOLD \
-    OMK_LINT_STALE_DAYS OMK_LINT_FLAG_DAYS OMK_LINT_REMIND_AFTER_DISTILLS OMK_MAX_FILE_KB \
+    OMK_AUTO_HANDOFF_REPEAT OMK_LINT_STALE_DAYS OMK_LINT_FLAG_DAYS OMK_LINT_REMIND_AFTER_DISTILLS OMK_MAX_FILE_KB \
     OMK_MAX_INDEX_LINE_CHARS OMK_AUTO_MEMORY_DIR OMK_AUTO_MEMORY_GLOB OMK_CLAUDE_MD \
     OMC_STATE_DIR OMK_TODAY OMK_JQ
 }

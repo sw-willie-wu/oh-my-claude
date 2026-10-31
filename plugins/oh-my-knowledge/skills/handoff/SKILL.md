@@ -48,11 +48,20 @@ Run `oh-my-knowledge:distill` (Skill tool) for this session's knowledge and the 
 
 ## 4. Mark the handoff
 
-So the automatic handoff does not ask again in this context window, write the state file `handoff-<sid>` (skipped when the session id was not substituted):
+So the automatic handoff does not ask again until usage grows by `auto_handoff_repeat` points, write the highest usage seen (marker `handoff-<sid>` or usage `ctx-<sid>`; valid = 1–3 digits, at most 100; `0` if neither) into `handoff-<sid>` (skipped when the session id was not substituted):
 
 ```bash
 d="${OMC_STATE_DIR:-$HOME/.claude/oh-my-claude/state}"; sid='${CLAUDE_SESSION_ID}'
-case "$sid" in ''|*'{'*) echo "no session id; marker skipped" ;; *) mkdir -p "$d" && : > "$d/handoff-${sid//[^A-Za-z0-9_-]/_}" && echo "marker written" ;; esac
+case "$sid" in ''|*'{'*) echo "no session id; marker skipped" ;; *)
+  s="${sid//[^A-Za-z0-9_-]/_}"; best=0
+  for f in "handoff-$s" "ctx-$s"; do
+    v=""; IFS= read -r v 2>/dev/null < "$d/$f"; v="${v%$'\r'}"
+    case "$f" in ctx-*) v="${v%% *}" ;; esac
+    case "$v" in ''|*[!0-9]*|????*) continue ;; esac
+    v=$((10#$v)); if [ "$v" -le 100 ] && [ "$v" -gt "$best" ]; then best=$v; fi
+  done
+  mkdir -p "$d" && printf '%s\n' "$best" > "$d/handoff-$s" && echo "marker written: $best" ;;
+esac
 ```
 
 ## 5. Report

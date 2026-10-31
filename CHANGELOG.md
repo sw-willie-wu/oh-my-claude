@@ -14,7 +14,8 @@
 - The marketplace declares `renames: {"oh-my-claude": "oh-my-status"}`, so
   enabled installs migrate automatically.
 - The 24 h SessionStart sweep also removes stale `ctx-*` and `handoff-*`
-  files from the state directory.
+  files from the state directory. A `handoff-<sid>` older than 24 h is kept
+  while its `ctx-<sid>` is fresher than 24 h (the session is still in use).
 
 ### Changed
 - The repository has a `.gitattributes` (LF line endings everywhere).
@@ -23,9 +24,12 @@
 - `oh-my-knowledge` plugin: a local, git-versioned knowledge base with five
   skills (`setup`, `lookup`, `distill`, `handoff`, `lint`), a lookup-reminder
   hook, an automatic handoff hook (needs `oh-my-status`, which now writes
-  `ctx-<sid>`), and scripts for init, commit, search
-  and lint. Requires bash, gawk, GNU date and find, and jq. See
-  `plugins/oh-my-knowledge/README.md`.
+  `ctx-<sid>`), and scripts for init, commit, search and lint. Requires bash,
+  gawk, GNU date and find, and jq. See `plugins/oh-my-knowledge/README.md`.
+  The automatic handoff fires at the threshold and again once usage has grown
+  by `auto_handoff_repeat` points (default 20, range 10-60) past the usage
+  recorded in `handoff-<sid>` at the last handoff; `/compact` and `/clear`
+  start a new window.
 
 ### Upgrading
 - Update the marketplace (or wait for auto-update), then close all sessions and

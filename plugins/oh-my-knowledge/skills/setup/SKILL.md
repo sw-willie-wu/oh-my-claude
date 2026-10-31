@@ -29,6 +29,7 @@ The output has `inputs` (current values), `configured` and `unconfigured` (key l
 | `lookup_reminder` | `true` | remind to look things up on problem-like prompts |
 | `auto_handoff` | `true` | ask for a handoff when context reaches the threshold |
 | `auto_handoff_threshold` | `70` (30–90) | context % for the automatic handoff |
+| `auto_handoff_repeat` | `20` (10–60) | points usage must grow before it asks again |
 | `lint_stale_days` | `90` | stale after this many days |
 | `lint_flag_days` | `14` | an UNVERIFIED flag older than this is reported |
 | `lint_remind_after_distills` | `10` | remind to lint after this many distills |

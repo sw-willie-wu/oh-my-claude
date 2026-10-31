@@ -35,6 +35,14 @@
       "min": 30,
       "max": 90
     },
+    "auto_handoff_repeat": {
+      "type": "number",
+      "title": "Automatic handoff repeat (percentage points)",
+      "description": "Once a handoff was requested at or above the threshold, ask again after usage has grown by this many points.",
+      "default": 20,
+      "min": 10,
+      "max": 60
+    },
     "lint_stale_days": {
       "type": "number",
       "title": "Lint: stale after (days)",

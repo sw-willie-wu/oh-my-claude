@@ -98,6 +98,19 @@ if [ "$GOT" != "$EXPECTED" ]; then
 fi
 end_test
 
+start_test "omk_config: OMK_AUTO_HANDOFF_REPEAT default, precedence, int normalisation (no clamping)"
+rep() { env -i PATH="$PATH" HOME="/h/home" "$@" bash -c '. "$1"; omk_config; printf %s "$OMK_AUTO_HANDOFF_REPEAT"' _ "$LIB"; }
+assert_eq "20" "$(rep)" "default"
+assert_eq "35" "$(rep CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=35)" "option"
+assert_eq "25" "$(rep OMK_AUTO_HANDOFF_REPEAT=25 CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=35)" "env over option"
+assert_eq "35" "$(rep OMK_AUTO_HANDOFF_REPEAT= CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=35)" "empty env falls to option"
+assert_eq "40" "$(rep CLAUDE_PLUGIN_OPTION_auto_handoff_repeat=40)" "lower-case option"
+assert_eq "20" "$(rep CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=abc)" "non-numeric -> default"
+assert_eq "20" "$(rep 'OMK_AUTO_HANDOFF_REPEAT=${user_config.auto_handoff_repeat}')" "literal -> default"
+assert_eq "7" "$(rep CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=007)" "leading zeros normalised"
+assert_eq "5" "$(rep CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=5)" "not clamped in config"
+end_test
+
 start_test "omk_config is fork-light (< 1 s; was ~1.7 s on Windows)"
 s=$(date +%s%N)
 bash -c '. "$1"; omk_config' _ "$LIB" >/dev/null 2>&1

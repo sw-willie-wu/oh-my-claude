@@ -68,12 +68,19 @@ else
     TS=$(date -v-25H '+%Y%m%d%H%M.%S')
   fi
   touch -t "$TS" "$OMC_STATE_DIR/ctx-old" "$OMC_STATE_DIR/handoff-old"
+  # old marker + fresh ctx (kept); old marker + no ctx (removed)
+  printf x > "$OMC_STATE_DIR/handoff-live"; printf x > "$OMC_STATE_DIR/ctx-live"
+  printf x > "$OMC_STATE_DIR/handoff-orphan"
+  touch -t "$TS" "$OMC_STATE_DIR/handoff-live" "$OMC_STATE_DIR/handoff-orphan"
   echo '{"session_id":"mkt-sweep","hook_event_name":"SessionStart","source":"startup"}' \
     | bash "$TW" session-start
   for k in ctx handoff; do
     [ ! -f "$OMC_STATE_DIR/$k-old" ] || { printf '    FAIL: stale %s-old not removed\n' "$k" >&2; TEST_FAILED=1; }
     [ -f "$OMC_STATE_DIR/$k-fresh" ] || { printf '    FAIL: fresh %s-fresh removed\n' "$k" >&2; TEST_FAILED=1; }
   done
+  [ -f "$OMC_STATE_DIR/handoff-live" ] || { printf '    FAIL: old marker with fresh ctx removed\n' >&2; TEST_FAILED=1; }
+  [ -f "$OMC_STATE_DIR/ctx-live" ] || { printf '    FAIL: fresh ctx removed\n' >&2; TEST_FAILED=1; }
+  [ ! -f "$OMC_STATE_DIR/handoff-orphan" ] || { printf '    FAIL: old marker without ctx not removed\n' >&2; TEST_FAILED=1; }
 fi
 end_test
 

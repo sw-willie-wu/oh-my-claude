@@ -186,6 +186,37 @@ for p in '## ⚡ 現況' '(omk-project)' 'distill' 'handoff-' '${CLAUDE_SESSION_
 done
 need "$f" 'never the knowledge base' handoff
 need "$f" 'If step 1 found a marker line' handoff
+need "$f" 'auto_handoff_repeat' handoff
+end_test
+
+start_test "handoff step 4: marker gets max(r, c); 0 only when both invalid"
+f="$SKILLS/handoff/SKILL.md"
+snip="$(awk '/^## 4\./{s=1; next} s && /^```bash/{p=1; next} p && /^```/{exit} p{print}' "$f")"
+if [ -z "$snip" ]; then fail "handoff step 4 snippet not found"; else
+  pat='${CLAUDE_SESSION_ID}'
+  # run_h <marker|-> <ctx|-> -> prints stdout line, then the marker file content
+  run_h() {
+    local sd="$T/h-state"; rm -rf "$sd"; mkdir -p "$sd"
+    [ "$1" = - ] || printf '%b' "$1" > "$sd/handoff-s_1"
+    [ "$2" = - ] || printf '%b' "$2" > "$sd/ctx-s_1"
+    OMC_STATE_DIR="$sd" bash -c "${snip//"$pat"/s/1}" >"$T/h-out" 2>&1
+    printf '%s|%s' "$(tr -d '\r' < "$T/h-out")" "$(cat "$sd/handoff-s_1" 2>/dev/null | tr -d '\r')"
+  }
+  assert_eq "marker written: 80|80" "$(run_h '80\n' '60 200000\n')" "r > c"
+  assert_eq "marker written: 75|75" "$(run_h '20\n' '75 200000\n')" "c > r"
+  assert_eq "marker written: 0|0" "$(run_h 'abc\n' 'xyz 1\n')" "both invalid"
+  assert_eq "marker written: 0|0" "$(run_h '150\n' '1000 200000\n')" "both out of range"
+  assert_eq "marker written: 0|0" "$(run_h '' '')" "both empty"
+  assert_eq "marker written: 0|0" "$(run_h - -)" "neither file"
+  assert_eq "marker written: 75|75" "$(run_h '' '75 200000\r\n')" "empty marker, CRLF ctx"
+  assert_eq "marker written: 72|72" "$(run_h '72\r\n' '10 200000\n')" "CRLF marker"
+  assert_eq "marker written: 40|40" "$(run_h '00000000000000000090\n' '40 200000\n')" "20-digit marker invalid"
+  assert_eq "marker written: 40|40" "$(run_h '30\n' '040 200000\n')" "leading zero ctx parsed base 10"
+  assert_eq "marker written: 55|55" "$(run_h '55\n' ' 200000\n')" "ctx with empty first token"
+  out="$(OMC_STATE_DIR="$T/h-state2" bash -c "$snip" 2>&1)"
+  assert_eq "no session id; marker skipped" "$out" "unsubstituted sid skipped"
+  [ -e "$T/h-state2" ] && fail "unsubstituted sid created state dir"
+fi
 end_test
 
 print_summary
