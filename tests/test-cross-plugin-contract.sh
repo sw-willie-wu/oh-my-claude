@@ -1,6 +1,6 @@
 #!/bin/bash
-# Cross-plugin contract: oh-my-status writes ctx-<sid> / shows the handoff
-# badge; oh-my-knowledge hooks read ctx-<sid> and own handoff-<sid>. The two
+# Cross-plugin contract: oh-my-status writes ctx-<sid>; oh-my-knowledge
+# hooks read ctx-<sid> and own handoff-<sid>. The two
 # plugins share only these files, so this test drives the real scripts.
 set -u
 
@@ -35,16 +35,17 @@ compact() {
   jq -n --arg s "$SID" '{session_id:$s,hook_event_name:"SessionStart",source:"compact"}' \
     | bash "$HOOKS/session-start.sh" >/dev/null 2>&1
 }
-has_badge() { printf '%s' "$1" | grep -qF '✓ handoff'; }
+has_badge() { printf '%s' "$1" | grep -qE '✓ handoff|handoff ok'; }
 
-start_test "render -> Stop block -> badge -> compact clears -> Stop blocks again"
+start_test "render -> Stop block -> no badge -> compact clears -> Stop blocks again"
 OUT="$(render)"
 assert_eq "75 200000" "$(cat "$OMC_STATE_DIR/ctx-$SAN" 2>/dev/null)" "render wrote ctx file"
 has_badge "$OUT" && { printf '    FAIL: badge before handoff\n' >&2; TEST_FAILED=1; }
 R1="$(stop)"
 case "$R1" in *'"decision":"block"'*'Context is at 75%'*) ;; *) printf '    FAIL: first Stop did not block: %q\n' "$R1" >&2; TEST_FAILED=1;; esac
 [ -f "$OMC_STATE_DIR/handoff-$SAN" ] || { printf '    FAIL: marker missing\n' >&2; TEST_FAILED=1; }
-has_badge "$(render)" || { printf '    FAIL: no badge after handoff\n' >&2; TEST_FAILED=1; }
+has_badge "$(render)" && { printf '    FAIL: badge shown after handoff\n' >&2; TEST_FAILED=1; }
+assert_eq "75 200000" "$(cat "$OMC_STATE_DIR/ctx-$SAN" 2>/dev/null)" "render still writes ctx with marker present"
 assert_eq "" "$(stop)" "second Stop must be silent while marker exists"
 compact
 [ -f "$OMC_STATE_DIR/handoff-$SAN" ] && { printf '    FAIL: compact left marker\n' >&2; TEST_FAILED=1; }

@@ -1295,7 +1295,7 @@ case "$s" in *"Opus 5.5"*) ;; *) printf '    FAIL: off: no model [%s]\n' "$s" >&
 case "$s" in *"["*) printf '    FAIL: off: has [ in [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
 end_test
 
-start_test "handoff badge per layout (only with marker); ctx file written"
+start_test "no handoff badge in any layout, with or without a marker; ctx file written"
 for l in $LAYOUTS4; do
   s=$(render_layout "$l" '' strip | tr '\n' ' ')
   case "$s" in *handoff*) printf '    FAIL: %s badge without marker [%s]\n' "$l" "$s" >&2; TEST_FAILED=1;; esac
@@ -1303,8 +1303,9 @@ done
 : > "$OMC_STATE_DIR/handoff-render-test-acc"
 for l in $LAYOUTS4; do
   s=$(render_layout "$l" '' strip | tr '\n' ' ')
-  if [ "$l" = pure ]; then want='handoff ok'; else want='✓ handoff'; fi
-  case "$s" in *"$want"*) ;; *) printf '    FAIL: %s lacks badge %s [%s]\n' "$l" "$want" "$s" >&2; TEST_FAILED=1;; esac
+  case "$s" in
+    *'✓ handoff'*|*'handoff ok'*) printf '    FAIL: %s shows a badge with marker [%s]\n' "$l" "$s" >&2; TEST_FAILED=1;;
+  esac
 done
 rm -f "$OMC_STATE_DIR/handoff-render-test-acc"
 [ -f "$OMC_STATE_DIR/ctx-render-test-acc" ] || { printf '    FAIL: ctx file missing\n' >&2; TEST_FAILED=1; }

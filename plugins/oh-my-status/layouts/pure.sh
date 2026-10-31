@@ -33,6 +33,5 @@ render() {
   LINE+="  $(pct_indicator "${RATE7_PCT:-0}" 7d)"
 
   emit_workers
-  [ -n "$HANDOFF_BADGE" ] && LINE+="  ${C_GREEN}${HANDOFF_BADGE}${RESET}"
   echo -e "$LINE"
 }

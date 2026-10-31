@@ -23,7 +23,7 @@
 - `oh-my-knowledge` plugin: a local, git-versioned knowledge base with five
   skills (`setup`, `lookup`, `distill`, `handoff`, `lint`), a lookup-reminder
   hook, an automatic handoff hook (needs `oh-my-status`, which now writes
-  `ctx-<sid>` and shows a handoff badge), and scripts for init, commit, search
+  `ctx-<sid>`), and scripts for init, commit, search
   and lint. Requires bash, gawk, GNU date and find, and jq. See
   `plugins/oh-my-knowledge/README.md`.
 

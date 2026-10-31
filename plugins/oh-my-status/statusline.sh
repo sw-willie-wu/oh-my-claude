@@ -550,13 +550,9 @@ if [ -z "$SESSION_ID" ]; then
   printf 'oh-my-claude: jq required (winget install jqlang.jq)\n'
   exit 0
 fi
-# Usage file for oh-my-knowledge auto-handoff (builtins only) and handoff badge.
+# Usage file for oh-my-knowledge auto-handoff (builtins only).
 [ -d "$OMC_STATE_DIR" ] || mkdir -p "$OMC_STATE_DIR" 2>/dev/null
 [ -n "$CTX_PCT" ] && { printf '%s %s\n' "$CTX_PCT" "$CTX_SIZE" > "$OMC_STATE_DIR/ctx-$SANITIZED_SID"; } 2>/dev/null
-HANDOFF_BADGE=""
-if [ -e "$OMC_STATE_DIR/handoff-$SANITIZED_SID" ]; then
-  if [ "$LAYOUT_FILE" = "${OMC_DIR}/layouts/pure.sh" ]; then HANDOFF_BADGE="handoff ok"; else HANDOFF_BADGE="✓ handoff"; fi
-fi
 apply_model_ctx_tag
 # Reap any crash-orphaned temp files before this render writes its own.
 _omc_sweep_stale_tmp

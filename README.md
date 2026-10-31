@@ -192,7 +192,6 @@ LAYOUT="powerline"
 
 ## How it works
 
-- **Handoff badge**: when oh-my-knowledge has requested or run a handoff, the statusline shows a short handoff badge (`$HANDOFF_BADGE`) until the context is compacted
 - **Plugin install** registers slash commands (`setup`, `set-theme`, `list-themes`)
 - **SessionStart hook** syncs themes/layouts from the plugin to `~/.claude/oh-my-claude/` (auto-updates when plugin updates)
 - **`/oh-my-status:setup`** adds the `statusLine` config to your `~/.claude/settings.json` (asks before overwriting existing config)
@@ -234,7 +233,6 @@ Add a `.sh` file to `plugins/oh-my-status/layouts/` that defines a `render()` fu
 - `$LINES_ADD`, `$LINES_DEL` - git line counts
 - `$CTX_PCT`, `$RATE5_PCT`, `$RATE7_PCT` - usage percentages
 - `$ACCOUNT`, `$ACCOUNT_ICON` - account segment (`$ACCOUNT` is empty when hidden; safe for `echo -e`)
-- `$HANDOFF_BADGE` - handoff badge text (empty unless a handoff was marked for this session)
 - `$C_PRIMARY`, `$C_SECONDARY`, etc. - theme colors
 
 See existing layouts in `plugins/oh-my-status/layouts/` for examples.

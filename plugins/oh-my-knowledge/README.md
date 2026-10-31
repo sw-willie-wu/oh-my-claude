@@ -58,7 +58,7 @@ Two hooks cooperate with the statusline plugin **oh-my-status**:
 
 1. The oh-my-status statusline writes the current context usage to `$OMC_STATE_DIR/ctx-<sid>` (percentage and window size).
 2. When Claude stops, the oh-my-knowledge Stop hook reads `ctx-<sid>`. If usage is at or above `auto_handoff_threshold` and no `handoff-<sid>` file exists yet, it creates `handoff-<sid>` and blocks the stop once with a request to run `oh-my-knowledge:handoff`.
-3. Handoff updates the status section, runs distill, and (re)writes `handoff-<sid>` so it will not ask again in this context window. oh-my-status shows a handoff badge while that file exists.
+3. Handoff updates the status section, runs distill, and (re)writes `handoff-<sid>` so it will not ask again in this context window.
 4. After a compact, the SessionStart hook deletes both files for the session, so the next window can trigger again, and tells Claude to re-read the status section.
 
 **Without oh-my-status installed, nothing writes `ctx-<sid>` and auto handoff silently does nothing.** Manual handoff works either way. Stale `ctx-*` and `handoff-*` files are swept after 24 hours. `$OMC_STATE_DIR` defaults to `~/.claude/oh-my-claude/state`.

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for oh-my-knowledge hooks and the statusline usage file / badge.
+# Tests for oh-my-knowledge hooks and the statusline usage file.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -162,7 +162,7 @@ contains "$T/out" '[[k:path]]' "compact link defs"
 start_hook startup OMK_JQ=/nonexistent; empty "$T/out" "jq missing"
 end_test
 
-# --- statusline usage file + badge ----------------------------------------
+# --- statusline usage file ------------------------------------------------
 render() { # <sid>  -> stdout
   jq -n --arg s "$1" '{session_id:$s,model:{display_name:"X"},workspace:{current_dir:"/tmp"},context_window:{used_percentage:42,context_window_size:200000}}' \
     | COLUMNS=120 bash "$STATUSLINE" 2>/dev/null
@@ -177,19 +177,19 @@ render 'a/b c.d' >/dev/null
 assert_eq "42 200000" "$(cat "$OMC_STATE_DIR/ctx-a_b_c_d" 2>/dev/null)" "sanitised ctx file"
 end_test
 
-start_test "statusline badge only with marker"
+start_test "statusline shows no handoff badge, even with a marker"
 reset_state
-render sess-R | strip | grep -qF 'handoff' && { printf '    FAIL: badge without marker\n' >&2; TEST_FAILED=1; }
 touch "$OMC_STATE_DIR/handoff-sess-R"
-render sess-R | strip | grep -qF '✓ handoff' || { printf '    FAIL: no badge with marker\n' >&2; TEST_FAILED=1; }
+render sess-R | strip | grep -qF 'handoff' && { printf '    FAIL: badge with marker\n' >&2; TEST_FAILED=1; }
+assert_eq "42 200000" "$(cat "$OMC_STATE_DIR/ctx-sess-R" 2>/dev/null)" "ctx still written with marker present"
 end_test
 
-start_test "pure layout badge text is 'handoff ok'"
+start_test "pure layout shows no handoff badge with a marker"
 printf 'LAYOUT=pure\n' > "$T/pure.conf"
 touch "$OMC_STATE_DIR/handoff-sess-R"
 OUT="$(jq -n '{session_id:"sess-R",model:{display_name:"X"},workspace:{current_dir:"/tmp"}}' | OMC_CONF="$T/pure.conf" COLUMNS=120 bash "$STATUSLINE" 2>/dev/null | strip)"
-case "$OUT" in *'handoff ok'*) ;; *) printf '    FAIL: pure badge missing: %q\n' "$OUT" >&2; TEST_FAILED=1;; esac
-case "$OUT" in *'✓'*) printf '    FAIL: pure should not use check mark\n' >&2; TEST_FAILED=1;; esac
+case "$OUT" in *'handoff ok'*|*'✓ handoff'*) printf '    FAIL: pure badge present: %q\n' "$OUT" >&2; TEST_FAILED=1;; esac
+case "$OUT" in *'ctx:'*) ;; *) printf '    FAIL: pure render empty: %q\n' "$OUT" >&2; TEST_FAILED=1;; esac
 end_test
 
 print_summary

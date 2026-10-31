@@ -53,6 +53,5 @@ render() {
 
   emit_workers
   echo -e "$LINE1"
-  [ -n "$HANDOFF_BADGE" ] && LINE2+="  ${C_GREEN}${HANDOFF_BADGE}${RESET}"
   echo -e "$LINE2"
 }
