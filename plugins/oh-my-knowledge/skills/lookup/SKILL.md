@@ -34,7 +34,7 @@ Output sections, in order:
 | Line | Meaning |
 |---|---|
 | `== knowledge base: <dir>` | the KB folder (`<knowledge_dir>`) |
-| `== index hits` | `rel:line:text` from `index.md` / `global/index_*.md` |
+| `== index hits` | `rel:line:text` from the `global/` index files (`index.md`, `index_*.md`); a migrated project's index files and the auto-memory `MEMORY.md` are listed in their own sections below |
 | `== topic hits (file:count)` | other `global/` pages, most hits first |
 | `== project: <p>` or `== project: (not migrated)` | then hits in `projects/<p>/` when this repo is migrated (its auto-memory `MEMORY.md` has a valid `(omk-project)` marker line) |
 | `== auto memory: <dir>` or `== auto memory: (none)` | then hits in this project's auto memory (stubs skipped; `MEMORY.md` lines shown like index hits) |

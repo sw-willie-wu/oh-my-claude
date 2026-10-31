@@ -13,6 +13,8 @@ description: Use to distill this session's durable knowledge (decisions and reas
 OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' OMK_AUTO_MEMORY_DIR='<auto-memory dir>' bash "${CLAUDE_PLUGIN_ROOT}/scripts/search.sh" omk-project
 ```
 
+Exit 2 with "knowledge base not found": tell the user to run `/oh-my-knowledge:setup` first and skip the distill.
+
 `<auto-memory dir>` = the auto memory directory stated in this session's system prompt (leave out the `OMK_AUTO_MEMORY_DIR=…` assignment if none is visible). Read `== project: <p>` (migrated: its `MEMORY.md` has exactly one valid marker line `- Knowledge base project: [[k:projects/<p>/index]] (omk-project)`) or `== project: (not migrated)`, and `== auto memory: <dir>`.
 
 ## 1. Steps
@@ -50,7 +52,7 @@ Unclear split → list the files, ask. After **every** `MEMORY.md` write, re-che
 
 ## 3. Modes (only on explicit request)
 
-- **migrate this project**: a full harvest. If `projects/<p>/` already exists, stop: this is **attach <p>**, never overwrite its index. Otherwise first create `projects/<p>/index.md`, add `- [[k:projects/<p>/index]] — <one sentence>` under `## Projects` in `index.md` only if absent, and write the marker line into the current `MEMORY.md`: right after the status section (from the `## ⚡ 現況` heading through the end of its 已完成 block) with one blank line before it, or at the top of the file when there is no status section yet; it must stay within the first 200 lines. Non-git project: also mark each existing subdirectory auto-memory dir, after the user confirms the list. Large projects go in batches, one commit per batch. End with the first `harvest` log entry.
+- **migrate this project**: a full harvest. If `projects/<p>/` already exists, stop: this is **attach <p>**, never overwrite its index. Otherwise first create `projects/<p>/index.md`, add `- [[k:projects/<p>/index]] — <one sentence>` under `## Projects` in `index.md` only if absent, and write the marker line into the current `MEMORY.md` (placement: reference.md, "Marker line placement"). Non-git project: also mark each existing subdirectory auto-memory dir, after the user confirms the list. Large projects go in batches, one commit per batch. End with the first `harvest` log entry.
 - **attach <p>**: the user names an existing `projects/<p>/`. No marker yet: write the marker line (same placement). An invalid marker (it names a missing project): after the user confirms, replace that line; never add a second marker. Then run a full harvest of the current auto-memory dir and add a `harvest` log entry.
 - **close this project** (the user says the project ended or the repo will be archived or deleted). Precondition: if the project is not migrated, run migrate this project first; if it is migrated, run a full harvest first. Keep the marker line and the `## Projects` entry. Then follow reference.md: promote reusable parts to `global/`, make every project page readable without the repo, put `Closed: YYYY-MM-DD` in `projects/<p>/index.md`, log `distill`.
 

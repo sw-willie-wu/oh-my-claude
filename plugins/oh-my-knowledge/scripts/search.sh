@@ -52,13 +52,13 @@ fi
 export OMK_SEARCH_PATS="$PATS"
 
 # scan <root> <output prefix>: one gawk pass over every *.md below root
-# (rules/_retired/lint pruned). Emits "I<TAB>pfx+rel:line:text" for index-type files
+# (rules/_retired/lint pruned below the root only). Emits "I<TAB>pfx+rel:line:text" for index-type files
 # (index.md, index_*.md, MEMORY.md) and "T<TAB>pfx+rel:count" for the rest.
 # Stub files emit nothing. Root and prefix travel via ENVIRON (no -v escape processing).
 scan() {
   local root="$1"
   while [ "${#root}" -gt 1 ] && [ "${root%/}" != "$root" ]; do root="${root%/}"; done
-  find "$root" \( -name rules -o -name _retired -o -name lint \) -prune -o -type f -name '*.md' -print0 \
+  find "$root" -mindepth 1 \( -name rules -o -name _retired -o -name lint \) -prune -o -type f -name '*.md' -print0 \
     | LC_ALL=C.UTF-8 OMK_SCAN_ROOT="$root" OMK_SCAN_PFX="$2" xargs -0 gawk '
       BEGIN {
         n = split(ENVIRON["OMK_SEARCH_PATS"], raw, "\n")

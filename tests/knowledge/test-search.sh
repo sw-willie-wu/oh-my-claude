@@ -290,6 +290,18 @@ assert_has "$T/out" "global/kept.md:1" "control hit"
 for d in rules _retired lint; do assert_lacks "$T/out" "$d/" "$d excluded"; done
 end_test
 
+start_test "project folder named like an excluded dir is still searched (root not pruned)"
+for d in lint rules _retired; do
+  mkdir -p "$KB/projects/$d/$d"
+  echo "Rootword $d top" > "$KB/projects/$d/page.md"; echo "Rootword $d nested" > "$KB/projects/$d/$d/x.md"
+  mkmem "$CWD"; marker "$d" > "$AM/MEMORY.md"
+  run "$CWD" Rootword
+  assert_has "$T/out" "projects/$d/page.md:1" "$d project root hit"
+  assert_lacks "$T/out" "$d/$d/x.md" "nested $d under project excluded"
+  rm -rf "$KB/projects/$d"
+done
+end_test
+
 start_test "ranking, caps and long-line cut"
 CK="$T/capkb"; mkdir -p "$CK/global"
 i=1; while [ $i -le 20 ]; do

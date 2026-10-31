@@ -15,7 +15,7 @@ The current auto-memory dir is the one stated in this session's system prompt. I
 OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' bash "${CLAUDE_PLUGIN_ROOT}/scripts/search.sh" omk-project
 ```
 
-from the working directory and use its `== auto memory: <dir>` line (`(none)` → ask the user where this project's auto memory is). Read the whole `MEMORY.md`. Note the marker line `- Knowledge base project: [[k:projects/<p>/index]] (omk-project)` exactly, if there is one.
+from the working directory. Exit 2 with "knowledge base not found": tell the user to run `/oh-my-knowledge:setup` first and skip the knowledge-base part (the status section is still updated, and distill is skipped). Otherwise use its `== auto memory: <dir>` line (`(none)` → ask the user where this project's auto memory is). Read the whole `MEMORY.md`. Note the marker line `- Knowledge base project: [[k:projects/<p>/index]] (omk-project)` exactly, if there is one.
 
 ## 2. Rewrite the status section only
 

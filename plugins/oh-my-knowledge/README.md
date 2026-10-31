@@ -130,6 +130,7 @@ Other storage (a remote git repository, a cloud drive, an MCP notebook) is futur
 ## Troubleshooting
 
 - **"knowledge base not found"** from lookup or lint: run `/oh-my-knowledge:setup`, or check `knowledge_dir`.
+- **Windows path too long (`commit.sh` exits 1 with a "Filename too long" hint, typically deep `_retired/harvested/…` paths):** run `git -C <knowledge_dir> config core.longpaths true` (repo-local), then re-run the commit.
 - **Changed a setting and nothing happened:** restart the session.
 - **Auto handoff never fires:** check that oh-my-status is installed and its statusline is active (it writes `ctx-<sid>`), that `auto_handoff` is `true`, and that the threshold is reachable. It fires once per context window.
 - **`gawk is required`, or lint/search exit 2:** a tool from Requirements is missing, the knowledge base was not found, or the command was used wrongly. Hooks do nothing, silently, when `jq` is missing.
