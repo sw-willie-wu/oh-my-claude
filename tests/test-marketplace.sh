@@ -77,4 +77,32 @@ else
 fi
 end_test
 
+start_test "knowledge README documents settings, state files, markers, requirements, moving"
+KR="$REPO_ROOT/plugins/oh-my-knowledge/README.md"
+if [ ! -f "$KR" ]; then
+  printf '    FAIL: missing %s\n' "$KR" >&2; TEST_FAILED=1
+else
+  for k in $(jq -r '.userConfig | keys[]' "$REPO_ROOT/plugins/oh-my-knowledge/.claude-plugin/plugin.json" | tr -d '\r'); do
+    grep -qF -- "\`$k\`" "$KR" || { printf '    FAIL: README lacks setting %s\n' "$k" >&2; TEST_FAILED=1; }
+  done
+  for s in 'ctx-<' 'handoff-<' '(omk-harvested)' 'OMK_AUTO_MEMORY_GLOB' 'Moving to another machine'; do
+    grep -qF -- "$s" "$KR" || { printf '    FAIL: README lacks %s\n' "$s" >&2; TEST_FAILED=1; }
+  done
+  req=$(awk '/^## Requirements/{f=1;next} /^## /{f=0} f' "$KR")
+  for s in jq gawk; do
+    printf "%s" "$req" | grep -qF -- "$s" || { printf '    FAIL: Requirements section lacks %s\n' "$s" >&2; TEST_FAILED=1; }
+  done
+fi
+end_test
+
+start_test "root README upgrade notes tell disabled users to uninstall oh-my-claude@oh-my-claude"
+grep -qF -- '/plugin uninstall oh-my-claude@oh-my-claude' "$REPO_ROOT/README.md" \
+  || { printf '    FAIL: root README lacks uninstall note\n' >&2; TEST_FAILED=1; }
+end_test
+
+start_test "marketplace entry for oh-my-knowledge is finalised"
+d=$(jq -r '.plugins[] | select(.name=="oh-my-knowledge") | .description' "$MKT" | tr -d '\r')
+case "$d" in *"work in progress"*|"") printf '    FAIL: description: %s\n' "$d" >&2; TEST_FAILED=1 ;; esac
+end_test
+
 print_summary

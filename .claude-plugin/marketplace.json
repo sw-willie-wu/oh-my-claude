@@ -19,7 +19,7 @@
     {
       "name": "oh-my-knowledge",
       "source": "./plugins/oh-my-knowledge",
-      "description": "Knowledge-base plugin for Claude Code (work in progress)."
+      "description": "A local, git-versioned knowledge base for Claude Code: look up, distill, lint and hand off durable knowledge."
     }
   ]
 }
