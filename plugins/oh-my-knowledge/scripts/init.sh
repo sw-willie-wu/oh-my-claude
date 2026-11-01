@@ -8,6 +8,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$HERE/lib/common.sh"
 omk_config
+[ -z "${OMK_CONFIG_ERROR:-}" ] || { echo "init: $OMK_CONFIG_ERROR" >&2; exit 2; }
 
 KB="$OMK_KNOWLEDGE_DIR"
 TPL="$HERE/../templates"

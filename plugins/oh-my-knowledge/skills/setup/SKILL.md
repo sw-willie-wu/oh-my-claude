@@ -21,7 +21,7 @@ One id → use it as `<id>`. Several → ask the user which one. None → tell t
 claude plugin configure '<id>' --json
 ```
 
-The output has `inputs` (current values), `configured` and `unconfigured` (key lists). List every option: its value from `inputs`, or "unset (default …)" when it is in `unconfigured`. Note the current `knowledge_dir` = `inputs.knowledge_dir` (unset → `~/knowledge`). Options and defaults:
+The output has `inputs` (current values), `configured` and `unconfigured` (key lists). List every option: its value from `inputs`, or "unset (default …)" when it is in `unconfigured`. Note the current `knowledge_dir` = `inputs.knowledge_dir` (unset → `~/knowledge`). Check it: after turning `\` into `/` it must start with `/`, `X:/` or `~/`, or be `~` or `X:`. If it does not (the hooks and scripts report a configuration error for it), tell the user and go straight to step 3 for a corrected value. Options and defaults:
 
 | key | default | meaning |
 |---|---|---|
@@ -41,6 +41,7 @@ Tell the user they can change options in the `/plugin` settings of oh-my-knowled
 ## 3. Change settings (on request)
 
 - Build a JSON object with only the changed keys, **every value a string** (`"true"`, `"70"`, `"D:/kb"`); escape backslashes, or prefer forward slashes.
+- Turn every `\` of a `knowledge_dir` into `/` first, then reject it unless it is absolute (starts with `/` or `X:/`, or is `X:`) or starts with `~/` (or is `~`): a relative path such as `kb` or `./kb` is a configuration error; ask for an absolute one.
 - Reject a `knowledge_dir` that contains `'` (it would break the single-quoted values the skills pass to scripts); ask for another path.
 - Pointing at a KB the user moved or copied (step 7): run its check **before** writing the setting.
 - Write it (the CLI validates ranges and stores the values):
@@ -102,10 +103,10 @@ Rules in `<knowledge_dir>/rules/` load only through one import line in the user'
 
 The user moves the whole folder (including its hidden version-history folder) themselves; you never move it. Then:
 
-1. Check the new place (a leading `~/` is expanded like init.sh does):
+1. Check the new place (a leading `~/` or `~\` is expanded like init.sh does):
 
 ```bash
-d='<new knowledge_dir>'; case "$d" in '~/'*) d="$HOME/${d#??}" ;; esac
+d='<new knowledge_dir>'; case "$d" in '~/'*|'~\'*) d="$HOME/${d#??}" ;; esac
 if [ -f "$d/SCHEMA.md" ] && [ -e "$d/.git" ]; then echo ok; elif [ -f "$d/SCHEMA.md" ]; then echo no-history; else echo missing; fi
 ```
 

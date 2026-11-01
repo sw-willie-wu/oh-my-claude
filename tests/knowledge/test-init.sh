@@ -281,4 +281,22 @@ runinit "$EX2" >/dev/null
 assert_eq "$b2" "$(md5sum < "$EX2/.gitattributes")" ".gitattributes kept"
 end_test
 
+start_test "relative knowledge_dir: search/lint/commit/init exit 2 with the message, from a temp cwd, nothing created"
+CWD2="$T/cwd2"; mkdir -p "$CWD2/kb"
+SCR="$PLUGIN/scripts"
+for rel in 'kb' './kb' 'kb\x'; do
+  for sc in "search.sh word" "lint.sh" "commit.sh msg SCHEMA.md" "init.sh"; do
+    set -- $sc
+    s="$1"; shift
+    out="$(cd "$CWD2" && OMK_KNOWLEDGE_DIR="$rel" bash "$SCR/$s" "$@" 2>&1 >/dev/null; echo "rc=$?")"
+    case "$out" in
+      *"knowledge_dir must be an absolute path or start with ~/ (got: $rel); run /oh-my-knowledge:setup"*"rc=2") ;;
+      *) printf '    FAIL: %s with %s: %s\n' "$s" "$rel" "$out" >&2; TEST_FAILED=1 ;;
+    esac
+  done
+done
+assert_eq "" "$(ls -A "$CWD2/kb")" "nothing created inside the relative dir"
+assert_eq "kb" "$(ls -A "$CWD2")" "nothing created in the cwd"
+end_test
+
 print_summary

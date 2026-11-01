@@ -21,6 +21,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$HERE/lib/common.sh"
 omk_config
+[ -z "${OMK_CONFIG_ERROR:-}" ] || { echo "commit.sh: $OMK_CONFIG_ERROR" >&2; exit 2; }
 
 MSG="${1-}"
 if [ "$#" -lt 2 ] || [ -z "$MSG" ]; then
@@ -142,6 +143,9 @@ while :; do
       continue
     fi
     cat "$ERR" >&2
+    lockp="$KB/.git/index.lock"
+    if [[ "$(cat "$ERR")" =~ Unable\ to\ create\ \'([^\']*\.lock)\' ]]; then lockp="${BASH_REMATCH[1]}"; fi
+    echo "commit.sh: lock file $lockp is held; if no git process is running, remove it (README: Troubleshooting)" >&2
     exit 4
   fi
   LC_ALL=C LANGUAGE= git -C "$KB" reset -q -- "${RELS[@]}" >/dev/null 2>&1 || true

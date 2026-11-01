@@ -110,7 +110,7 @@ Files in `rules/` load only through one import line in your `CLAUDE.md` (`${CLAU
 - Hook scripts are bash 3.2 compatible.
 - **macOS:** install them first, for example `brew install gawk coreutils findutils jq`, and put the GNU `date` and `find` first on `PATH` (Homebrew installs them as `gdate` and `gfind` unless you add the `gnubin` directories).
 - **Windows:** use Git Bash; the scripts handle Windows-style paths.
-- `git` for the knowledge base's history.
+- `git` 2.31 or newer for the knowledge base's history (project detection uses `rev-parse --path-format`).
 
 ## Moving to another machine
 
@@ -135,8 +135,8 @@ Other storage (a remote git repository, a cloud drive, an MCP notebook) is futur
 - **Changed a setting and nothing happened:** restart the session.
 - **Auto handoff never fires:** check that oh-my-status is installed and its statusline is active (it writes `ctx-<sid>`), that `auto_handoff` is `true`, and that the threshold is reachable. After it fires (or after a handoff), it asks again only once usage has grown by `auto_handoff_repeat` points past the usage recorded in `handoff-<sid>` (5 points if that value is below the threshold); with a recorded value at or above the threshold and above `100 - auto_handoff_repeat` it does not ask again in that window. A compact or `/clear` starts a new window.
 - **`gawk is required`, or lint/search exit 2:** a tool from Requirements is missing, the knowledge base was not found, or the command was used wrongly. Hooks do nothing, silently, when `jq` is missing.
-- **Lock errors (commit exit 4):** `commit.sh` already retried 3 times. A stale `.git/index.lock` left by a crashed git can be removed once no git process is running.
-- **`knowledge_dir` rejected:** it must not contain `'`.
+- **Lock errors (commit exit 4):** `commit.sh` already retried 3 times. A stale `.git/index.lock` left by a crashed git can be removed once no git process is running (`commit.sh` prints the lock path).
+- **`knowledge_dir` rejected:** it must not contain `'`, and it must be absolute (`/…`, `C:/…`, a UNC path) or start with `~/` (`\` is read as `/`). A relative value such as `kb` or `./kb` is a configuration error: the scripts print `knowledge_dir must be an absolute path or start with ~/ (got: …); run /oh-my-knowledge:setup` and exit 2, SessionStart shows the same message, and the lookup reminder and the automatic handoff stay silent until it is fixed. Run `/oh-my-knowledge:setup` to correct it.
 - **A local skill shadows a plugin skill:** call the plugin's by full name, `/oh-my-knowledge:lookup`.
 
 ## Advanced / testing
@@ -153,6 +153,7 @@ Environment variables override the settings for scripts and tests. Normal use ne
 | `OMK_TODAY` | today (`date +%F`) | Fixed date for lint. |
 | `OMK_JQ` | `jq` | The jq executable. |
 | `OMK_COMMIT_RETRY_DELAY` | `2` | Seconds between `commit.sh` lock retries. |
+| `OMK_TEST_CASE_FOLD` | OS default (`1` on Windows, else `0`) | Test-only: `0` or `1` overrides whether the auto-memory directory match may fall back to a case-insensitive match (an exact name always wins). |
 | `OMK_LINT_ICASE` | auto-probed | `0` or `1`: override the case-insensitive filesystem probe in lint. |
 | `OMK_LINT_WINPATHS` | set by lint.sh | Internal: lint.sh sets it from the platform, so a value you set is ignored; only honoured when running `lib/lint-content.awk` directly. |
 

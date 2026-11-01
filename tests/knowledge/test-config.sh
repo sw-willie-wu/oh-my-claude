@@ -111,6 +111,33 @@ assert_eq "7" "$(rep CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=007)" "leading zer
 assert_eq "5" "$(rep CLAUDE_PLUGIN_OPTION_AUTO_HANDOFF_REPEAT=5)" "not clamped in config"
 end_test
 
+start_test "omk_config: ~\\ expands like ~/ (M1)"
+assert_eq "/h/home/knowledge" "$(env -i PATH="$PATH" HOME="/h/home" 'CLAUDE_PLUGIN_OPTION_KNOWLEDGE_DIR=~\knowledge' bash -c '. "$1"; omk_config; printf %s "$OMK_KNOWLEDGE_DIR"' _ "$LIB")" "~\\knowledge"
+assert_eq "/h/home/a/b" "$(env -i PATH="$PATH" HOME="/h/home" bash -c '. "$1"; omk_resolve_dir "~\\a\\b"' _ "$LIB")" "resolve ~\\a\\b"
+end_test
+
+start_test "omk_config: knowledge_dir validation (M2): accepted forms leave OMK_CONFIG_ERROR empty"
+cfg_err() { # <dir> [extra env…] -> "<rc>|<error>"
+  local d="$1"; shift
+  env -i PATH="$PATH" HOME="/h/home" "$@" "CLAUDE_PLUGIN_OPTION_KNOWLEDGE_DIR=$d" bash -c '. "$1"; omk_config; rc=$?; printf "%s|%s" "$rc" "$OMK_CONFIG_ERROR"' _ "$LIB"
+}
+for d in 'C:/x' 'C:\x' 'c:' '/x' '//omk-test.invalid/share' '~' '~/x' '~\x' 'D:/'; do
+  assert_eq "0|" "$(cfg_err "$d")" "accepted: $d"
+done
+end_test
+
+start_test "omk_config: relative knowledge_dir is a configuration error, still returns 0"
+CW="$(mktemp -d)"; mkdir -p "$CW/kb"
+for d in 'kb' './kb' 'kb\x' 'rel/dir' '../kb' 'C:kb' '~user/kb'; do
+  got="$(cd "$CW" && cfg_err "$d")"
+  assert_eq "0|knowledge_dir must be an absolute path or start with ~/ (got: $d); run /oh-my-knowledge:setup" "$got" "rejected: $d (exists in cwd: $([ -d "$CW/$d" ] && echo yes || echo no))"
+done
+assert_eq "0|" "$(cfg_err '/x' OMK_CONFIG_ERROR=stale)" "stale exported OMK_CONFIG_ERROR cleared for a valid dir"
+got="$(env -i PATH="$PATH" HOME="/h/home" OMK_KNOWLEDGE_DIR=kb bash -c '. "$1"; omk_config; printf "%s" "$OMK_CONFIG_ERROR"' _ "$LIB")"
+assert_eq "knowledge_dir must be an absolute path or start with ~/ (got: kb); run /oh-my-knowledge:setup" "$got" "OMK_KNOWLEDGE_DIR env form is validated too"
+rm -rf "$CW"
+end_test
+
 start_test "omk_config is fork-light (< 1 s; was ~1.7 s on Windows)"
 s=$(date +%s%N)
 bash -c '. "$1"; omk_config' _ "$LIB" >/dev/null 2>&1

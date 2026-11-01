@@ -13,7 +13,7 @@ description: Use to distill this session's durable knowledge (decisions and reas
 OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' OMK_AUTO_MEMORY_DIR='<auto-memory dir>' bash "${CLAUDE_PLUGIN_ROOT}/scripts/search.sh" omk-project
 ```
 
-Exit 2 with "knowledge base not found": tell the user to run `/oh-my-knowledge:setup` first and skip the distill.
+Exit 2 naming `knowledge_dir` or "knowledge base not found": tell the user to run `/oh-my-knowledge:setup` first and skip the distill.
 
 `<auto-memory dir>` = the auto memory directory stated in this session's system prompt (leave out the `OMK_AUTO_MEMORY_DIR=…` assignment if none is visible). Read `== project: <p>` (migrated: its `MEMORY.md` has exactly one valid marker line `- Knowledge base project: [[k:projects/<p>/index]] (omk-project)`) or `== project: (not migrated)`, and `== auto memory: <dir>`.
 

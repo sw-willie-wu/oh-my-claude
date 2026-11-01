@@ -8,11 +8,11 @@ _OMK_LO=abcdefghijklmnopqrstuvwxyz
 # _omk_resolve_into <outvar> <path>: fork-free core of omk_resolve_dir.
 _omk_resolve_into() {
   local _p="$2" _q _pre _dl _old _hadold _oo
+  _p="${_p//\\//}"
   case "$_p" in
     "~") _p="$HOME" ;;
     "~/"*) _p="$HOME/${_p#\~/}" ;;
   esac
-  _p="${_p//\\//}"
   if [[ "$_p" =~ ^([A-Za-z]):(/.*)?$ ]]; then
     _dl="${BASH_REMATCH[1]}"
     _q="${BASH_REMATCH[2]}"
@@ -86,6 +86,12 @@ omk_repo_root() {
   d="$(omk_resolve_dir "$1")"
   if g="$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && [ -n "$g" ]; then
     g="${g%$'\r'}"
+    # Anything but one absolute line (old git ignoring --path-format, noise) = not in git.
+    case "$g" in
+      *$'\n'*) printf '%s' "$d"; return 0 ;;
+      /*|[A-Za-z]:|[A-Za-z]:[/\\]*) ;;
+      *) printf '%s' "$d"; return 0 ;;
+    esac
     g="$(omk_resolve_dir "$g")"
     omk_resolve_dir "$(dirname "$g")"
   else
@@ -173,8 +179,17 @@ omk_today() {
 # userConfig defaults, so the default branch is the normal path for unset options.
 # Fork-free (hooks run it on every event); OMK_TODAY is lazy, see omk_today.
 omk_config() {
-  local cc="${CLAUDE_CONFIG_DIR:-$HOME/.claude}" t
-  _omk_pick t OMK_KNOWLEDGE_DIR knowledge_dir '~/knowledge'; _omk_resolve_into OMK_KNOWLEDGE_DIR "$t"
+  local cc="${CLAUDE_CONFIG_DIR:-$HOME/.claude}" t _v
+  _omk_pick t OMK_KNOWLEDGE_DIR knowledge_dir '~/knowledge'
+  # Validate the picked raw value (backslashes as slashes) before resolving:
+  # absolute = /…, X:/…, X:, or ~ / ~/…. Always assigned; omk_config still returns 0.
+  OMK_CONFIG_ERROR=""
+  _v="${t//\\//}"
+  case "$_v" in
+    /*|"~"|"~/"*|[A-Za-z]:|[A-Za-z]:/*) ;;
+    *) OMK_CONFIG_ERROR="knowledge_dir must be an absolute path or start with ~/ (got: $t); run /oh-my-knowledge:setup" ;;
+  esac
+  _omk_resolve_into OMK_KNOWLEDGE_DIR "$t"
   _omk_pick t OMK_LOOKUP_REMINDER lookup_reminder true; _omk_bool OMK_LOOKUP_REMINDER "$t" true
   _omk_pick t OMK_AUTO_HANDOFF auto_handoff true; _omk_bool OMK_AUTO_HANDOFF "$t" true
   _omk_pick t OMK_AUTO_HANDOFF_THRESHOLD auto_handoff_threshold 70; _omk_int OMK_AUTO_HANDOFF_THRESHOLD "$t" 70
@@ -199,5 +214,5 @@ omk_config() {
   export OMK_KNOWLEDGE_DIR OMK_LOOKUP_REMINDER OMK_AUTO_HANDOFF OMK_AUTO_HANDOFF_THRESHOLD \
     OMK_AUTO_HANDOFF_REPEAT OMK_LINT_STALE_DAYS OMK_LINT_FLAG_DAYS OMK_LINT_REMIND_AFTER_DISTILLS OMK_MAX_FILE_KB \
     OMK_MAX_INDEX_LINE_CHARS OMK_AUTO_MEMORY_DIR OMK_AUTO_MEMORY_GLOB OMK_CLAUDE_MD \
-    OMC_STATE_DIR OMK_TODAY OMK_JQ
+    OMC_STATE_DIR OMK_TODAY OMK_JQ OMK_CONFIG_ERROR
 }

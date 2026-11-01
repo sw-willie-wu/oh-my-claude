@@ -27,7 +27,7 @@ OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' OMK_AUTO_MEMORY_DIR='<auto-memo
 
 - `<auto-memory dir>`: the auto memory directory stated in this session's system prompt. If none is visible, leave out the whole `OMK_AUTO_MEMORY_DIR=…` assignment (the script derives it from the working directory).
 - 3–6 keywords: error message fragments, tool names, symptoms, and synonyms in English and in the user's language.
-- Exit 2 with "knowledge base not found": tell the user to run `oh-my-knowledge:setup`, then answer without the KB.
+- Exit 2 naming `knowledge_dir` or "knowledge base not found": tell the user to run `/oh-my-knowledge:setup`, then answer without the KB.
 
 Output sections, in order:
 

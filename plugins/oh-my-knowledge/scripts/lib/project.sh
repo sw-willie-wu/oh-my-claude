@@ -47,10 +47,11 @@ omk_project_marker() {
 
 # omk_auto_memory_for_cwd <cwd>
 # OMK_AUTO_MEMORY_DIR if set and existing (normalised); else the dir under the
-# OMK_AUTO_MEMORY_GLOB parent whose name equals omk_encode_path(omk_repo_root cwd),
-# compared case-insensitively (Claude Code may write the drive letter in lower case).
+# OMK_AUTO_MEMORY_GLOB parent whose name equals omk_encode_path(omk_repo_root cwd);
+# exact match first, then (Windows only) case-insensitive: Claude Code may write the
+# drive letter in lower case.
 omk_auto_memory_for_cwd() {
-  local cwd="${1:-.}" glob pre suf want lc_want names idx name d
+  local cwd="${1:-.}" glob pre suf want lc_want names idx name d fold
   if [ -n "${OMK_AUTO_MEMORY_DIR:-}" ]; then
     d="$(omk_resolve_dir "$OMK_AUTO_MEMORY_DIR")"
     if [ -d "$d" ]; then printf '%s' "$d"; return 0; fi
@@ -63,9 +64,18 @@ omk_auto_memory_for_cwd() {
   pre="$(omk_resolve_dir "$pre")"
   [ -d "$pre" ] || return 0
   want="$(omk_encode_path "$(omk_repo_root "$cwd")")"
-  lc_want="$(printf %s "$want" | LC_ALL=C tr 'A-Z' 'a-z')"
   names="$(ls -1 "$pre" 2>/dev/null | tr -d '\r')"
-  idx="$(printf '%s\n' "$names" | LC_ALL=C tr 'A-Z' 'a-z' | grep -nxF -- "$lc_want" | head -n 1 | cut -d: -f1)"
+  # Exact name first; the case-insensitive fallback is for Windows only
+  # (OMK_TEST_CASE_FOLD=0|1 overrides the OS default; test-only seam).
+  idx="$(printf '%s\n' "$names" | grep -nxF -- "$want" | head -n 1 | cut -d: -f1)"
+  if [ -z "$idx" ]; then
+    fold=0
+    case "${OSTYPE:-}" in msys*|cygwin*) fold=1 ;; esac
+    case "${OMK_TEST_CASE_FOLD:-}" in 0) fold=0 ;; 1) fold=1 ;; esac
+    [ "$fold" = 1 ] || return 0
+    lc_want="$(printf %s "$want" | LC_ALL=C tr 'A-Z' 'a-z')"
+    idx="$(printf '%s\n' "$names" | LC_ALL=C tr 'A-Z' 'a-z' | grep -nxF -- "$lc_want" | head -n 1 | cut -d: -f1)"
+  fi
   [ -n "$idx" ] || return 0
   name="$(printf '%s\n' "$names" | sed -n "${idx}p")"
   if [ -d "$pre/$name$suf" ]; then printf '%s' "$(omk_resolve_dir "$pre/$name$suf")"; fi

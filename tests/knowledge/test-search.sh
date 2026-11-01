@@ -46,7 +46,7 @@ start_test "project.sh and search.sh exist"
 end_test
 
 start_test "bash-3.2 compatibility guard (no bash4-only constructs)"
-if [ -f "$PROJECT" ] && [ -f "$SEARCH" ] && ! grep -nE '\$\{[A-Za-z_]+(\^\^|,,)|declare +-A|\bmapfile\b|\breadarray\b' "$PROJECT" "$SEARCH" >/dev/null 2>&1; then
+if [ -f "$PROJECT" ] && [ -f "$SEARCH" ] && [ -f "$COMMON" ] && [ -f "$PLUGIN/hooks/auto-handoff.sh" ] && ! grep -nE '\$\{[A-Za-z_]+(\^\^|,,)|declare +-A|\bmapfile\b|\breadarray\b|\|&' "$PROJECT" "$SEARCH" "$PLUGIN"/hooks/*.sh "$COMMON" >/dev/null 2>&1; then
   :
 else
   echo "    FAIL: bash4-only construct or files missing" >&2; TEST_FAILED=1
@@ -323,6 +323,43 @@ printf -- '- %s\n' "$LONG" > "$CK/global/index_one.md"; rm "$CK/global/index_big
 KBENV="$CK" run "$CWD" Capword
 L="$(grep -F "global/index_one.md:1:" "$T/out" | head -n 1)"
 assert_eq 260 "$(LC_ALL=C.UTF-8 bash -c 'printf %s "${#1}"' _ "$L")" "line cut to 260 chars"
+end_test
+
+start_test "auto-memory match: exact first; case-insensitive fallback only when folding is on (OMK_TEST_CASE_FOLD)"
+CF="$T/work/Case Fold"; mkdir -p "$CF"
+e="$(enc "$CF")"; var="$(printf %s "$e" | LC_ALL=C tr 'a-z' 'A-Z')"
+if [ "$var" = "$e" ]; then var="$(printf %s "$e" | LC_ALL=C tr 'A-Z' 'a-z')"; fi
+PRJ="$CLAUDE_CONFIG_DIR/projects"
+rm -rf "$PRJ/$e" "$PRJ/$var"
+cf() { OMK_TEST_CASE_FOLD="$1" pcall omk_auto_memory_for_cwd "$CF"; }
+mkdir -p "$PRJ/$e/memory"
+assert_eq "$(res "$PRJ/$e/memory")" "$(cf 0)" "exact only, folding off: found"
+rm -rf "$PRJ/$e"
+mkdir -p "$PRJ/$var/memory"
+assert_eq "$(res "$PRJ/$var/memory")" "$(cf 1)" "variant only, folding on: found"
+assert_eq "" "$(cf 0)" "variant only, folding off: not found"
+# exact wins over a case variant (needs a case-sensitive filesystem; probe)
+mkdir -p "$PRJ/$e/memory"
+if [ "$(ls -1 "$PRJ" | grep -cxF -e "$e" -e "$var")" = 2 ]; then
+  assert_eq "$(res "$PRJ/$e/memory")" "$(cf 1)" "exact beats variant, folding on"
+  assert_eq "$(res "$PRJ/$e/memory")" "$(cf 0)" "exact found, folding off"
+else
+  echo "    (case-insensitive filesystem: exact-vs-variant case skipped)"
+fi
+rm -rf "$PRJ/$e" "$PRJ/$var"
+end_test
+
+start_test "omk_repo_root: git-common-dir result that is not one absolute line means not in git"
+FG="$T/fakegit"; mkdir -p "$FG"
+printf '#!/bin/bash\nprintf "rel-line\\nsecond-line\\n"\n' > "$FG/git"; chmod +x "$FG/git"
+RR="$T/work/rr"; mkdir -p "$RR"
+assert_eq "$(res "$RR")" "$(PATH="$FG:$PATH" bash -c '. "$1"; omk_repo_root "$2"' _ "$COMMON" "$RR" | tr -d '\r')" "two lines -> not in git"
+printf '#!/bin/bash\nprintf "relative/.git\\n"\n' > "$FG/git"
+assert_eq "$(res "$RR")" "$(PATH="$FG:$PATH" bash -c '. "$1"; omk_repo_root "$2"' _ "$COMMON" "$RR" | tr -d '\r')" "relative single line -> not in git"
+printf '#!/bin/bash\nprintf "/%s/\\n/%s/.git\\n" a b\n' > "$FG/git"
+assert_eq "$(res "$RR")" "$(PATH="$FG:$PATH" bash -c '. "$1"; omk_repo_root "$2"' _ "$COMMON" "$RR" | tr -d '\r')" "absolute first line + extra line -> not in git"
+GR="$T/work/realgit"; mkdir -p "$GR"; git -C "$GR" init -q . >/dev/null 2>&1
+assert_eq "$(res "$GR")" "$(bash -c '. "$1"; omk_repo_root "$2"' _ "$COMMON" "$GR" | tr -d '\r')" "real repo still found"
 end_test
 
 start_test "omk_project_marker_status: none / ok / invalid multiple / invalid missing"

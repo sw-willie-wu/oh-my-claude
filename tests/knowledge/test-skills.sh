@@ -135,7 +135,31 @@ if [ -z "$snip" ]; then fail "setup relocation check snippet not found"; else
     got="$(HOME="$H" bash -c "${snip//<new knowledge_dir>/$rep}" 2>&1)"
     assert_eq "${c#* }" "$got" "relocation check for $rep"
   done
+  rep='~\kb1'
+  got="$(HOME="$H" bash -c "${snip//<new knowledge_dir>/$rep}" 2>&1)"
+  assert_eq "ok" "$got" 'relocation check for ~\kb1'
 fi
+end_test
+
+start_test "setup: step 2 validates the stored knowledge_dir; step 3 normalises backslashes and rejects non-absolute"
+f="$SKILLS/setup/SKILL.md"
+s2="$(awk '/^## 2\./{p=1; next} /^## 3\./{exit} p' "$f")"
+s3="$(awk '/^## 3\./{p=1; next} /^## 4\./{exit} p' "$f")"
+case "$s2" in *'`~/`'*'go straight to step 3'*) ;; *) fail "setup step 2: stored value validation / go to step 3 missing" ;; esac
+case "$s2" in *'`\` into `/`'*) ;; *) fail "setup step 2: backslash normalisation missing" ;; esac
+case "$s3" in *'Turn every `\` of a `knowledge_dir` into `/`'*'reject it unless it is absolute'*'`kb` or `./kb`'*) ;; *) fail "setup step 3: normalise / reject non-absolute missing" ;; esac
+need "$f" "'~/'*|'~\\'*" setup
+end_test
+
+start_test "lookup, lint, handoff, distill: exit 2 naming knowledge_dir routes to setup"
+for n in lookup handoff distill; do
+  grep -F 'Exit 2 naming `knowledge_dir` or "knowledge base not found"' "$SKILLS/$n/SKILL.md" | grep -qF 'oh-my-knowledge:setup' \
+    || fail "$n: exit-2 routing to /oh-my-knowledge:setup missing"
+done
+grep -F 'naming `knowledge_dir` or "knowledge base not found"' "$SKILLS/lint/SKILL.md" | grep -qF 'oh-my-knowledge:setup' || fail "lint: exit-2 routing missing"
+grep -F 'exit 2 bad path' "$SKILLS/distill/SKILL.md" | grep -qF 'fix' || fail "distill: commit-time 'exit 2 bad path -> fix' must stay"
+sz="$(wc -c < "$SKILLS/distill/SKILL.md" | tr -d ' ')"
+[ "$sz" -le 8192 ] || fail "distill SKILL.md is $sz bytes (> 8192)"
 end_test
 
 start_test "lookup: search sections, four write-backs, inbox-only for auto memory"

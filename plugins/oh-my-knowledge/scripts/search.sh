@@ -29,6 +29,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/project.sh
 . "$HERE/lib/project.sh"
 omk_config
+[ -z "${OMK_CONFIG_ERROR:-}" ] || { echo "search.sh: $OMK_CONFIG_ERROR" >&2; exit 2; }
 
 if [ "$#" -lt 1 ]; then
   echo "usage: search.sh <keyword>..." >&2

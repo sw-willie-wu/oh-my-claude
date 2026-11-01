@@ -255,6 +255,36 @@ contains "$T/out" '[[k:path]]' "compact link defs"
 start_hook startup OMK_JQ=/nonexistent; empty "$T/out" "jq missing"
 end_test
 
+start_test "configuration error (relative knowledge_dir): SessionStart prints it; compact/clear still clear + reread; other hooks silent"
+ERRMSG='knowledge_dir must be an absolute path or start with ~/ (got: kb); run /oh-my-knowledge:setup'
+for src in startup compact clear; do
+  printf '70\n' > "$OMC_STATE_DIR/handoff-sess-A"; printf '80 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+  start_hook "$src" OMK_KNOWLEDGE_DIR=kb
+  assert_eq 0 "$RC" "exit ($src)"
+  got="$(jq -r '.hookSpecificOutput.additionalContext' "$T/out" 2>/dev/null)"
+  case "$got" in *"$ERRMSG"*) ;; *) printf '    FAIL: %s: message missing: %q\n' "$src" "$got" >&2; TEST_FAILED=1 ;; esac
+  case "$got" in "Knowledge base: "*) printf '    FAIL: %s: normal note not replaced: %q\n' "$src" "$got" >&2; TEST_FAILED=1 ;; esac
+  case "$src" in
+    startup)
+      lacks "$T/out" 'MEMORY.md' "no reread on startup"
+      [ -f "$OMC_STATE_DIR/handoff-sess-A" ] && [ -f "$OMC_STATE_DIR/ctx-sess-A" ] || { printf '    FAIL: startup cleared state\n' >&2; TEST_FAILED=1; } ;;
+    *)
+      contains "$T/out" 'MEMORY.md' "$src reread sentence"
+      [ -f "$OMC_STATE_DIR/handoff-sess-A" ] && { printf '    FAIL: %s kept marker\n' "$src" >&2; TEST_FAILED=1; }
+      [ -f "$OMC_STATE_DIR/ctx-sess-A" ] && { printf '    FAIL: %s kept ctx\n' "$src" >&2; TEST_FAILED=1; } ;;
+  esac
+done
+# lookup reminder: silent with the error, fires with a valid dir (same prompt)
+prompt_hook '為什麼 docker 很慢' OMK_KNOWLEDGE_DIR=kb; empty "$T/out" "reminder silent on config error"
+prompt_hook '為什麼 docker 很慢' OMK_KNOWLEDGE_DIR="$KB"; contains "$T/out" 'oh-my-knowledge:lookup' "reminder fires with a valid dir"
+# auto-handoff: silent with the error (no marker written), blocks with a valid dir
+reset_state; printf '90 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+stop_hook "$STOP" OMK_KNOWLEDGE_DIR=kb; empty "$T/out" "auto-handoff silent on config error"
+[ -f "$OMC_STATE_DIR/handoff-sess-A" ] && { printf '    FAIL: marker written despite config error\n' >&2; TEST_FAILED=1; }
+stop_hook "$STOP" OMK_KNOWLEDGE_DIR="$KB"; contains "$T/out" '"decision":"block"' "auto-handoff blocks with a valid dir"
+reset_state
+end_test
+
 # --- statusline usage file ------------------------------------------------
 render() { # <sid>  -> stdout
   jq -n --arg s "$1" '{session_id:$s,model:{display_name:"X"},workspace:{current_dir:"/tmp"},context_window:{used_percentage:42,context_window_size:200000}}' \

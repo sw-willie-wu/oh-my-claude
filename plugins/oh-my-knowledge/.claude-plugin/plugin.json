@@ -11,7 +11,7 @@
     "knowledge_dir": {
       "type": "directory",
       "title": "Knowledge base directory",
-      "description": "Local folder (a git repo) that holds the knowledge base. Must not contain a single quote. Run the setup skill after changing it.",
+      "description": "Local folder (a git repo) that holds the knowledge base. Must be an absolute path or start with ~/, and must not contain a single quote. Run the setup skill after changing it.",
       "default": "~/knowledge",
       "required": true
     },

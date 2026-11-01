@@ -6,6 +6,7 @@ case "${BASH_SOURCE[0]}" in */*) HOOK_DIR="${BASH_SOURCE[0]%/*}" ;; *) HOOK_DIR=
 # shellcheck source=../scripts/lib/common.sh
 . "$HOOK_DIR/../scripts/lib/common.sh" 2>/dev/null || exit 0
 omk_config 2>/dev/null || exit 0
+[ -z "${OMK_CONFIG_ERROR:-}" ] || exit 0
 [ "$OMK_LOOKUP_REMINDER" = true ] || exit 0
 
 prompt="$("$OMK_JQ" -r '.prompt // ""' 2>/dev/null)" || exit 0
