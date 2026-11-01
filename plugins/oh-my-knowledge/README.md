@@ -109,7 +109,7 @@ Files in `rules/` load only through one import line in your `CLAUDE.md` (`${CLAU
 An instruction that must apply in every reply has no trigger, so harvest cannot reduce it to a trigger line. Two homes:
 
 - **A rule** (`rules/<slug>.md`) when it applies in every project; it loads through the rules import above.
-- **`projects/<p>/always-on.md`** when it is for one project only (or you declined the rule or the rules import): one directive per `- ` line. The SessionStart hook appends these lines to the session-start note on every start, resume, compact and clear, so they stay in force. The page is the only copy; harvest leaves a `> Moved:` stub and a pointer-only `MEMORY.md` line in auto memory.
+- **`projects/<p>/always-on.md`** when it is for one project only (or you declined the rule or the rules import): one directive per `- ` line. The SessionStart hook appends these lines to the session-start note on every start, resume, compact and clear, so they stay in force (up to 4000 bytes; beyond that the note ends with a pointer to the page, so keep the page short). The page is the only copy; harvest leaves a `> Moved:` stub and a pointer-only `MEMORY.md` line in auto memory.
 
 Distill proposes the home during harvest and asks before writing a rule. To change later, ask: "make X a global rule", "change X", "drop X". The page is never deleted (stubs on other machines link to it). A session opened in an unmarked non-git subdirectory of a migrated project gets no injection (no marker, no project). The page's text is followed as instructions, so only share a knowledge base with people you trust.
 
