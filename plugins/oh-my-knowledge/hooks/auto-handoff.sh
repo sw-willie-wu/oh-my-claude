@@ -12,6 +12,8 @@ case "${BASH_SOURCE[0]}" in */*) HOOK_DIR="${BASH_SOURCE[0]%/*}" ;; *) HOOK_DIR=
 omk_config 2>/dev/null || exit 0
 [ -z "${OMK_CONFIG_ERROR:-}" ] || exit 0
 [ "$OMK_AUTO_HANDOFF" = true ] || exit 0
+# Not set up yet (no SCHEMA.md in the knowledge base): stay silent.
+[ -f "$OMK_KNOWLEDGE_DIR/SCHEMA.md" ] || exit 0
 
 # One jq call; split on the tab with parameter expansion (read would collapse an
 # empty first field) and strip the CR a Windows jq adds.

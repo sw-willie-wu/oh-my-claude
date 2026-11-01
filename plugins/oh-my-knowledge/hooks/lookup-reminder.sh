@@ -8,6 +8,8 @@ case "${BASH_SOURCE[0]}" in */*) HOOK_DIR="${BASH_SOURCE[0]%/*}" ;; *) HOOK_DIR=
 omk_config 2>/dev/null || exit 0
 [ -z "${OMK_CONFIG_ERROR:-}" ] || exit 0
 [ "$OMK_LOOKUP_REMINDER" = true ] || exit 0
+# Not set up yet (no SCHEMA.md in the knowledge base): stay silent.
+[ -f "$OMK_KNOWLEDGE_DIR/SCHEMA.md" ] || exit 0
 
 prompt="$("$OMK_JQ" -r '.prompt // ""' 2>/dev/null)" || exit 0
 [ -n "$prompt" ] || exit 0
@@ -15,6 +17,11 @@ prompt="$("$OMK_JQ" -r '.prompt // ""' 2>/dev/null)" || exit 0
 # Slash commands are not questions.
 trimmed="${prompt#"${prompt%%[![:space:]]*}"}"
 case "$trimmed" in /*) exit 0 ;; esac
+# Harness relays (peer sessions, subagent hand-backs, notifications) are not
+# user questions. Starts-with only: a prompt merely quoting them is still checked.
+case "$trimmed" in
+  "Another Claude session sent a message"*|"<agent-message "*|"<task-notification>"*|"[SYSTEM NOTIFICATION"*) exit 0 ;;
+esac
 
 zh='為什麼|為何|怎麼|怎樣|如何|怎辦|是不是|會不會|要不要|慢|錯|壞|失敗|卡住|卡在|不行|不能|沒反應|跑不|掛了|爆了|異常|問題|影響'
 en='why|how come|error|errors|fail(s|ed|ing|ure)?|slow|broken|crash(es|ed)?|hang(s|ing)?|stuck|timeout|timed out|flaky|not working'

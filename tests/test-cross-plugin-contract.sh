@@ -19,6 +19,7 @@ export HOME="$T/home"; mkdir -p "$HOME"
 export OMC_STATE_DIR="$T/state"
 export OMC_CONF=/dev/null
 export CLAUDE_PLUGIN_OPTION_KNOWLEDGE_DIR="$T/kb"
+mkdir -p "$T/kb"; : > "$T/kb/SCHEMA.md"   # a set-up knowledge base (hooks are silent before setup)
 
 SID='sess/contract 1'   # special chars: exercises the shared sanitisation
 SAN='sess_contract_1'

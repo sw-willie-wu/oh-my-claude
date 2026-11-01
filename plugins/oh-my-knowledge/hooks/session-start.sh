@@ -16,7 +16,9 @@ source_="${source_%$'\r'}"; sid="${sid%$'\r'}"
 # Native form (C:/… on Windows) so the Read tool gets a path it can open.
 kb="$(omk_native_path "$OMK_KNOWLEDGE_DIR")"
 msg="Knowledge base: ${kb}. [[g:slug]] = ${kb}/global/<slug>.md; [[k:path]] = ${kb}/<path>.md."
-# A configuration error replaces the note (clearing and the re-read sentence stay).
+# Precedence: configuration error > not set up > normal note (clearing and the
+# re-read sentence stay in every case).
+[ -f "$OMK_KNOWLEDGE_DIR/SCHEMA.md" ] || msg="oh-my-knowledge: knowledge base not set up yet (${kb}) — run /oh-my-knowledge:setup"
 [ -z "${OMK_CONFIG_ERROR:-}" ] || msg="oh-my-knowledge: $OMK_CONFIG_ERROR"
 
 case "$source_" in

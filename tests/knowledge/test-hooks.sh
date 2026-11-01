@@ -69,6 +69,18 @@ prompt_hook 'why does it fail' OMK_JQ=/nonexistent; empty "$T/out" "jq missing"
 printf 'garbage' | bash "$HOOKS/lookup-reminder.sh" >"$T/out" 2>/dev/null; assert_eq 0 $? "garbage stdin exit"; empty "$T/out" "garbage stdin"
 end_test
 
+start_test "lookup-reminder skips harness relays (starts-with only)"
+prompt_hook 'Another Claude session sent a message: why is it slow'; empty "$T/out" "peer-session relay"
+prompt_hook '<agent-message from="x">why did it fail</agent-message>'; empty "$T/out" "agent-message relay"
+prompt_hook '<task-notification>task failed with error</task-notification>'; empty "$T/out" "task-notification relay"
+prompt_hook '[SYSTEM NOTIFICATION] build failed'; empty "$T/out" "system notification relay"
+prompt_hook '   <agent-message from="x">why did it fail</agent-message>'; empty "$T/out" "relay after leading spaces"
+prompt_hook "$(printf '\n\t<task-notification>why error</task-notification>')"; empty "$T/out" "relay after leading newline/tab"
+prompt_hook 'what does <agent-message > mean, why does it fail'; contains "$T/out" 'oh-my-knowledge:lookup' "quoted mid-text still reminded"
+prompt_hook 'Why did the Another Claude session sent a message thing fail'; contains "$T/out" 'oh-my-knowledge:lookup' "relay phrase mid-text still reminded"
+prompt_hook 'why does the build fail'; contains "$T/out" 'oh-my-knowledge:lookup' "normal question still reminded"
+end_test
+
 # --- auto-handoff ---------------------------------------------------------
 stop_hook() { # <json> [env...] -> $T/out, RC
   local j="$1"; shift
@@ -207,7 +219,7 @@ start_hook() { # <source> [env...] -> $T/out
   printf '{"session_id":"sess-A","hook_event_name":"SessionStart","source":"%s"}' "$s" \
     | env "$@" bash "$HOOKS/session-start.sh" >"$T/out" 2>"$T/err"; RC=$?
 }
-KB="$T/kbdir"; mkdir -p "$KB" "$HOME/knowledge"
+KB="$T/kbdir"; mkdir -p "$KB" "$HOME/knowledge"; : > "$KB/SCHEMA.md"
 # native form of an existing dir: C:/… on Windows (pwd -W), plain physical path elsewhere
 native() { ( cd -P -- "$1" && { pwd -W 2>/dev/null || pwd -P; } ); }
 
@@ -283,6 +295,45 @@ stop_hook "$STOP" OMK_KNOWLEDGE_DIR=kb; empty "$T/out" "auto-handoff silent on c
 [ -f "$OMC_STATE_DIR/handoff-sess-A" ] && { printf '    FAIL: marker written despite config error\n' >&2; TEST_FAILED=1; }
 stop_hook "$STOP" OMK_KNOWLEDGE_DIR="$KB"; contains "$T/out" '"decision":"block"' "auto-handoff blocks with a valid dir"
 reset_state
+end_test
+
+start_test "not set up (no SCHEMA.md): SessionStart prints the note; reminder and auto-handoff silent; each paired with a set-up KB"
+NOKB="$T/nokb"; mkdir -p "$NOKB"
+NOMSG="oh-my-knowledge: knowledge base not set up yet ($(native "$NOKB")) — run /oh-my-knowledge:setup"
+for src in startup compact clear; do
+  printf '70\n' > "$OMC_STATE_DIR/handoff-sess-A"; printf '80 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+  start_hook "$src" OMK_KNOWLEDGE_DIR="$NOKB"
+  assert_eq 0 "$RC" "not set up exit ($src)"
+  got="$(jq -r '.hookSpecificOutput.additionalContext' "$T/out" 2>/dev/null)"
+  case "$got" in *"$NOMSG"*) ;; *) printf '    FAIL: %s: not-set-up note missing: %q\n' "$src" "$got" >&2; TEST_FAILED=1 ;; esac
+  case "$got" in *"[[g:slug]]"*) printf '    FAIL: %s: link definitions not replaced: %q\n' "$src" "$got" >&2; TEST_FAILED=1 ;; esac
+  case "$src" in
+    startup)
+      lacks "$T/out" 'MEMORY.md' "not set up: no reread on startup"
+      [ -f "$OMC_STATE_DIR/handoff-sess-A" ] && [ -f "$OMC_STATE_DIR/ctx-sess-A" ] || { printf '    FAIL: not set up: startup cleared state\n' >&2; TEST_FAILED=1; } ;;
+    *)
+      contains "$T/out" 'MEMORY.md' "not set up: $src reread sentence"
+      [ -f "$OMC_STATE_DIR/handoff-sess-A" ] && { printf '    FAIL: not set up: %s kept marker\n' "$src" >&2; TEST_FAILED=1; }
+      [ -f "$OMC_STATE_DIR/ctx-sess-A" ] && { printf '    FAIL: not set up: %s kept ctx\n' "$src" >&2; TEST_FAILED=1; } ;;
+  esac
+done
+start_hook startup OMK_KNOWLEDGE_DIR="$KB"; contains "$T/out" 'Knowledge base:' "paired: set-up KB prints the normal note"
+lacks "$T/out" 'not set up yet' "paired: set-up KB has no not-set-up note"
+# a directory named SCHEMA.md is not a set-up KB
+mkdir -p "$T/dirschema/SCHEMA.md"
+start_hook startup OMK_KNOWLEDGE_DIR="$T/dirschema"; contains "$T/out" 'not set up yet' "SCHEMA.md as a directory is not set up"
+prompt_hook '為什麼 docker 很慢' OMK_KNOWLEDGE_DIR="$NOKB"; empty "$T/out" "reminder silent before setup"
+prompt_hook '為什麼 docker 很慢' OMK_KNOWLEDGE_DIR="$KB"; contains "$T/out" 'oh-my-knowledge:lookup' "paired: reminder fires with SCHEMA.md"
+reset_state; printf '90 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+stop_hook "$STOP" OMK_KNOWLEDGE_DIR="$NOKB"; empty "$T/out" "auto-handoff silent before setup"
+[ -f "$OMC_STATE_DIR/handoff-sess-A" ] && { printf '    FAIL: marker written before setup\n' >&2; TEST_FAILED=1; }
+reset_state; printf '90 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
+stop_hook "$STOP" OMK_KNOWLEDGE_DIR="$KB"; contains "$T/out" '"decision":"block"' "paired: auto-handoff blocks with SCHEMA.md"
+reset_state
+# configuration error wins over not set up (relative dir has no SCHEMA.md either)
+start_hook startup OMK_KNOWLEDGE_DIR=kb
+contains "$T/out" 'knowledge_dir must be an absolute path' "config error shown"
+lacks "$T/out" 'not set up yet' "config error wins over not set up"
 end_test
 
 # --- statusline usage file ------------------------------------------------
