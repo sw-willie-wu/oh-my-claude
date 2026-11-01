@@ -111,7 +111,7 @@ end_test
 
 start_test "unharvested_auto_memory: per dir; mapped vs unmapped text; stubs/project/unlisted handled"
 assert_eq "blue:0" "$(finding unharvested_auto_memory "$EXT1")" "mapped dir finding"
-assert_eq "to harvest: 3 new entries" "$(detail unharvested_auto_memory "$EXT1")" "fb1 + ref1 (metadata.type) + user1 (not listed); not project/mixed/blank-line stub"
+assert_eq "to harvest: 3 new entries" "$(detail unharvested_auto_memory "$EXT1")" "fb1 + ref1 (metadata.type) + user1 (not listed); not project/mixed/blank-line stub; not omk: always-on (top level ao-top, under metadata: ao-meta) nor always-on-declined (ao-declined)"
 EXT2="$(RES "$AM/two/memory")"
 assert_eq "not migrated: 2 knowledge entries" "$(detail unharvested_auto_memory "$EXT2")" "unmapped dir (stub excluded)"
 assert_eq 2 "$(count_check unharvested_auto_memory)" "one finding per dir"

@@ -24,12 +24,25 @@ Companion to [SKILL.md](SKILL.md). `<knowledge_dir>/SCHEMA.md` stays the authori
 4. Replace the auto-memory file's body with `> Moved: [[k:projects/<p>/<slug>]]` (or `[[k:global/<slug>]]`).
 5. If it has a `MEMORY.md` line, edit only that line into `- <trigger situation> → [[k:…]] (omk-harvested)`. Keep the trigger, drop the conclusion. Example: `- before touching production → [[k:projects/p0001/deploy-prod]] (omk-harvested)`. No line → add none.
 
+**Always-on directive** (feedback/user candidate whose content is an instruction that applies in every situation; takes precedence over duplicate and all knowledge)
+1. Record the original's date first (step 1 above).
+2. Rules-import check: `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` (setup step 6's path) must contain a direct `@` import line that resolves to this knowledge base's `rules/INDEX.md`. Expand `~` and `~\`, turn `\` into `/`, compare with the path in the session-start "Knowledge base:" note, case-insensitive on Windows, treating `/c/…` and `C:/…` as the same path (Git Bash expands `~` to the `/c/` form). Nested imports are not followed.
+3. Scope. **This project only** → leave it unharvested: file and `MEMORY.md` line stay unchanged except the frontmatter tag `omk: always-on`, under `metadata:` if that block exists, else top level; a file without frontmatter gets a minimal block with `type: feedback` and the tag. Harvest then skips it and lint does not count it.
+4. **Applies in any project** and no import: offer setup step 6 first. Accepted → run setup step 6 (backup, append the import), then continue with step 5. Declined → tag the file `omk: always-on-declined` (file and line otherwise unchanged); harvest re-offers it only when the import exists and the user has not declined it in this harvest (remove the tag or add the import to get the offer again).
+5. Import present: if an existing rule already covers the directive, reuse it (no new rule file) and go to step 7 with that rule. Otherwise list the proposed `rules/<slug>.md` files (one short rule each; frontmatter per SCHEMA with `verified` from step 1, never today's date; link to a `global/` page only if details are needed) and ask the user. Declined → tag `omk: always-on-declined` as in step 4.
+6. Approved: write the rule and add the line `@<slug>.md` to `rules/INDEX.md`.
+7. Copy-and-verify the original (all-knowledge step 2). Then body → `> Moved: [[k:rules/<slug>]]`, and rewrite its `MEMORY.md` line (if any) pointer-only: `- always-on rule → [[k:rules/<slug>]] (omk-harvested)`. The rule loads every session itself; no second copy of the directive.
+
+Copy-and-verify (`cp -p` + `cmp`, all-knowledge step 2) comes before every outcome that changes an auto-memory file: all knowledge, mixed, duplicate, obsolete, always-on rule. A mismatch stops that file.
+
+In the harvest log line, `<n> always-on` counts every always-on candidate handled in this harvest: rule stubs plus files newly tagged `omk: always-on` or `omk: always-on-declined`.
+
 **Progress + knowledge (mixed)**
-1. Record the date (step 1 above), then move the knowledge part into the KB as in step 3.
+1. Record the date (step 1 above) and copy-and-verify the original (step 2 above), then move the knowledge part into the KB as in step 3.
 2. In the auto-memory file, replace the moved part with one line `→ [[k:…]]`; it must not be the first body line (the file is not a stub and stays searchable).
 3. Set its frontmatter type to `project`. Its `MEMORY.md` line keeps describing the progress; no `(omk-harvested)`.
 
-**Duplicate** of an existing page: body → `> Moved: [[k:<existing relpath>]]` (or `[[g:<slug>]]`); rewrite its `MEMORY.md` line (if any) like "all knowledge".
+**Duplicate** of an existing page: copy-and-verify first (step 2 above), then body → `> Moved: [[k:<existing relpath>]]` (or `[[g:<slug>]]`); rewrite its `MEMORY.md` line (if any) like "all knowledge".
 
 **Obsolete / not worth keeping**: copy and verify as in step 2, body → `> Moved: [[k:_retired/harvested/YYYY-MM-DD/<encoded dir>/<name without .md>]]`; rewrite its `MEMORY.md` line (if any) trigger-only to `- <trigger> → [[k:_retired/harvested/YYYY-MM-DD/<encoded dir>/<name without .md>]] (omk-harvested)`, or ask the user. Never delete the line silently.
 

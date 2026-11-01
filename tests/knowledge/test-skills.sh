@@ -192,6 +192,29 @@ grep -F 'invalid marker' "$r" 2>/dev/null | grep -qF 'never add a second marker'
 need "$r" 'demo-old' distill/reference.md
 end_test
 
+start_test "distill: always-on directive outcome (spec C)"
+f="$SKILLS/distill/SKILL.md"; r="$SKILLS/distill/reference.md"
+need "$f" 'always-on directive' distill
+grep -F 'always-on directive' "$f" 2>/dev/null | grep -F 'duplicate' | grep -qF 'all knowledge' || fail "distill: always-on row must state precedence over duplicate/all knowledge"
+need "$f" 'always-on' distill
+grep -F '<n> always-on' "$f" 2>/dev/null | grep -qF '<n> retired' || fail "distill: harvest log line lacks <n> always-on"
+need "$f" 'omk: always-on' distill
+need "$f" 'omk: always-on-declined' distill
+need "$f" 'copy-and-verify' distill
+need "$f" '- always-on rule → [[k:rules/<slug>]] (omk-harvested)' distill
+need "$f" '> Moved: [[k:rules/<slug>]]' distill
+for p in 'CLAUDE_CONFIG_DIR' 'rules/INDEX.md' 'setup step 6' '@<slug>.md' 'omk: always-on' 'omk: always-on-declined' \
+  'metadata:' 'type: feedback' '- always-on rule → [[k:rules/<slug>]] (omk-harvested)' \
+  '> Moved: [[k:rules/<slug>]]' 'case-insensitive' 'reuse'; do
+  need "$r" "$p" distill/reference.md
+done
+grep -F 'rules/<slug>.md' "$r" 2>/dev/null | grep -F 'verified' | grep -qF 'ask the user' || fail "reference: always-on rule proposal must carry verified frontmatter and ask the user"
+for o in 'all knowledge' 'mixed' 'duplicate' 'obsolete' 'always-on rule'; do
+  grep -F 'Copy-and-verify' "$r" 2>/dev/null | grep -qF "$o" || fail "reference: copy-and-verify must cover $o"
+done
+need "$f" 'carry no conclusion' distill
+end_test
+
 start_test "lint: script stage, subagent groups, report, retire, harvested marker"
 f="$SKILLS/lint/SKILL.md"
 for p in 'scripts/lint.sh' '(omk-harvested)' '(omk-project)' 'lint/lint-YYYY-MM-DD.md' 'sonnet' '_retired/YYYY-MM-DD/' \

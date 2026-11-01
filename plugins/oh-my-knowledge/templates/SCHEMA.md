@@ -68,6 +68,7 @@ Read the type from `metadata.type`, else from a top-level `type:` (auto memory u
 ## Markers
 
 - Harvested auto-memory entry: `(omk-harvested)`.
+- Always-on directive kept in auto memory: frontmatter `omk: always-on` (this project only) or `omk: always-on-declined`; harvest and lint skip the file.
 - Unverified claim: a line `> ⚠ UNVERIFIED (YYYY-MM-DD): <what is unconfirmed>`.
 - Stub (a moved page): after the frontmatter the body (blank lines ignored) contains only `> Moved: ` lines whose targets are comma-separated `[[slug]]`, `[[g:slug]]` or `[[k:<relpath>]]`.
 
