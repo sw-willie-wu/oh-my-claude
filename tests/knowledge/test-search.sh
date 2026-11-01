@@ -338,6 +338,12 @@ rm -rf "$PRJ/$e"
 mkdir -p "$PRJ/$var/memory"
 assert_eq "$(res "$PRJ/$var/memory")" "$(cf 1)" "variant only, folding on: found"
 assert_eq "" "$(cf 0)" "variant only, folding off: not found"
+# the fold path must leave the caller's nocasematch setting as it found it
+for st0 in on off; do
+  got="$(cd "$CF" && OMK_KNOWLEDGE_DIR="$KB" OMK_TEST_CASE_FOLD=1 bash -c '. "$1"; . "$2"; omk_config; if [ "$3" = on ]; then shopt -s nocasematch; else shopt -u nocasematch; fi; _omk_auto_memory_into r "$4"; if shopt -q nocasematch; then echo "after=on"; else echo "after=off"; fi; echo "r=$r"' _ "$COMMON" "$PROJECT" "$st0" "$CF" | tr -d '\r')"
+  case "$got" in *"after=$st0"*) ;; *) echo "    FAIL: nocasematch started $st0, changed by the fold path: $got" >&2; TEST_FAILED=1 ;; esac
+  case "$got" in *"r=$(res "$PRJ/$var/memory")"*) ;; *) echo "    FAIL: fold path did not resolve (nocasematch $st0): $got" >&2; TEST_FAILED=1 ;; esac
+done
 # exact wins over a case variant (needs a case-sensitive filesystem; probe)
 mkdir -p "$PRJ/$e/memory"
 if [ "$(ls -1 "$PRJ" | grep -cxF -e "$e" -e "$var")" = 2 ]; then
@@ -347,6 +353,20 @@ else
   echo "    (case-insensitive filesystem: exact-vs-variant case skipped)"
 fi
 rm -rf "$PRJ/$e" "$PRJ/$var"
+end_test
+
+start_test "auto-memory glob forms: ~/… and (Windows) backslash C:\\… globs resolve like the plain one"
+GC="$T/work/Glob Case"; mkdir -p "$GC"
+ge="$(enc "$GC")"
+mkdir -p "$HOME/ccx/projects/$ge/memory"
+assert_eq "$(res "$HOME/ccx/projects/$ge/memory")" "$(OMK_AUTO_MEMORY_GLOB='~/ccx/projects/*/memory' PCWD="$GC" pcall omk_auto_memory_for_cwd "$GC")" "~/ glob resolves"
+case "${OSTYPE:-}" in
+  msys*|cygwin*)
+    WH="$(cd "$HOME" && pwd -W)"; BG="${WH//\//\\}\\ccx\\projects\\*\\memory"
+    assert_eq "$(res "$HOME/ccx/projects/$ge/memory")" "$(OMK_AUTO_MEMORY_GLOB="$BG" PCWD="$GC" pcall omk_auto_memory_for_cwd "$GC")" "backslash C:\\ glob resolves" ;;
+  *) echo "    (not msys: backslash glob case skipped)" ;;
+esac
+rm -rf "$HOME/ccx"
 end_test
 
 start_test "omk_repo_root: git-common-dir result that is not one absolute line means not in git"
@@ -374,6 +394,10 @@ assert_eq "" "$(pcall omk_project_marker "$SD")" "wrapper empty on invalid"
 rmdir "$KB/projects/other"
 marker nosuch > "$SD/MEMORY.md"; assert_eq "invalid missing nosuch" "$(pcall omk_project_marker_status "$SD")" missing
 printf 'prose (omk-project) only\n' > "$SD/MEMORY.md"; assert_eq none "$(pcall omk_project_marker_status "$SD")" prose
+printf '# M\n- Knowledge base project: [[k:projects/demo/index]] (omk-project)' > "$SD/MEMORY.md"
+assert_eq "ok demo" "$(pcall omk_project_marker_status "$SD")" "marker as last line without trailing newline"
+printf '# M\n- Knowledge base project: [[k:projects/demo/index]] (omk-project)\r' > "$SD/MEMORY.md"
+assert_eq "ok demo" "$(pcall omk_project_marker_status "$SD")" "last line CR only, no newline"
 end_test
 
 print_summary

@@ -164,8 +164,9 @@ mkmem m-bom-ok;   printf '\xef\xbb\xbf'"$MK"'\n' a > "$M/m-bom-ok/memory/MEMORY.
 mkmem m-bom-none; printf '\xef\xbb\xbf# M\n- nothing\n' > "$M/m-bom-none/memory/MEMORY.md"
 mkmem m-bom-l2;   printf '# M\n\xef\xbb\xbf'"$MK"'\n' a > "$M/m-bom-l2/memory/MEMORY.md"
 mkmem m-case;     printf -- "$MK\n" A > "$M/m-case/memory/MEMORY.md"
+mkmem m-nonl;     printf "# M\n$MK" a > "$M/m-nonl/memory/MEMORY.md"
 runc "$T/kbm" "$M"
-for d in m-ok m-none m-multi m-missing m-crlf m-prose m-trail m-indent m-dup m-dotdot m-nomem m-subpath m-wrongtail m-bomless m-bom-ok m-bom-none m-bom-l2 m-case; do
+for d in m-ok m-none m-multi m-missing m-crlf m-prose m-trail m-indent m-dup m-dotdot m-nomem m-subpath m-wrongtail m-bomless m-bom-ok m-bom-none m-bom-l2 m-case m-nonl; do
   dp="$(RES "$M/$d/memory")"
   ST="$(OMK_KNOWLEDGE_DIR="$T/kbm" bash -c '. "$1"; . "$2"; omk_project_marker_status "$3"' _ "$PLUGIN/scripts/lib/common.sh" "$PLUGIN/scripts/lib/project.sh" "$dp" | tr -d '\r')"
   case "$ST" in

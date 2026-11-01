@@ -336,6 +336,142 @@ contains "$T/out" 'knowledge_dir must be an absolute path' "config error shown"
 lacks "$T/out" 'not set up yet' "config error wins over not set up"
 end_test
 
+# --- session-start: project always-on injection (spec G2) -----------------
+AO_CC="$T/aocc"; AO_KB="$T/kbao"; AO_W="$T/aowork/proj"
+mkdir -p "$AO_CC/projects" "$AO_KB/projects/demo" "$AO_W"; : > "$AO_KB/SCHEMA.md"
+git -C "$AO_W" init -q . >/dev/null 2>&1
+AO_ENC="$(bash -c '. "$1"; omk_encode_path "$2"' _ "$HOOKS/../scripts/lib/common.sh" "$AO_W" | tr -d '\r')"
+AO_MEM="$AO_CC/projects/$AO_ENC/memory"; mkdir -p "$AO_MEM"
+AO_PAGE="$AO_KB/projects/demo/always-on.md"
+ao_marker() { printf -- '- Knowledge base project: [[k:projects/%s/index]] (omk-project)\n' "$1"; }
+ao_marker demo > "$AO_MEM/MEMORY.md"
+# ao_hook <source> <cwd|-> [env...] -> $T/out ; cwd "-" omits the field
+ao_hook() {
+  local s="$1" c="$2"; shift 2
+  if [ "$c" = "-" ]; then
+    printf '{"session_id":"sess-A","hook_event_name":"SessionStart","source":"%s"}' "$s"
+  else
+    MSYS2_ARG_CONV_EXCL='*' jq -nc --arg s "$s" --arg c "$c" '{session_id:"sess-A",hook_event_name:"SessionStart",source:$s,cwd:$c}'
+  fi | env CLAUDE_CONFIG_DIR="$AO_CC" OMK_KNOWLEDGE_DIR="$AO_KB" "$@" bash "$HOOKS/session-start.sh" >"$T/out" 2>"$T/err"; RC=$?
+}
+# Windows jq writes CRLF in text mode; the hook output itself is checked for a real CR separately.
+ao_msg() { jq -r '.hookSpecificOutput.additionalContext' "$T/out" 2>/dev/null | tr -d '\r'; }
+AO_NOTE="Knowledge base: $(native "$AO_KB"). [[g:slug]] = $(native "$AO_KB")/global/<slug>.md; [[k:path]] = $(native "$AO_KB")/<path>.md."
+AO_HEAD='Always-on directives for this project (demo) — follow them in every reply:'
+AO_REREAD="Before continuing, re-read the current-status section of this project's auto-memory MEMORY.md."
+ao_expect() { # <msg> <expected> <label>
+  [ "$1" = "$2" ] || { printf '    FAIL: %s\n      want: %q\n      got:  %q\n' "$3" "$2" "$1" >&2; TEST_FAILED=1; }
+}
+printf -- '---\nname: ao\ndescription: d\ntags:\n- yaml-list-item\n---\n# Title\n- Reply in 繁體中文\n  - indented is not a directive\nprose line\n```\n- inside fence\n```\n<!-- single-line comment -->\n<!--\n- inside comment\n-->\n- say "hi" and C:\\path\\x\n-not a directive\n- last <!-- inline kept -->\n' > "$AO_PAGE"
+AO_BODY="$(printf -- '- Reply in 繁體中文\n- say "hi" and C:\\path\\x\n- last <!-- inline kept -->')"
+
+start_test "session-start always-on: heading and exactly the '- ' lines after the note; frontmatter, fences and comments excluded"
+ao_hook startup "$AO_W"
+assert_eq 0 "$RC" "exit"
+jq -e '.hookSpecificOutput.hookEventName=="SessionStart"' "$T/out" >/dev/null 2>&1 || { printf '    FAIL: bad JSON: %q\n' "$(cat "$T/out")" >&2; TEST_FAILED=1; }
+ao_expect "$(ao_msg)" "$AO_NOTE"$'\n\n'"$AO_HEAD"$'\n'"$AO_BODY" "startup message"
+ao_hook resume "$AO_W"
+ao_expect "$(ao_msg)" "$AO_NOTE"$'\n\n'"$AO_HEAD"$'\n'"$AO_BODY" "resume repeats the injection"
+(cd "$AO_W" && printf '{"session_id":"sess-A","source":"startup"}' | env CLAUDE_CONFIG_DIR="$AO_CC" OMK_KNOWLEDGE_DIR="$AO_KB" bash "$HOOKS/session-start.sh" >"$T/out" 2>/dev/null)
+ao_expect "$(ao_msg)" "$AO_NOTE"$'\n\n'"$AO_HEAD"$'\n'"$AO_BODY" "no cwd field falls back to \$PWD"
+(cd "$AO_W" && printf '{"session_id":"sess-A","source":"startup","cwd":""}' | env CLAUDE_CONFIG_DIR="$AO_CC" OMK_KNOWLEDGE_DIR="$AO_KB" bash "$HOOKS/session-start.sh" >"$T/out" 2>/dev/null)
+ao_expect "$(ao_msg)" "$AO_NOTE"$'\n\n'"$AO_HEAD"$'\n'"$AO_BODY" "empty cwd falls back to \$PWD"
+end_test
+
+start_test "session-start always-on: a trailing CR on cwd, source and session_id is stripped"
+# A jq that writes CRLF (Windows builds) already appends one CR to every field, so the
+# source/session_id strip is covered by the compact/clear tests there (msys tolerates a CR
+# on cwd); the explicit payload-CR case, which covers cwd, runs only with an LF jq.
+if [ "$(jq -n '"a"' | od -An -c | tr -d ' ')" = '"a"\n' ]; then
+  printf '{"session_id":"sess-A\\r","hook_event_name":"SessionStart","source":"compact\\r","cwd":"%s\\r"}' "$AO_W" \
+    | env CLAUDE_CONFIG_DIR="$AO_CC" OMK_KNOWLEDGE_DIR="$AO_KB" bash "$HOOKS/session-start.sh" >"$T/out" 2>/dev/null
+  ao_expect "$(ao_msg)" "$AO_NOTE $AO_REREAD"$'\n\n'"$AO_HEAD"$'\n'"$AO_BODY" "payload fields ending in CR"
+else
+  echo "    (jq writes CRLF here: CR strip is exercised by every injection case; explicit case skipped)"
+fi
+end_test
+
+start_test "session-start always-on: compact and clear append after the re-read sentence"
+for src in compact clear; do
+  ao_hook "$src" "$AO_W"
+  ao_expect "$(ao_msg)" "$AO_NOTE $AO_REREAD"$'\n\n'"$AO_HEAD"$'\n'"$AO_BODY" "$src message"
+done
+end_test
+
+start_test "session-start always-on: CRLF page"
+printf -- '---\r\nname: ao\r\ntags:\r\n- yaml-list-item\r\n---\r\n- one\r\n- two\r\n' > "$AO_PAGE"
+ao_hook startup "$AO_W"
+ao_expect "$(ao_msg)" "$AO_NOTE"$'\n\n'"$AO_HEAD"$'\n- one\n- two' "CRLF page"
+assert_eq false "$(jq -r '.hookSpecificOutput.additionalContext | contains("\r")' "$T/out" | tr -d '\r')" "no CR in the message"
+end_test
+
+start_test "session-start always-on: backslash cwd in the payload (Windows form)"
+case "${OSTYPE:-}" in
+  msys*|cygwin*)
+    printf -- '- one\n' > "$AO_PAGE"
+    WB="$(cd "$AO_W" && pwd -W)"; WB="${WB//\//\\}"
+    ao_hook startup "$WB"
+    ao_expect "$(ao_msg)" "$AO_NOTE"$'\n\n'"$AO_HEAD"$'\n- one' "backslash cwd ($WB)" ;;
+  *) echo "    (not msys: backslash-cwd case skipped)" ;;
+esac
+end_test
+
+start_test "session-start always-on: anything unmapped leaves the note unchanged"
+printf -- '- one\n' > "$AO_PAGE"
+ao_hook startup "$AO_W"; ao_expect "$(ao_msg)" "$AO_NOTE"$'\n\n'"$AO_HEAD"$'\n- one' "baseline injects"
+ao_hook startup "$T/aowork"; ao_expect "$(ao_msg)" "$AO_NOTE" "not migrated (cwd without marker)"
+ao_marker demo > "$AO_MEM/MEMORY.md"; ao_marker other >> "$AO_MEM/MEMORY.md"; mkdir -p "$AO_KB/projects/other"
+ao_hook startup "$AO_W"; ao_expect "$(ao_msg)" "$AO_NOTE" "multiple projects"
+ao_marker nosuch > "$AO_MEM/MEMORY.md"
+ao_hook startup "$AO_W"; ao_expect "$(ao_msg)" "$AO_NOTE" "marker names a missing project"
+ao_marker demo > "$AO_MEM/MEMORY.md"
+mv "$AO_PAGE" "$AO_PAGE.off"
+ao_hook startup "$AO_W"; ao_expect "$(ao_msg)" "$AO_NOTE" "no page"
+printf -- '---\nname: ao\n---\nno directives here\n  - indented\n' > "$AO_PAGE"
+ao_hook startup "$AO_W"; ao_expect "$(ao_msg)" "$AO_NOTE" "page without '- ' lines"
+printf -- '> Moved: [[k:rules/x]]\n' > "$AO_PAGE"
+ao_hook startup "$AO_W"; ao_expect "$(ao_msg)" "$AO_NOTE" "stub page"
+printf -- '```\n- never closed fence\n' > "$AO_PAGE"
+ao_hook startup "$AO_W"; ao_expect "$(ao_msg)" "$AO_NOTE" "only an unclosed fence"
+rm -f "$AO_PAGE"; mv "$AO_PAGE.off" "$AO_PAGE"
+ao_hook startup "$AO_W" OMK_KNOWLEDGE_DIR=kb
+case "$(ao_msg)" in *"Always-on directives"*) printf '    FAIL: injected despite config error\n' >&2; TEST_FAILED=1;; esac
+NOKB2="$T/nokb2"; mkdir -p "$NOKB2/projects/demo"; cp "$AO_PAGE" "$NOKB2/projects/demo/always-on.md"
+ao_hook startup "$AO_W" OMK_KNOWLEDGE_DIR="$NOKB2"
+case "$(ao_msg)" in *"Always-on directives"*) printf '    FAIL: injected despite not set up\n' >&2; TEST_FAILED=1;; esac
+contains "$T/out" 'not set up yet' "not-set-up note kept"
+end_test
+
+start_test "session-start always-on: cap of 4000 bytes at a line boundary, then the (more in ...) line"
+: > "$AO_PAGE"
+i=0; while [ "$i" -lt 100 ]; do i=$((i+1)); printf -- '- line-%03d %s\n' "$i" "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >> "$AO_PAGE"; done
+ao_hook startup "$AO_W"
+M="$(ao_msg)"
+BLOCK="${M#*"$AO_HEAD"$'\n'}"
+case "$BLOCK" in *$'\n(more in [[k:projects/demo/always-on]])') ;; *) printf '    FAIL: no (more in) line: %q\n' "${BLOCK: -80}" >&2; TEST_FAILED=1;; esac
+LINES_ONLY="${BLOCK%$'\n(more in [[k:projects/demo/always-on]])'}"
+assert_eq 1 "$([ "$(printf '%s' "$LINES_ONLY" | LC_ALL=C wc -c | tr -d ' ')" -le 4000 ] && echo 1 || echo 0)" "directive lines <= 4000 bytes"
+NL="$(printf '%s\n' "$LINES_ONLY" | grep -c '^- line-[0-9]* x\{52\}$')"
+assert_eq "$(printf '%s\n' "$LINES_ONLY" | wc -l | tr -d ' ')" "$NL" "every injected line is complete"
+assert_eq 1 "$([ "$NL" -ge 50 ] && [ "$NL" -lt 100 ] && echo 1 || echo 0)" "truncated but not tiny (got $NL lines)"
+jq -e . "$T/out" >/dev/null 2>&1 || { printf '    FAIL: invalid JSON when truncated\n' >&2; TEST_FAILED=1; }
+# CJK is counted in bytes (LC_ALL=C): 3 bytes per char
+: > "$AO_PAGE"
+i=0; while [ "$i" -lt 60 ]; do i=$((i+1)); printf -- '- 行%02d 規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則規則\n' "$i" >> "$AO_PAGE"; done
+ao_hook startup "$AO_W"
+M="$(ao_msg)"; BLOCK="${M#*"$AO_HEAD"$'\n'}"
+case "$BLOCK" in *$'\n(more in [[k:projects/demo/always-on]])') ;; *) printf '    FAIL: CJK page not truncated\n' >&2; TEST_FAILED=1;; esac
+LINES_ONLY="${BLOCK%$'\n(more in [[k:projects/demo/always-on]])'}"
+assert_eq 1 "$([ "$(printf '%s' "$LINES_ONLY" | LC_ALL=C wc -c | tr -d ' ')" -le 4000 ] && echo 1 || echo 0)" "CJK lines <= 4000 bytes"
+# a first line over the cap: heading kept, no directive line, the (more in) line
+printf -- '- %s\n- short\n' "$(printf 'y%.0s' $(seq 1 4100))" > "$AO_PAGE"
+ao_hook startup "$AO_W"
+ao_expect "$(ao_msg)" "$AO_NOTE"$'\n\n'"$AO_HEAD"$'\n(more in [[k:projects/demo/always-on]])' "oversized first line"
+# a page of exactly-fitting size is not truncated
+printf -- '- a\n- b\n' > "$AO_PAGE"
+ao_hook startup "$AO_W"; lacks "$T/out" '(more in' "short page: no more-line"
+end_test
+
 # --- statusline usage file ------------------------------------------------
 render() { # <sid>  -> stdout
   jq -n --arg s "$1" '{session_id:$s,model:{display_name:"X"},workspace:{current_dir:"/tmp"},context_window:{used_percentage:42,context_window_size:200000}}' \
