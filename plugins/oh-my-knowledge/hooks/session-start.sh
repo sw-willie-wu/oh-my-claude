@@ -25,7 +25,7 @@ normal=1
 # re-read sentence stay in every case).
 if [ ! -f "$OMK_KNOWLEDGE_DIR/SCHEMA.md" ]; then
   normal=0
-  msg="oh-my-knowledge: knowledge base not set up yet (${kb}) — run /oh-my-knowledge:setup"
+  msg="oh-my-knowledge: knowledge base not set up yet (${kb}) — run /oh-my-knowledge:setup."
 fi
 if [ -n "${OMK_CONFIG_ERROR:-}" ]; then
   normal=0

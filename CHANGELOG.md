@@ -16,11 +16,11 @@ Releases are identified by the git tag: the manifests carry no version and
   All plugins in this marketplace update together on each release.
 - The marketplace declares `renames: {"oh-my-claude": "oh-my-status"}`, so
   enabled installs migrate automatically.
+
+### Changed
 - The 24 h SessionStart sweep also removes stale `ctx-*` and `handoff-*`
   files from the state directory. A `handoff-<sid>` older than 24 h is kept
   while its `ctx-<sid>` is fresher than 24 h (the session is still in use).
-
-### Changed
 - The repository has a `.gitattributes` (LF line endings everywhere).
 
 ### Added
@@ -43,8 +43,9 @@ Releases are identified by the git tag: the manifests carry no version and
 ### Upgrading
 - Run `/plugin marketplace update oh-my-claude`, then close all sessions and
   restart Claude Code twice: the first restart installs `oh-my-status` in the
-  background, the second makes it active. An old session's SessionStart would
-  copy the old files back, so do not leave one running.
+  background, the second makes it active. Every running Claude Code session
+  must be restarted after updating: an old session's SessionStart would copy
+  the old files back, so do not leave one running.
 - If you had `oh-my-claude` disabled, run
   `/plugin uninstall oh-my-claude@oh-my-claude`,
   `/plugin install oh-my-status@oh-my-claude`, then

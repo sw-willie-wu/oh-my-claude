@@ -299,7 +299,7 @@ end_test
 
 start_test "not set up (no SCHEMA.md): SessionStart prints the note; reminder and auto-handoff silent; each paired with a set-up KB"
 NOKB="$T/nokb"; mkdir -p "$NOKB"
-NOMSG="oh-my-knowledge: knowledge base not set up yet ($(native "$NOKB")) — run /oh-my-knowledge:setup"
+NOMSG="oh-my-knowledge: knowledge base not set up yet ($(native "$NOKB")) — run /oh-my-knowledge:setup."
 for src in startup compact clear; do
   printf '70\n' > "$OMC_STATE_DIR/handoff-sess-A"; printf '80 200000\n' > "$OMC_STATE_DIR/ctx-sess-A"
   start_hook "$src" OMK_KNOWLEDGE_DIR="$NOKB"
