@@ -102,9 +102,15 @@ else
 fi
 end_test
 
-start_test "root README upgrade notes tell disabled users to uninstall oh-my-claude@oh-my-claude"
+start_test "upgrade notes tell disabled users to uninstall, reinstall and disable"
 grep -qF -- '/plugin uninstall oh-my-claude@oh-my-claude' "$REPO_ROOT/README.md" \
   || { printf '    FAIL: root README lacks uninstall note\n' >&2; TEST_FAILED=1; }
+grep -qF -- '/plugin disable oh-my-status@oh-my-claude' "$REPO_ROOT/README.md" \
+  || { printf '    FAIL: root README lacks disable note\n' >&2; TEST_FAILED=1; }
+grep -qF -- '/plugin disable oh-my-status@oh-my-claude' "$REPO_ROOT/CHANGELOG.md" \
+  || { printf '    FAIL: CHANGELOG lacks disable note\n' >&2; TEST_FAILED=1; }
+[ "$(grep -cF -- 'had `oh-my-claude` disabled' "$REPO_ROOT/CHANGELOG.md")" = 1 ] \
+  || { printf '    FAIL: CHANGELOG must have exactly one disabled-user note\n' >&2; TEST_FAILED=1; }
 end_test
 
 start_test "marketplace entry for oh-my-knowledge is finalised"

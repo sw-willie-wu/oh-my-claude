@@ -1,5 +1,5 @@
 ---
-description: Switch oh-my-claude theme and/or layout
+description: Switch oh-my-status theme and/or layout
 ---
 
 Read the oh-my-claude config file at ~/.claude/oh-my-claude.conf and show the user the current THEME and LAYOUT settings.

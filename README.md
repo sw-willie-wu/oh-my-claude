@@ -146,11 +146,15 @@ you want live background-shell rows.
 
 The statusline plugin was renamed from `oh-my-claude` to `oh-my-status`, and the repository now holds its plugins under `plugins/`. The marketplace name stays `oh-my-claude`, and runtime paths (`~/.claude/oh-my-claude/`, `~/.claude/oh-my-claude.conf`) are unchanged, so your theme, layout and config carry over.
 
-1. Update the marketplace (or wait for auto-update).
+1. Update the marketplace: `/plugin marketplace update oh-my-claude`.
 2. Close all running Claude Code sessions, then start Claude Code and restart it once more. The first start installs `oh-my-status` in the background; the second makes it active. Do not keep an old session open: its SessionStart hook would copy the old files back.
 3. Slash commands moved from the old `oh-my-claude` prefix to `/oh-my-status:` (for example `/oh-my-status:setup`).
 
-If you had `oh-my-claude` disabled, the rename does not migrate it. Run `/plugin uninstall oh-my-claude@oh-my-claude`, then `/plugin install oh-my-status@oh-my-claude`.
+If you had `oh-my-claude` disabled, the rename does not migrate it. Run `/plugin uninstall oh-my-claude@oh-my-claude`, then `/plugin install oh-my-status@oh-my-claude`, then `/plugin disable oh-my-status@oh-my-claude` to keep it disabled.
+
+If you start Claude Code with `--plugin-dir`, point it at `<repo>/plugins/oh-my-status` (and `<repo>/plugins/oh-my-knowledge` for the knowledge plugin) instead of the repository root.
+
+If a project-level `.claude/settings.json` enables `oh-my-claude@oh-my-claude`, rename the key to `oh-my-status@oh-my-claude` by hand; the automatic rename was verified only for user settings.
 
 ### Upgrading
 

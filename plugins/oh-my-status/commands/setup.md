@@ -1,5 +1,5 @@
 ---
-description: Configure oh-my-claude statusline in your settings
+description: Configure oh-my-status statusline in your settings
 ---
 
 Configure the oh-my-claude statusline in the user's settings.

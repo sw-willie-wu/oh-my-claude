@@ -147,7 +147,7 @@ out="$(HOME="$sbox/home" \
   OMC_CONF_TEMPLATE="$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" \
   bash "$SETUP_SH" 2>/dev/null)"
 case "$out" in
-  *"[oh-my-claude]"*"LAYOUT"*) ;;
+  *"[oh-my-status]"*"LAYOUT"*) ;;
   *) printf '    FAIL: notice missing or lacks key name; got: %s\n' "$out" >&2; TEST_FAILED=1 ;;
 esac
 # the partial user conf must not have been modified by detection

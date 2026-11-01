@@ -106,10 +106,11 @@ Files in `rules/` load only through one import line in your `CLAUDE.md` (`${CLAU
 
 ## Requirements
 
-- `bash`, `gawk`, GNU `date`, GNU `find` (lint uses `find -printf`), and `jq`.
-- Hook scripts are bash 3.2 compatible.
-- **macOS:** install them first, for example `brew install gawk coreutils findutils jq`, and put the GNU `date` and `find` first on `PATH` (Homebrew installs them as `gdate` and `gfind` unless you add the `gnubin` directories).
-- **Windows:** use Git Bash; the scripts handle Windows-style paths.
+- `bash`, `gawk`, GNU `find` (lint uses `find -printf`), and `jq`. BSD `date` (the macOS default) is fine.
+- The hook scripts are bash 3.2 compatible.
+- **macOS:** install them first, for example `brew install gawk findutils jq`, and put the GNU `find` first on `PATH` (Homebrew installs it as `gfind` unless you add the `gnubin` directory).
+- **Linux:** GNU `find` is the default; install `jq` and `gawk` from your package manager.
+- **Windows:** use Git Bash, which ships `gawk` and GNU `find`; install `jq` with `winget install jqlang.jq`. The scripts handle Windows-style paths.
 - `git` 2.31 or newer for the knowledge base's history (project detection uses `rev-parse --path-format`).
 
 ## Moving to another machine

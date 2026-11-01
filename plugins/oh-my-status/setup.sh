@@ -35,7 +35,7 @@ if [ -r "$SCRIPT_DIR/lib/conf-keys.sh" ]; then
   if [ -n "$missing" ]; then
     n="$(printf '%s\n' "$missing" | awk 'END{print NR}')"
     keys_csv="$(printf '%s' "$missing" | paste -sd, -)"
-    printf '%s\n' "[oh-my-claude] Context for the assistant: ${n} new config option(s) (${keys_csv}) exist in the bundled template but are not in the user's ~/.claude/oh-my-claude.conf. At a natural moment, mention to the user once (not repeatedly within this session) that running /oh-my-status:setup will add the new options with safe defaults while preserving existing values."
+    printf '%s\n' "[oh-my-status] Context for the assistant: ${n} new config option(s) (${keys_csv}) exist in the bundled template but are not in the user's ~/.claude/oh-my-claude.conf. At a natural moment, mention to the user once (not repeatedly within this session) that running /oh-my-status:setup will add the new options with safe defaults while preserving existing values."
   fi
 fi
 

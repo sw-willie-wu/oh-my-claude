@@ -2,6 +2,9 @@
 
 ## Unreleased (2026-10-31)
 
+Releases are identified by the git tag: the manifests carry no version and
+`/plugin` shows a commit sha. This heading gets the tag name at release time.
+
 ### Changed (breaking)
 - Split the repository into two plugins under `plugins/`: `oh-my-status` (the
   statusline, formerly `oh-my-claude`) and `oh-my-knowledge` (a new
@@ -25,22 +28,30 @@
   skills (`setup`, `lookup`, `distill`, `handoff`, `lint`), a lookup-reminder
   hook, an automatic handoff hook (needs `oh-my-status`, which now writes
   `ctx-<sid>`), and scripts for init, commit, search and lint. Requires bash,
-  gawk, GNU date and find, and jq. See `plugins/oh-my-knowledge/README.md`.
+  gawk, GNU find (BSD date is fine), and jq. See
+  `plugins/oh-my-knowledge/README.md`.
   The automatic handoff fires at the threshold and again once usage has grown
   by `auto_handoff_repeat` points (default 20, range 10-60) past the usage
   recorded in `handoff-<sid>` at the last handoff; `/compact` and `/clear`
   start a new window.
 
 ### Upgrading
-- Update the marketplace (or wait for auto-update), then close all sessions and
+- Run `/plugin marketplace update oh-my-claude`, then close all sessions and
   restart Claude Code twice: the first restart installs `oh-my-status` in the
   background, the second makes it active. An old session's SessionStart would
   copy the old files back, so do not leave one running.
+- If you had `oh-my-claude` disabled, run
+  `/plugin uninstall oh-my-claude@oh-my-claude`,
+  `/plugin install oh-my-status@oh-my-claude`, then
+  `/plugin disable oh-my-status@oh-my-claude`.
+- `--plugin-dir` users: point it at `<repo>/plugins/oh-my-status` (and
+  `<repo>/plugins/oh-my-knowledge`), not the repository root.
+- A project-level `.claude/settings.json` that enables
+  `oh-my-claude@oh-my-claude` needs the key renamed to
+  `oh-my-status@oh-my-claude` by hand; the automatic rename was verified only
+  for user settings.
 - Runtime paths are unchanged (`~/.claude/oh-my-claude/`,
   `~/.claude/oh-my-claude.conf`).
-- If you had `oh-my-claude` disabled: run
-  `/plugin uninstall oh-my-claude@oh-my-claude`, then
-  `/plugin install oh-my-status@oh-my-claude`.
 
 ## 1.2.0 (2026-10-20)
 

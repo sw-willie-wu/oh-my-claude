@@ -1,6 +1,6 @@
 #!/bin/bash
 # oh-my-knowledge shared helpers: path normalisation and configuration.
-# Source this file; it defines functions only. Requirements: bash, gawk, GNU date, jq.
+# Source this file; it defines functions only. Requirements: bash, gawk, GNU find, jq.
 
 _OMK_UP=ABCDEFGHIJKLMNOPQRSTUVWXYZ
 _OMK_LO=abcdefghijklmnopqrstuvwxyz
