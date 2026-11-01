@@ -104,6 +104,15 @@ Files in `rules/` load only through one import line in your `CLAUDE.md` (`${CLAU
 
 (use your real `knowledge_dir`). `rules/INDEX.md` in turn `@`-imports each rule with a path relative to itself, so moving the folder needs no rewrite there. `setup` offers to add the line and keeps a dated backup of `CLAUDE.md`. Lint flags rule files missing from the index.
 
+## Always-on directives
+
+An instruction that must apply in every reply has no trigger, so harvest cannot reduce it to a trigger line. Two homes:
+
+- **A rule** (`rules/<slug>.md`) when it applies in every project; it loads through the rules import above.
+- **`projects/<p>/always-on.md`** when it is for one project only (or you declined the rule or the rules import): one directive per `- ` line. The SessionStart hook appends these lines to the session-start note on every start, resume, compact and clear, so they stay in force. The page is the only copy; harvest leaves a `> Moved:` stub and a pointer-only `MEMORY.md` line in auto memory.
+
+Distill proposes the home during harvest and asks before writing a rule. To change later, ask: "make X a global rule", "change X", "drop X". The page is never deleted (stubs on other machines link to it). A session opened in an unmarked non-git subdirectory of a migrated project gets no injection (no marker, no project). The page's text is followed as instructions, so only share a knowledge base with people you trust.
+
 ## Requirements
 
 - `bash`, `gawk`, GNU `find` (lint uses `find -printf`), and `jq`. BSD `date` (the macOS default) is fine.

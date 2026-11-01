@@ -124,7 +124,7 @@ BEGINFILE {
   }
   skipf = 0
   ln = 0; fm = 0; hasfm = 0; fmclose = 0; body = 0; moved = 0; infence = ""; incm = 0; cur = ""
-  fname = ""; ftype = ""; mtype = ""; fver = ""; stl = 0; vm = 0; aon = 0
+  fname = ""; ftype = ""; mtype = ""; fver = ""; stl = 0; vm = 0
   delete movp
 }
 
@@ -158,12 +158,10 @@ BEGINFILE {
       cur = m[1]; v = unq(vclean(m[2]))
       if (cur == "type") ftype = v
       else if (cur == "verified") fver = v
-      else if (cur == "omk" && (v == "always-on" || v == "always-on-declined")) aon = 1
     } else if (cur == "metadata" && match(line, /^[ \t]+([A-Za-z_]+):[ \t]*(.*)$/, m)) {
       v = unq(vclean(m[2]))
       if (m[1] == "type") mtype = v
       else if (m[1] == "verified") fver = v
-      else if (m[1] == "omk" && (v == "always-on" || v == "always-on-declined")) aon = 1
     }
     next
   }
@@ -182,7 +180,8 @@ BEGINFILE {
   if (infence != "") next
   c0 = nocomment(line)
   if (tag == "K" && !refonly) {
-    if (c0 !~ /^ {0,3}#+([ \t]|$)/) {
+    # projects/<p>/always-on.md holds directives that may mention work words
+    if (c0 !~ /^ {0,3}#+([ \t]|$)/ && id !~ /^projects\/[^\/]+\/always-on\.md$/) {
       s = c0
       gsub(/https?:\/\/[^ \t)>\]"\x27]*/, "", s)
       if (match(tolower(s), progre, pm)) add("progress_leak", "yellow", id, ln, "'" pm[0] "' outside code/headings")
@@ -237,7 +236,7 @@ ENDFILE {
       if (isstub) { for (p in movp) harvp[adir SUBSEP p] = 1 }
       else {
         ty = (mtype != "" ? mtype : ftype)
-        if ((ty == "feedback" || ty == "reference" || ty == "user") && !aon) ucount[adir]++
+        if (ty == "feedback" || ty == "reference" || ty == "user") ucount[adir]++
       }
     }
   }

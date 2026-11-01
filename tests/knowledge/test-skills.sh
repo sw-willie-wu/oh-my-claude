@@ -192,27 +192,76 @@ grep -F 'invalid marker' "$r" 2>/dev/null | grep -qF 'never add a second marker'
 need "$r" 'demo-old' distill/reference.md
 end_test
 
-start_test "distill: always-on directive outcome (spec C)"
+start_test "distill: always-on directive outcomes (spec C rule path, spec G project always-on)"
 f="$SKILLS/distill/SKILL.md"; r="$SKILLS/distill/reference.md"
 need "$f" 'always-on directive' distill
 grep -F 'always-on directive' "$f" 2>/dev/null | grep -F 'duplicate' | grep -qF 'all knowledge' || fail "distill: always-on row must state precedence over duplicate/all knowledge"
-need "$f" 'always-on' distill
 grep -F '<n> always-on' "$f" 2>/dev/null | grep -qF '<n> retired' || fail "distill: harvest log line lacks <n> always-on"
-need "$f" 'omk: always-on' distill
-need "$f" 'omk: always-on-declined' distill
 need "$f" 'copy-and-verify' distill
 need "$f" '- always-on rule → [[k:rules/<slug>]] (omk-harvested)' distill
 need "$f" '> Moved: [[k:rules/<slug>]]' distill
-for p in 'CLAUDE_CONFIG_DIR' 'rules/INDEX.md' 'setup step 6' '@<slug>.md' 'omk: always-on' 'omk: always-on-declined' \
-  'metadata:' 'type: feedback' '- always-on rule → [[k:rules/<slug>]] (omk-harvested)' \
-  '> Moved: [[k:rules/<slug>]]' 'case-insensitive' 'reuse'; do
+# G: no tags anywhere
+if grep -rnE 'omk: always-on|always-on-declined' "$PLUGIN/skills" "$PLUGIN/templates" "$PLUGIN/scripts/lib/lint-content.awk" >/dev/null 2>&1; then
+  fail "an omk: always-on / always-on-declined tag is still mentioned in skills, SCHEMA template or lint awk"
+fi
+# G1: project always-on row (SKILL.md) and steps (reference.md)
+grep -F 'always-on directive' "$f" 2>/dev/null | grep -qF 'projects/<p>/always-on.md' || fail "distill: always-on row lacks projects/<p>/always-on.md"
+need "$f" '- always-on (this project) → [[k:projects/<p>/always-on]] (omk-harvested)' distill
+need "$f" '> Moved: [[k:projects/<p>/always-on]]' distill
+need "$f" 'make X a global rule' distill
+need "$f" '改成全域規則' distill
+grep -E '^description:' "$f" | grep -qF 'make X a global rule' || fail "distill: description lacks the 'make X a global rule' trigger"
+grep -E '^description:' "$f" | grep -qF '改成全域規則' || fail "distill: description lacks 改成全域規則"
+for p in 'CLAUDE_CONFIG_DIR' 'rules/INDEX.md' 'setup step 6' '@<slug>.md' \
+  '- always-on rule → [[k:rules/<slug>]] (omk-harvested)' '> Moved: [[k:rules/<slug>]]' 'case-insensitive' 'reuse' \
+  'projects/<p>/always-on.md' '- always-on (this project) → [[k:projects/<p>/always-on]] (omk-harvested)' \
+  '> Moved: [[k:projects/<p>/always-on]]' 'same directive' 'dedupe' 'stub' 'projects/<p>/index.md' \
+  'no line' 'exact pointer line' 'make X a global rule' 'Never delete' 'last line' 'log.md' \
+  'rules/INDEX.md' 'verified' 'user declines' 'change X' 'drop X' 'Closed'; do
   need "$r" "$p" distill/reference.md
 done
 grep -F 'rules/<slug>.md' "$r" 2>/dev/null | grep -F 'verified' | grep -qF 'ask the user' || fail "reference: always-on rule proposal must carry verified frontmatter and ask the user"
-for o in 'all knowledge' 'mixed' 'duplicate' 'obsolete' 'always-on rule'; do
+for o in 'all knowledge' 'mixed' 'duplicate' 'obsolete' 'always-on rule' 'project always-on'; do
   grep -F 'Copy-and-verify' "$r" 2>/dev/null | grep -qF "$o" || fail "reference: copy-and-verify must cover $o"
 done
+grep -F 'Copy-and-verify' "$r" 2>/dev/null | grep -qF 'six' || fail "reference: copy-and-verify must say six outcomes"
+grep -F '<n> always-on' "$r" 2>/dev/null | grep -qF 'project always-on' || fail "reference: <n> always-on counting must include project always-on outcomes"
+grep -E 'say .make X a global rule' "$r" 2>/dev/null | grep -qiE 'report' || fail "reference: report must carry the promote hint"
+grep -F 'make X a global rule' "$r" 2>/dev/null | grep -qF 'rules-import check' || fail "reference: promote must run the rules-import check"
+grep -F 'Never delete' "$r" 2>/dev/null | grep -qF 'page' || fail "reference: never-delete line must name the page"
+grep -F 'commit' "$r" 2>/dev/null | grep -F 'projects/<p>/always-on.md' | grep -qF 'rules/INDEX.md' || fail "reference: promote commit list (rule, INDEX, always-on page, log) missing"
+grep -F 'last line' "$r" 2>/dev/null | grep -qF '> Moved: [[k:rules/<slug>]]' || fail "reference: stub on last promote missing"
+grep -F 'tub page' "$r" 2>/dev/null | grep -qF 'restore' || fail "reference: appending to a stub page must restore it and its index line"
 need "$f" 'carry no conclusion' distill
+# review pins (M1, M3, M4, M5)
+grep -F 'user declines the import offer' "$r" 2>/dev/null | grep -qF 'project always-on' || fail "reference: a declined import offer must lead to project always-on"
+grep -F 'user declines the rule' "$r" 2>/dev/null | grep -qF 'project always-on' || fail "reference: a declined rule must lead to project always-on"
+grep -F 'exact pointer line' "$r" 2>/dev/null | grep -qF 'remove this file' || fail "reference: pointer-line dedupe must remove this file's line"
+grep -F 'the user declines → stop' "$r" 2>/dev/null | grep -qF 'nothing changes' || fail "reference: promote with a declined import must stop, nothing changes"
+need "$r" 'does not change `verified`' distill/reference.md
+grep -F 'Page missing' "$r" 2>/dev/null | grep -qF 'index line' || fail "reference: page creation must add the index line"
+grep -F 'delete the page' "$r" 2>/dev/null | grep -qF 'Never delete the page' || fail "reference: never-delete wording missing"
+[ -z "$(grep -F 'delete the page' "$r" 2>/dev/null | grep -vF 'Never delete the page')" ] || fail "reference: a line allows deleting the always-on page"
+grep -F 'index line stays' "$r" 2>/dev/null | grep -qF 'repoint' || fail "reference: promoted page keeps its index line"
+grep -F 'only if it was removed or repointed' "$r" 2>/dev/null | grep -qF 'Stub page' || fail "reference: stub restore only when the index line was removed or repointed"
+grep -F 'reuse that rule' "$r" 2>/dev/null | grep -qF 'existing rule' || fail "reference: promote reuses an existing rule"
+grep -F 'detail link' "$r" 2>/dev/null | grep -qF 'global/' || fail "reference: promote must drop or replace [[k:projects/…]] detail links"
+f="$SKILLS/distill/SKILL.md"
+need "$f" 'ask first' distill
+need "$f" 'make X a global rule / change X / drop X' distill
+need "$f" 'After **every** `MEMORY.md` write, re-check the marker line' distill
+grep -E '^Report:' "$f" | grep -qF 'always-on promote hint' || fail "distill: report line lacks the always-on promote hint"
+end_test
+
+start_test "templates/SCHEMA.md and lint skill carry the always-on.md convention (spec G4)"
+S="$PLUGIN/templates/SCHEMA.md"; f="$SKILLS/lint/SKILL.md"
+need "$S" 'always-on.md' SCHEMA
+grep -F 'always-on.md' "$S" | grep -qF 'reserved' || fail "SCHEMA: always-on.md must be a reserved slug"
+grep -F 'always-on.md' "$S" | grep -qF 'session start' || fail "SCHEMA: always-on.md loaded at session start"
+need "$f" 'always-on.md' lint
+grep -F 'always-on.md' "$f" | grep -qiE 'informational|not a finding' || fail "lint: always-on counts must be informational"
+grep -F 'stub_unreferenced' "$f" | grep -qF 'never offer it for retirement' || fail "lint: stub_unreferenced must exclude always-on.md"
+grep -F 'Never retire' "$f" | grep -qF 'always-on.md' || fail "lint: retire section must exclude always-on.md"
 end_test
 
 start_test "lint: script stage, subagent groups, report, retire, harvested marker"

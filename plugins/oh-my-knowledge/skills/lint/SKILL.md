@@ -30,12 +30,13 @@ Checks and who handles them (F = fix directly, P = propose a diff, A = ask the u
 | `oversize`, `duplicate_name`, `orphan`, `missing_page`, `rules_import_missing` | A |
 | `stale`, `unverified_overdue` | A: re-verify (run `oh-my-knowledge:lookup` write-backs) |
 | `progress_leak` | A: where the progress belongs (the project auto memory) |
-| `stub_unreferenced` | A: retire candidate |
+| `stub_unreferenced` | A: retire candidate, except `projects/*/always-on.md`: never offer it for retirement |
 | `promote_candidate` | A: promote to `global/` (see distill promote timing) |
 | `ext_link_missing`, `auto_memory_link_broken` | P only (they are outside the KB) |
 | `project_marker_invalid`, `project_marker_misplaced`, `project_marker_missing` | P only: propose the exact marker line `- Knowledge base project: [[k:projects/<p>/index]] (omk-project)` and its place (after the status section, within the first 200 lines). `project_marker_missing` means `(omk-harvested)` lines or `> Moved: [[k:projects/<p>/…]]` stubs exist without a valid marker. |
 | `unharvested_auto_memory` | report as the migration progress table; suggest distill ("migrate this project" / harvest) |
 | `slug_shadows_global` | blue hint only |
+| (no script check) always-on counts | informational, not a finding: in the report, list per project the number of `- ` lines in `projects/<p>/always-on.md` (read the files; skip projects without one) |
 | `missing_path` (blue: a `~/…` path in the text does not exist on this machine) | A: outdated path, or just absent here |
 
 ## 2. Judgement stage
@@ -76,6 +77,8 @@ Exit 0 committed; 3 nothing to commit = success; 4 lock held → report, retry l
 Show each proposal as a diff; apply only after the user agrees (description out of sync with the body, how to split a long index line, the trigger line for an unindexed page). Ask the "Ask the user" list in one message. Apply the answers, then commit as above with a message naming the change.
 
 ## 6. Retire (only after the user agrees)
+
+Never retire `projects/*/always-on.md` (other machines' stubs and pointer lines link to it).
 
 1. Move the file to `_retired/YYYY-MM-DD/<same relative path>` (`mv`).
 2. Append one line per file to `_retired/YYYY-MM-DD/REPORT.md`: path and reason.

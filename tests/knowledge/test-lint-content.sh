@@ -111,7 +111,7 @@ end_test
 
 start_test "unharvested_auto_memory: per dir; mapped vs unmapped text; stubs/project/unlisted handled"
 assert_eq "blue:0" "$(finding unharvested_auto_memory "$EXT1")" "mapped dir finding"
-assert_eq "to harvest: 3 new entries" "$(detail unharvested_auto_memory "$EXT1")" "fb1 + ref1 (metadata.type) + user1 (not listed); not project/mixed/blank-line stub; not omk: always-on (top level ao-top, under metadata: ao-meta) nor always-on-declined (ao-declined)"
+assert_eq "to harvest: 4 new entries" "$(detail unharvested_auto_memory "$EXT1")" "fb1 + ref1 (metadata.type) + user1 (not listed) + tagged-left (a leftover omk: always-on tag no longer exempts); not project/mixed/blank-line stub"
 EXT2="$(RES "$AM/two/memory")"
 assert_eq "not migrated: 2 knowledge entries" "$(detail unharvested_auto_memory "$EXT2")" "unmapped dir (stub excluded)"
 assert_eq 2 "$(count_check unharvested_auto_memory)" "one finding per dir"
@@ -405,6 +405,24 @@ printf -- '---\nname: fb\ndescription: d\ntype: feedback\n---\nx\n' > "$T/ami/p/
 DI="$(RES "$T/ami/p/memory")"
 OMK_LINT_ICASE=1 runc "$T/kbi2" "$T/ami"; assert_eq "to harvest: 1 new entries" "$(detail unharvested_auto_memory "$DI")" "icase=1"
 OMK_LINT_ICASE=0 runc "$T/kbi2" "$T/ami"; assert_eq "not migrated: 1 knowledge entries" "$(detail unharvested_auto_memory "$DI")" "icase=0"
+end_test
+
+start_test "progress_leak: raised on a normal project page, not on projects/<p>/always-on.md"
+fresh "$T/kbao"
+printf -- '- a\n' > "$T/kbao/projects/a/index.md"
+page "$T/kbao/projects/a/normal.md" normal '- 下一步 先問我 (MR 待審)'
+page "$T/kbao/projects/a/always-on.md" always-on '- 下一步 先問我 (MR 待審)'
+page "$T/kbao/projects/b/always-on.md" always-on '- 進行中的事不要動'
+mkdir -p "$T/kbao/projects/a/sub"
+page "$T/kbao/global/always-on.md" always-on '- 下一步 先問我 (MR 待審)'
+page "$T/kbao/projects/a/sub/always-on.md" always-on '- 下一步 先問我 (MR 待審)'
+runc "$T/kbao" "$T/no-am"
+assert_eq "9" "$(lines_of progress_leak global/always-on.md)" "global/always-on.md is still flagged"
+assert_eq "9" "$(lines_of progress_leak projects/a/sub/always-on.md)" "nested always-on.md is still flagged"
+assert_eq "9" "$(lines_of progress_leak projects/a/normal.md)" "normal page is flagged"
+assert_eq "" "$(lines_of progress_leak projects/a/always-on.md)" "always-on.md of a is skipped"
+assert_eq "" "$(lines_of progress_leak projects/b/always-on.md)" "always-on.md of b is skipped"
+assert_eq 3 "$(count_check progress_leak)" "normal page + global/ + nested only"
 end_test
 
 print_summary

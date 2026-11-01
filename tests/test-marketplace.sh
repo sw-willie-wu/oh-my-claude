@@ -92,7 +92,7 @@ else
   for k in $(jq -r '.userConfig | keys[]' "$REPO_ROOT/plugins/oh-my-knowledge/.claude-plugin/plugin.json" | tr -d '\r'); do
     grep -qF -- "\`$k\`" "$KR" || { printf '    FAIL: README lacks setting %s\n' "$k" >&2; TEST_FAILED=1; }
   done
-  for s in 'ctx-<' 'handoff-<' '(omk-harvested)' 'OMK_AUTO_MEMORY_GLOB' 'Moving to another machine'; do
+  for s in 'ctx-<' 'handoff-<' '(omk-harvested)' '(omk-project)' 'always-on.md' 'OMK_AUTO_MEMORY_GLOB' 'Moving to another machine'; do
     grep -qF -- "$s" "$KR" || { printf '    FAIL: README lacks %s\n' "$s" >&2; TEST_FAILED=1; }
   done
   req=$(awk '/^## Requirements/{f=1;next} /^## /{f=0} f' "$KR")
@@ -109,6 +109,10 @@ grep -qF -- '/plugin disable oh-my-status@oh-my-claude' "$REPO_ROOT/README.md" \
   || { printf '    FAIL: root README lacks disable note\n' >&2; TEST_FAILED=1; }
 grep -qF -- '/plugin disable oh-my-status@oh-my-claude' "$REPO_ROOT/CHANGELOG.md" \
   || { printf '    FAIL: CHANGELOG lacks disable note\n' >&2; TEST_FAILED=1; }
+grep -qF -- 'always-on.md' "$REPO_ROOT/CHANGELOG.md" \
+  || { printf '    FAIL: CHANGELOG lacks always-on.md note\n' >&2; TEST_FAILED=1; }
+grep -qF -- 'SCHEMA.md' "$REPO_ROOT/CHANGELOG.md" \
+  || { printf '    FAIL: CHANGELOG lacks SCHEMA.md upgrade note\n' >&2; TEST_FAILED=1; }
 [ "$(grep -cF -- 'had `oh-my-claude` disabled' "$REPO_ROOT/CHANGELOG.md")" = 1 ] \
   || { printf '    FAIL: CHANGELOG must have exactly one disabled-user note\n' >&2; TEST_FAILED=1; }
 end_test

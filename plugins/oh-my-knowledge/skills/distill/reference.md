@@ -27,15 +27,28 @@ Companion to [SKILL.md](SKILL.md). `<knowledge_dir>/SCHEMA.md` stays the authori
 **Always-on directive** (feedback/user candidate whose content is an instruction that applies in every situation; takes precedence over duplicate and all knowledge)
 1. Record the original's date first (step 1 above).
 2. Rules-import check: `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` (setup step 6's path) must contain a direct `@` import line that resolves to this knowledge base's `rules/INDEX.md`. Expand `~` and `~\`, turn `\` into `/`, compare with the path in the session-start "Knowledge base:" note, case-insensitive on Windows, treating `/c/…` and `C:/…` as the same path (Git Bash expands `~` to the `/c/` form). Nested imports are not followed.
-3. Scope. **This project only** → leave it unharvested: file and `MEMORY.md` line stay unchanged except the frontmatter tag `omk: always-on`, under `metadata:` if that block exists, else top level; a file without frontmatter gets a minimal block with `type: feedback` and the tag. Harvest then skips it and lint does not count it.
-4. **Applies in any project** and no import: offer setup step 6 first. Accepted → run setup step 6 (backup, append the import), then continue with step 5. Declined → tag the file `omk: always-on-declined` (file and line otherwise unchanged); harvest re-offers it only when the import exists and the user has not declined it in this harvest (remove the tag or add the import to get the offer again).
-5. Import present: if an existing rule already covers the directive, reuse it (no new rule file) and go to step 7 with that rule. Otherwise list the proposed `rules/<slug>.md` files (one short rule each; frontmatter per SCHEMA with `verified` from step 1, never today's date; link to a `global/` page only if details are needed) and ask the user. Declined → tag `omk: always-on-declined` as in step 4.
+3. Scope. **This project only** → **project always-on** (below). **Applies in any project** → step 4.
+4. No import: offer setup step 6 first. Accepted → run setup step 6 (backup, append the import), then continue with step 5. If the user declines the import offer → project always-on.
+5. Import present: if an existing rule already covers the directive, reuse it (no new rule file) and go to step 7 with that rule. Otherwise list the proposed `rules/<slug>.md` files (one short rule each; frontmatter per SCHEMA with `verified` from step 1, never today's date; link to a `global/` page only if details are needed) and ask the user. If the user declines the rule → project always-on.
 6. Approved: write the rule and add the line `@<slug>.md` to `rules/INDEX.md`.
 7. Copy-and-verify the original (all-knowledge step 2). Then body → `> Moved: [[k:rules/<slug>]]`, and rewrite its `MEMORY.md` line (if any) pointer-only: `- always-on rule → [[k:rules/<slug>]] (omk-harvested)`. The rule loads every session itself; no second copy of the directive.
 
-Copy-and-verify (`cp -p` + `cmp`, all-knowledge step 2) comes before every outcome that changes an auto-memory file: all knowledge, mixed, duplicate, obsolete, always-on rule. A mismatch stops that file.
+**Project always-on** (the directive is for this project only, or the rule or the import was declined). The plugin injects `projects/<p>/always-on.md` into every session of this project, so the KB holds the only copy.
+1. Record the original's date (step 1 above); copy-and-verify the original (all-knowledge step 2).
+2. Edit `projects/<p>/always-on.md`. If a line with the same directive already exists, add nothing (dedupe). Otherwise append one line `- <directive>`: self-contained, in the user's language; links only as `[[g:…]]` / `[[k:…]]` (details can live on a normal project page, linked at the end of the line).
+   - Page missing → create it: frontmatter per SCHEMA (`description`, `verified` = the date from step 1, `evidence` inferred unless the content shows otherwise) and add its index line to `projects/<p>/index.md`. Appending to an existing page does not change `verified`.
+   - Stub page (its last line was promoted earlier, body is `> Moved: …`): replace the body with the new line and restore its index line in `projects/<p>/index.md` only if it was removed or repointed.
+3. Stub the auto-memory file: body → `> Moved: [[k:projects/<p>/always-on]]`. Rewrite its `MEMORY.md` line (if any) pointer-only: `- always-on (this project) → [[k:projects/<p>/always-on]] (omk-harvested)`. With no line, add none. If that exact pointer line already exists in `MEMORY.md`, remove this file's line instead of adding a second one.
+4. The report names each such directive and says how to make it global later: say 'make X a global rule' (in the user's language).
 
-In the harvest log line, `<n> always-on` counts every always-on candidate handled in this harvest: rule stubs plus files newly tagged `omk: always-on` or `omk: always-on-declined`.
+**On request** (explicit wording only; no automatic re-offer of a declined rule exists)
+- **make X a global rule**: run the rules-import check (import missing → offer setup step 6; the user declines → stop, nothing changes). If an existing rule already covers it, reuse that rule (no new file). Otherwise write `rules/<slug>.md` (frontmatter per SCHEMA, `verified` = the always-on page's `verified`; links only to `global/` pages, so drop a `[[k:projects/…]]` detail link or replace it with a `global/` page link) and add `@<slug>.md` to `rules/INDEX.md`; remove the line from `projects/<p>/always-on.md`; log `distill`; commit `rules/<slug>.md`, `rules/INDEX.md`, `projects/<p>/always-on.md` and `log.md`.
+- **change X** / **drop X**: edit or remove the line in `projects/<p>/always-on.md`; log and commit it like any page edit.
+- Never delete the page: auto-memory stubs and `MEMORY.md` pointer lines on other machines link to it. When its last line is promoted the body becomes `> Moved: [[k:rules/<slug>]]`; when its last line is dropped the page stays with no `- ` lines. Either way nothing is injected, and the page's index line stays (lint may repoint it).
+
+Copy-and-verify (`cp -p` + `cmp`, all-knowledge step 2) comes before each of the six outcomes that change an auto-memory file: all knowledge, mixed, duplicate, obsolete, always-on rule, project always-on. A mismatch stops that file.
+
+In the harvest log line, `<n> always-on` counts the rule outcomes (a new or a reused rule) plus the project always-on outcomes handled in this harvest.
 
 **Progress + knowledge (mixed)**
 1. Record the date (step 1 above) and copy-and-verify the original (step 2 above), then move the knowledge part into the KB as in step 3.

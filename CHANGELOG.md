@@ -34,6 +34,11 @@ Releases are identified by the git tag: the manifests carry no version and
   by `auto_handoff_repeat` points (default 20, range 10-60) past the usage
   recorded in `handoff-<sid>` at the last handoff; `/compact` and `/clear`
   start a new window.
+- Project always-on directives: `projects/<p>/always-on.md` holds directives
+  that apply to one project in every reply. The SessionStart hook injects its
+  `- ` lines (up to 4000 bytes) for a migrated project; distill harvests such
+  directives into it and promotes them to a rule on request ("make X a global
+  rule"). Lint skips `progress_leak` on that page and lists its line counts.
 
 ### Upgrading
 - Run `/plugin marketplace update oh-my-claude`, then close all sessions and
@@ -52,6 +57,9 @@ Releases are identified by the git tag: the manifests carry no version and
   for user settings.
 - Runtime paths are unchanged (`~/.claude/oh-my-claude/`,
   `~/.claude/oh-my-claude.conf`).
+- An existing knowledge base's `SCHEMA.md` is not updated automatically: copy
+  the `always-on.md` paragraph from `plugins/oh-my-knowledge/templates/SCHEMA.md`
+  into it.
 
 ## 1.2.0 (2026-10-20)
 

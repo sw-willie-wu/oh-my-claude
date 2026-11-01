@@ -1,6 +1,6 @@
 ---
 name: distill
-description: Use to distill this session's durable knowledge (decisions and reasons, pitfalls, conventions, root causes) into the knowledge base and to harvest the project's auto memory; handoff runs it at the end. Also for "migrate this project", "attach <p>", "close this project". 蒸餾 / 寫進知識庫 / 遷移這個專案 / 接上 <p> / 專案結案.
+description: Use to distill this session's durable knowledge (decisions and reasons, pitfalls, conventions, root causes) into the knowledge base and to harvest the project's auto memory; handoff runs it at the end. Also for "migrate this project", "attach <p>", "close this project", "make X a global rule". 蒸餾 / 寫進知識庫 / 遷移這個專案 / 接上 <p> / 專案結案 / 改成全域規則.
 ---
 
 # Distill into the knowledge base
@@ -31,21 +31,21 @@ Not migrated → skip harvest; the report says: "This project is not migrated ye
 ## 2. Harvest (migrated projects only)
 
 Candidates in the current auto-memory dir (not `MEMORY.md`, not stubs; type = `metadata.type`, else top-level `type:`):
-- every file of type feedback, reference or user, except tagged `omk: always-on` (and `omk: always-on-declined` unless the rules import exists);
+- every file of type feedback, reference or user;
 - type project: only files modified (`date -r '<file>' +%F`) on or after the last `## [YYYY-MM-DD] harvest | <p>` date in `log.md`, and only if you judge the content to be knowledge. A **full harvest** (migrate, attach, close) has no date filter: look at every project-typed file.
 
 Each candidate gets exactly one outcome (step-by-step in reference.md — follow it):
 
 | Content | KB | Auto-memory file | Its `MEMORY.md` line |
 |---|---|---|---|
-| always-on directive (applies in every situation; precedence over duplicate and all knowledge) | in any project, with rules import: propose `rules/<slug>.md`, ask the user, then write it + `@<slug>.md` in `rules/INDEX.md` (reuse an existing rule); no import: offer setup step 6 | copy-and-verify, then `> Moved: [[k:rules/<slug>]]` | `- always-on rule → [[k:rules/<slug>]] (omk-harvested)` |
+| always-on directive (applies in every situation; precedence over duplicate and all knowledge) | any project: a rule if the rules import loads (ask first); this project only, or declined: a `- ` line in `projects/<p>/always-on.md` | copy-and-verify, then `> Moved: [[k:rules/<slug>]]` or `> Moved: [[k:projects/<p>/always-on]]` | `- always-on rule → [[k:rules/<slug>]] (omk-harvested)` or `- always-on (this project) → [[k:projects/<p>/always-on]] (omk-harvested)` |
 | all knowledge | write into `projects/<p>/` or `global/`; copy the original byte-for-byte with `cp -p` into `<knowledge_dir>/_retired/harvested/YYYY-MM-DD/<encoded dir>/` and confirm with `cmp` | only after `cmp` succeeds: body becomes `> Moved: [[k:projects/<p>/<slug>]]` (or `[[k:global/<slug>]]`) | `- <trigger> → [[k:…]] (omk-harvested)` — trigger only, no conclusion |
 | progress + knowledge | write the knowledge part | keep the progress; a non-leading line `→ [[k:…]]`; frontmatter type → `project` | stays a progress line, no `(omk-harvested)` |
 | duplicate | — | `> Moved: [[k:<existing page>]]` or `> Moved: [[g:<slug>]]` | like "all knowledge" |
 | obsolete / not worth keeping | `cp -p` + `cmp` into `_retired/harvested/` | `> Moved: [[k:_retired/harvested/YYYY-MM-DD/<encoded dir>/<name>]]` | `- <trigger> → [[k:_retired/harvested/…]] (omk-harvested)` (or ask the user) |
 
 - New KB pages get `verified` from the original's `metadata.modified`, else its modification date read **before** you change it (`date -r '<file>' +%F`); `evidence` = the SCHEMA's inferred value unless the content shows it was tested or documented. Add an index line for each new page (its sub-index or `projects/<p>/index.md`).
-- Directive for this project only, or the rule or import was declined: file and line stay; add frontmatter `omk: always-on` or `omk: always-on-declined`. Harvest and lint skip tagged files (declined is re-offered only once the import exists).
+- Always-on steps: reference.md. The plugin injects `projects/<p>/always-on.md` at session start.
 - Copy-and-verify (`cp -p` + `cmp`) before every outcome that changes an auto-memory file. No `MEMORY.md` line → none added. A `cmp` difference → stop, file untouched, report.
 
 Unclear split → list the files, ask. After **every** `MEMORY.md` write, re-check the marker line; restore it if lost or changed.
@@ -55,6 +55,7 @@ Unclear split → list the files, ask. After **every** `MEMORY.md` write, re-che
 Steps for each mode: reference.md.
 - **migrate this project**: a full harvest. If `projects/<p>/` already exists, stop: this is **attach <p>**, never overwrite its index. Otherwise create `projects/<p>/index.md`, add its line under `## Projects` in `index.md` only if absent, write the marker line, harvest, end with the first `harvest` log entry.
 - **attach <p>**: the user names an existing `projects/<p>/`. Write the marker if missing (an invalid one: replace after the user confirms), full harvest, `harvest` log entry.
+- **make X a global rule / change X / drop X** (always-on): reference.md.
 - **close this project** (project ended, repo archived or deleted). Precondition: not migrated → migrate this project first; migrated → run a full harvest first. Keep the marker and the `## Projects` entry; then reference.md (promote to `global/`, pages readable without the repo, `Closed: YYYY-MM-DD`, log `distill`).
 
 ## 4. Log, commit, remind, report
@@ -79,4 +80,4 @@ OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' bash "${CLAUDE_PLUGIN_ROOT}/scr
 
 Lint reminder: count `## [….] distill |` entries in `log.md` after the latest `## [….] lint |` entry. If the count reaches `'${user_config.lint_remind_after_distills}'` (literal placeholder → 10), or the last lint is over a month old, suggest `oh-my-knowledge:lint`.
 
-Report: pages written, promotions, harvest counts, questions, the not-migrated hint.
+Report: pages written, promotions, harvest counts, questions, the not-migrated hint, the always-on promote hint.

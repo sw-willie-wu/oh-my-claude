@@ -68,7 +68,7 @@ Read the type from `metadata.type`, else from a top-level `type:` (auto memory u
 ## Markers
 
 - Harvested auto-memory entry: `(omk-harvested)`.
-- Always-on directive kept in auto memory: frontmatter `omk: always-on` (this project only) or `omk: always-on-declined`; harvest and lint skip the file.
+- `projects/<p>/always-on.md` (reserved slug in `projects/<p>/` and `global/`): directives for this project, one per `- ` line, links only as `[[g:…]]` / `[[k:…]]`; the plugin loads its `- ` lines at session start. A directive that applies everywhere is written as a rule (`rules/<slug>.md`) instead.
 - Unverified claim: a line `> ⚠ UNVERIFIED (YYYY-MM-DD): <what is unconfirmed>`.
 - Stub (a moved page): after the frontmatter the body (blank lines ignored) contains only `> Moved: ` lines whose targets are comma-separated `[[slug]]`, `[[g:slug]]` or `[[k:<relpath>]]`.
 
