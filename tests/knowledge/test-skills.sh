@@ -287,6 +287,13 @@ done
 need "$f" 'never the knowledge base' handoff
 need "$f" 'If step 1 found a marker line' handoff
 need "$f" 'auto_handoff_repeat' handoff
+need "$f" 'Keep every existing line in either block that is not progress' handoff
+need "$f" 'never delete or reword it' handoff
+need "$f" 'is progress even when it holds a link or a directive' handoff
+need "$f" 'keep its position among the lines' handoff
+need "$f" '(plus kept lines, below)' handoff
+has "$f" 'No conclusions or pitfalls here' && fail "handoff: old 'No conclusions or pitfalls here' wording is back"
+need "$f" 'Do not add new conclusions or pitfalls' handoff
 end_test
 
 start_test "handoff step 4: marker gets max(r, c); 0 only when both invalid"
