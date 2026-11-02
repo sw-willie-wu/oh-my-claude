@@ -29,8 +29,8 @@ render() {
   fi
 
   LINE+="  $(pct_indicator "${CTX_PCT:-0}" ctx)"
-  LINE+="  $(pct_indicator "${RATE5_PCT:-0}" 5h)"
-  LINE+="  $(pct_indicator "${RATE7_PCT:-0}" 7d)"
+  [ -n "${RATE5_PCT:-}" ] && LINE+="  $(pct_indicator "$RATE5_PCT" 5h)"
+  [ -n "${RATE7_PCT:-}" ] && LINE+="  $(pct_indicator "$RATE7_PCT" 7d)"
 
   emit_workers
   echo -e "$LINE"

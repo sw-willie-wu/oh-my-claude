@@ -50,7 +50,9 @@ render() {
   fi
 
   # Line 3: usage meters
-  local LINE3="$(meter "${CTX_PCT:-0}" "ctx" 12)  $(meter "${RATE5_PCT:-0}" " 5h" 12)${RATE5_SUFFIX}  $(meter "${RATE7_PCT:-0}" " 7d" 12)${RATE7_SUFFIX}"
+  local LINE3="$(meter "${CTX_PCT:-0}" "ctx" 12)"
+  [ -n "${RATE5_PCT:-}" ] && LINE3+="  $(meter "$RATE5_PCT" " 5h" 12)${RATE5_SUFFIX}"
+  [ -n "${RATE7_PCT:-}" ] && LINE3+="  $(meter "$RATE7_PCT" " 7d" 12)${RATE7_SUFFIX}"
 
   echo -e "$LINE1"
   [ -n "$LINE2" ] && echo -e "$LINE2"

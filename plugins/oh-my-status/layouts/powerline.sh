@@ -39,8 +39,8 @@ render() {
   # Segment 4: Usage stats
   local STATS=""
   STATS+="ctx:${CTX_PCT:-0}%"
-  STATS+=" 5h:${RATE5_PCT:-0}%"
-  STATS+=" 7d:${RATE7_PCT:-0}%"
+  [ -n "${RATE5_PCT:-}" ] && STATS+=" 5h:${RATE5_PCT}%"
+  [ -n "${RATE7_PCT:-}" ] && STATS+=" 7d:${RATE7_PCT}%"
   LINE+="$(pct_color "${CTX_PCT:-0}") ${STATS} ${RESET}"
 
   emit_workers

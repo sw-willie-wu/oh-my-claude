@@ -235,7 +235,7 @@ Add a `.sh` file to `plugins/oh-my-status/layouts/` that defines a `render()` fu
 - `$MODEL`, `$DIR`, `$BRANCH` - basic info (`$MODEL` may end in ` [NM]`, e.g. ` [1M]`, for large context windows)
 - `$ADD_FILES`, `$MOD_FILES`, `$DEL_FILES` - git file counts
 - `$LINES_ADD`, `$LINES_DEL` - git line counts
-- `$CTX_PCT`, `$RATE5_PCT`, `$RATE7_PCT` - usage percentages
+- `$CTX_PCT`, `$RATE5_PCT`, `$RATE7_PCT` - usage percentages (`$RATE5_PCT`/`$RATE7_PCT` are empty when that window is absent)
 - `$ACCOUNT`, `$ACCOUNT_ICON` - account segment (`$ACCOUNT` is empty when hidden; safe for `echo -e`)
 - `$C_PRIMARY`, `$C_SECONDARY`, etc. - theme colors
 

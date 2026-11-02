@@ -28,8 +28,8 @@ render() {
 
   LINE+=" ${C_SUBTEXT}|${RESET}"
   LINE+=" $(pct_color "${CTX_PCT:-0}")${CTX_PCT:-0}%${RESET}"
-  LINE+=" $(pct_color "${RATE5_PCT:-0}")${RATE5_PCT:-0}%${RESET}"
-  LINE+=" $(pct_color "${RATE7_PCT:-0}")${RATE7_PCT:-0}%${RESET}"
+  [ -n "${RATE5_PCT:-}" ] && LINE+=" $(pct_color "$RATE5_PCT")${RATE5_PCT}%${RESET}"
+  [ -n "${RATE7_PCT:-}" ] && LINE+=" $(pct_color "$RATE7_PCT")${RATE7_PCT}%${RESET}"
 
   emit_workers
   echo -e "$LINE"

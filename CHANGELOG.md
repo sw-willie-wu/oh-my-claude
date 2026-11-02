@@ -22,6 +22,9 @@ Releases are identified by the git tag: the manifests carry no version and
   files from the state directory. A `handoff-<sid>` older than 24 h is kept
   while its `ctx-<sid>` is fresher than 24 h (the session is still in use).
 - The repository has a `.gitattributes` (LF line endings everywhere).
+- oh-my-status hides the 5h / 7d segment when Claude Code sends no such window
+  (plans without that limit, API-key sessions, the first render); a present
+  0 % still shows `0%`.
 
 ### Added
 - `oh-my-knowledge` plugin: a local, git-versioned knowledge base with five

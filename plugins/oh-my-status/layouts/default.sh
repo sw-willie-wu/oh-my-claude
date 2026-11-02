@@ -43,7 +43,9 @@ render() {
     [ -n "$LINE_INFO" ] && LINE1="${LINE1}| ${LINE_INFO}"
   fi
 
-  local LINE2="$(bar "${CTX_PCT:-0}" 15)  $(bar "${RATE5_PCT:-0}" 15)${RATE5_SUFFIX}  $(bar "${RATE7_PCT:-0}" 15)${RATE7_SUFFIX}"
+  local LINE2="$(bar "${CTX_PCT:-0}" 15)"
+  [ -n "${RATE5_PCT:-}" ] && LINE2+="  $(bar "$RATE5_PCT" 15)${RATE5_SUFFIX}"
+  [ -n "${RATE7_PCT:-}" ] && LINE2+="  $(bar "$RATE7_PCT" 15)${RATE7_SUFFIX}"
 
   emit_workers
   echo -e "$LINE1"
