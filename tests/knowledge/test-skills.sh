@@ -272,6 +272,10 @@ for p in 'scripts/lint.sh' '(omk-harvested)' '(omk-project)' 'lint/lint-YYYY-MM-
 done
 need "$f" 'missing_path' lint
 need "$f" 'absolute native path' lint
+need "$f" 'batches' lint
+need "$f" 'lower recall' lint
+grep -F '`missing_path`' "$f" | grep -qF 'report only' || fail "lint: missing_path row must be report only"
+grep -F '`broken_link`' "$f" | grep -qF 'backticks or a fence' || fail "lint: broken_link row must mention backticks or a fence"
 awk '/^## 3\. Mechanical fixes/{m=NR} /^## 4\. Report/{r=NR} END{exit !(m && r && m < r)}' "$f" || fail "lint: report must come after the mechanical fixes"
 end_test
 

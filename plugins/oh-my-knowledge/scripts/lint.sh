@@ -2,7 +2,8 @@
 # lint.sh [--checks structure|content|all]   (oh-my-knowledge health check, script stage)
 # Prints one JSON document on stdout:
 #   {"version":1,"generated":"YYYY-MM-DD","knowledge_dir":"...","findings":[{check,severity,file,line,detail}],
-#    "groups":[{"name":"index:<slug>|project:<p>|family:<prefix>","pages":[rel paths]}]}
+#    "groups":[{"name":"index:<slug>|project:<p>|family:<prefix>","pages":[rel paths]}],
+#    "batches":[{"groups":[names],"pages":[rel paths]}]}   (<= 25 distinct pages each; groups whose pages are a subset of another group's are dropped)
 # Scope: rules/, global/, projects/, index.md (skips .git/, lint/, _retired/). Paths are KB-relative; line 0 = whole file.
 # Symlinked files are skipped (find -type f). long_index_line looks at bullet lines of index.md / index_*.md files. Groups come only from the structure pass
 # (--checks content returns none). Content/reference checks (lib/lint-content.awk) cover KB pages, auto memory
@@ -100,8 +101,22 @@ if [ "$CHECKS" != structure ]; then
 fi
 
 "$OMK_JQ" -Rn --arg gen "$OMK_TODAY" --arg kb "$(omk_native_path "$KB")" '
+  def batches($max):
+    [ .[] | {name, pages: (.pages | unique)} | select(.pages | length > 0) ]
+    | sort_by([-(.pages | length), .name])
+    | reduce .[] as $g ([];
+        if any(.[]; ($g.pages - .pages) == []) then . else . + [$g] end)
+    | [ .[] | . as $g | range(0; (($g.pages | length) + $max - 1) / $max | floor) as $i
+        | {name: $g.name, i: $i, pages: $g.pages[($i * $max):(($i + 1) * $max)]} ]
+    | sort_by([-(.pages | length), .name, .i])
+    | reduce .[] as $u ([];
+        (first(range(0; length) as $k | select((.[$k].pages + $u.pages | unique | length) <= $max) | $k) // null) as $k
+        | if $k == null then . + [{groups: [$u.name], pages: $u.pages}]
+          else .[$k].groups += [$u.name] | .[$k].pages = (.[$k].pages + $u.pages | unique) end);
   [inputs | rtrimstr("\r") | split("\t")] as $r
+  | [$r[] | select(.[0] == "G") | {name: .[1], pages: .[2:]}] as $groups
   | {version: 1, generated: $gen, knowledge_dir: $kb,
      findings: [$r[] | select(.[0] == "F") | {check: .[1], severity: .[2], file: .[3], line: (.[4] | tonumber), detail: .[5]}],
-     groups: [$r[] | select(.[0] == "G") | {name: .[1], pages: .[2:]}]}' < "$RAW" | tr -d '\r' || { echo "lint.sh: JSON shaping failed" >&2; exit 1; }
+     groups: $groups,
+     batches: ($groups | batches(25))}' < "$RAW" | tr -d '\r' || { echo "lint.sh: JSON shaping failed" >&2; exit 1; }
 exit 0

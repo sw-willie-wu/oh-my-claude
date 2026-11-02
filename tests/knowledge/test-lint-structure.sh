@@ -442,6 +442,33 @@ assert_eq "red:13" "$(finding broken_link global/g2.md)" "info-string fence insi
 has "$(detail broken_link global/g2.md)" "outside-1" "target" || true
 end_test
 
+start_test "lint: batches pack groups into <= 25 distinct pages, subset groups dropped"
+fresh "$T/kbb"; mkdir -p "$T/kbb/projects/big"
+for i in 1 2 3 4 5; do page "$T/kbb/global/fam-$i.md" "fam-$i"; done
+printf -- '---\nname: index_t\ndescription: d\nmetadata:\n  type: reference\n  verified: 2026-10-01\n  evidence: tested\n---\n- [[fam-1]]\n- [[fam-2]]\n- [[fam-3]]\n' > "$T/kbb/global/index_t.md"
+for i in $(seq -w 1 26); do page "$T/kbb/projects/big/p$i.md" "p$i"; done
+for i in 1 2 3; do page "$T/kbb/projects/big/q-$i.md" "q-$i"; done
+mkdir -p "$T/kbb/projects/mid"; for i in $(seq -w 1 18); do page "$T/kbb/projects/mid/m$i.md" "m$i"; done
+printf -- '---\nname: index_x\ndescription: d\nmetadata:\n  type: reference\n  verified: 2026-10-01\n  evidence: tested\n---\n- [[fam-1]]\n- [[fam-2]]\n- [[k:projects/big/p01]]\n' > "$T/kbb/global/index_x.md"
+run "$T/kbb"
+assert_eq 0 "$RC" "batches fixture exit"
+assert_eq "true" "$(q '[.groups[].name] | index("index:index_t") != null')" "index_t is still in groups"
+assert_eq 0 "$(q '[.batches[] | select(.groups | index("index:index_t"))] | length')" "subset index group in no batch"
+assert_eq 2 "$(q '[.batches[] | select(.groups | index("project:big"))] | length')" "project:big split in 2 batches"
+assert_eq "true" "$(q '([.batches[].pages | length] | max) <= 25')" "no batch over 25 pages"
+assert_eq 0 "$(q '[.batches[] | select(.groups | index("family:q"))] | length')" "family:q (sorts before its superset) in no batch"
+assert_eq "[[\"project:big\"],[\"project:mid\",\"family:fam\",\"index:index_x\"],[\"project:big\"]]" "$(qc '[.batches[].groups]')" "exact batch groups and order"
+assert_eq "[25,24,4]" "$(qc '[.batches[].pages | length]')" "batch sizes (union, not sum, when packing)"
+assert_eq "true" "$(q '([.batches[].pages[]] | unique) == ([.groups[].pages[]] | unique)')" "batch pages cover group pages"
+cp "$T/out" "$T/out1"; run "$T/kbb"
+assert_eq "$("$JQ" -c .batches "$T/out1" | tr -d '\r')" "$(qc .batches)" "batches deterministic"
+fresh "$T/kbe"
+run "$T/kbe"
+assert_eq "[]" "$(qc .batches)" "skeleton KB: batches empty"
+run "$T/kbb" --checks content
+assert_eq "[]" "$(qc .batches)" "--checks content: batches empty"
+end_test
+
 start_test "KB without SCHEMA.md is not set up (exit 2)"
 fresh "$T/kbns"; rm -f "$T/kbns/SCHEMA.md"
 run "$T/kbns"

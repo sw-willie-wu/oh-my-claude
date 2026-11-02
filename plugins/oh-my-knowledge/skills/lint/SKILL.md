@@ -15,7 +15,7 @@ Save the JSON to a file in your scratch/temp directory:
 OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' OMK_LINT_STALE_DAYS='${user_config.lint_stale_days}' OMK_LINT_FLAG_DAYS='${user_config.lint_flag_days}' OMK_MAX_FILE_KB='${user_config.max_file_kb}' OMK_MAX_INDEX_LINE_CHARS='${user_config.max_index_line_chars}' bash "${CLAUDE_PLUGIN_ROOT}/scripts/lint.sh" > '<scratch>/lint.json'
 ```
 
-Exit 0 = ok; 1 = a pass failed; 2 = KB, gawk or jq missing (report and stop; a message naming `knowledge_dir` or "knowledge base not found" → tell the user to run `/oh-my-knowledge:setup`). The JSON has `findings` (`{check, severity, file, line, detail}`, `file` KB-relative for KB pages but an absolute native path for auto-memory and CLAUDE.md findings (`unharvested_auto_memory`, `ext_link_missing`, `auto_memory_link_broken`, the `project_marker_*` checks), `line` 0 = whole file; severity red/yellow/blue) and `groups` (`{name, pages}`, name `index:<slug>`, `project:<p>` or `family:<prefix>`). Read it with `jq`.
+Exit 0 = ok; 1 = a pass failed; 2 = KB, gawk or jq missing (report and stop; a message naming `knowledge_dir` or "knowledge base not found" → tell the user to run `/oh-my-knowledge:setup`). The JSON has `findings` (`{check, severity, file, line, detail}`, `file` KB-relative for KB pages but an absolute native path for auto-memory and CLAUDE.md findings (`unharvested_auto_memory`, `ext_link_missing`, `auto_memory_link_broken`, the `project_marker_*` checks), `line` 0 = whole file; severity red/yellow/blue), `groups` (`{name, pages}`, name `index:<slug>`, `project:<p>` or `family:<prefix>`) and `batches` (`{groups, pages}`, at most 25 pages each). Read it with `jq`.
 
 Checks and who handles them (F = fix directly, P = propose a diff, A = ask the user):
 
@@ -24,7 +24,7 @@ Checks and who handles them (F = fix directly, P = propose a diff, A = ask the u
 | `missing_frontmatter` | F for `name` / `verified` / `evidence`; a missing `description` or `type` → P |
 | `name_mismatch` | F: set `name` to the file name (slugs never get renamed) |
 | (no script check) links to a single-target stub — for each KB stub, `grep -rnF '[[<slug>]]'` (and `[[g:<slug>]]`, `[[k:<relpath>]]`) over `rules/ global/ projects/ index.md` inside `<knowledge_dir>` | F, only for links that really resolve to the stub (`[[slug]]` resolves in the linking page's folder first, then `global/`): point them at the stub's target; a target in another folder is written `[[g:<slug>]]` (global) or `[[k:<relpath>]]` |
-| `broken_link` | A (or P when the right target is obvious) |
+| `broken_link` | A (or P when the right target is obvious); a literal `[[` belongs in backticks or a fence |
 | `rules_not_in_index` | F: add the `@<slug>.md` line to `rules/INDEX.md` |
 | `not_indexed`, `long_index_line` | P (the trigger line to add, or how to split) |
 | `oversize`, `duplicate_name`, `orphan`, `missing_page`, `rules_import_missing` | A |
@@ -37,11 +37,11 @@ Checks and who handles them (F = fix directly, P = propose a diff, A = ask the u
 | `unharvested_auto_memory` | report as the migration progress table; suggest distill ("migrate this project" / harvest) |
 | `slug_shadows_global` | blue hint only |
 | (no script check) always-on counts | informational, not a finding: in the report, list per project the number of `- ` lines in `projects/<p>/always-on.md` outside frontmatter, fenced and `<!-- -->` blocks (read the files; skip projects without one); note a page whose directive lines exceed 4000 bytes (the session-start injection stops there) |
-| `missing_path` (blue: a `~/…` path in the text does not exist on this machine) | A: outdated path, or just absent here |
+| `missing_path` (blue: a `~/…` path in the text does not exist on this machine) | report only, no question (paths on other machines are normal) |
 
 ## 2. Judgement stage
 
-For each entry in `groups`, dispatch one subagent (Agent tool, `subagent_type: general-purpose`, `model: sonnet`), in parallel. At most 25 pages per subagent: split bigger groups and note "lower recall" for them in the report. Prompt each one with the page paths (`<knowledge_dir>/<rel>`) and:
+For each entry in `batches`, dispatch one subagent (Agent tool, `subagent_type: general-purpose`, `model: sonnet`), in parallel. A group named in more than one batch was split: note "lower recall" for it in the report. Prompt each one with the batch's page paths (`<knowledge_dir>/<rel>`) and:
 
 > Read these pages. Find contradictions, pages that should be merged, missing cross-links, and leftovers of stacked corrections ("correction to the above", "this entry is void"). Read only; change nothing; run no commands. Return only a JSON array of `{"type": "contradiction|merge|missing_link|stacked_correction", "pages": [...], "detail": "..."}`.
 
