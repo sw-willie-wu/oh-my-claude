@@ -5,7 +5,7 @@ description: Use to distill this session's durable knowledge (decisions and reas
 
 # Distill into the knowledge base
 
-`<knowledge_dir>/SCHEMA.md` is the authority for every writing rule. Read it first. `<knowledge_dir>` is the folder in the session-start note ("Knowledge base: …"). Pages via Read/Write/Edit; history only via `commit.sh`. Write knowledge in the user's language. Detailed harvest and mode procedures: [reference.md](reference.md).
+`<knowledge_dir>/SCHEMA.md` is the authority for every writing rule. Read it first. `<knowledge_dir>` is the folder in the session-start note ("Knowledge base: …"). Pages via Read/Write/Edit; history only via `commit.sh`. Write new text in the user's language; moved text keeps its language. Detailed harvest and mode procedures: [reference.md](reference.md).
 
 ## 0. Current project
 
@@ -32,20 +32,20 @@ Not migrated → skip harvest; the report says: "This project is not migrated ye
 
 Candidates in the current auto-memory dir (not `MEMORY.md`, not stubs; type = `metadata.type`, else top-level `type:`):
 - every file of type feedback, reference or user;
-- type project: only files modified (`date -r '<file>' +%F`) on or after the last `## [YYYY-MM-DD] harvest | <p>` date in `log.md`, and only if you judge the content to be knowledge. A **full harvest** (migrate, attach, close) has no date filter: look at every project-typed file.
+- type project: not a stub, and either modified (`date -r '<file>' +%F`) on or after the last `## [YYYY-MM-DD] harvest | <p>` date in `log.md` or not containing `→ [[k:`; only if you judge it knowledge (cost rule: reference.md). A **full harvest** (migrate, attach, close) reads every project-typed file.
 
 Each candidate gets exactly one outcome (step-by-step in reference.md — follow it):
 
 | Content | KB | Auto-memory file | Its `MEMORY.md` line |
 |---|---|---|---|
 | always-on directive (applies in every situation; precedence over duplicate and all knowledge) | any project: a rule if the rules import loads (ask first); this project only, or declined: a `- ` line in `projects/<p>/always-on.md` | copy-and-verify, then `> Moved: [[k:rules/<slug>]]` or `> Moved: [[k:projects/<p>/always-on]]` | `- always-on rule → [[k:rules/<slug>]] (omk-harvested)` or `- always-on (this project) → [[k:projects/<p>/always-on]] (omk-harvested)` |
-| all knowledge | write into `projects/<p>/` or `global/`; copy the original byte-for-byte with `cp -p` into `<knowledge_dir>/_retired/harvested/YYYY-MM-DD/<encoded dir>/` and confirm with `cmp` | only after `cmp` succeeds: body becomes `> Moved: [[k:projects/<p>/<slug>]]` (or `[[k:global/<slug>]]`) | `- <trigger> → [[k:…]] (omk-harvested)` — trigger only, no conclusion |
+| all knowledge | progress-free (reference.md) into the page that covers it, new or existing, in `projects/<p>/` or `global/` | `> Moved: [[k:<that page>]]` | `- <trigger> → [[k:…]] (omk-harvested)` — trigger only, no conclusion |
 | progress + knowledge | write the knowledge part | keep the progress; a non-leading line `→ [[k:…]]`; frontmatter type → `project` | stays a progress line, no `(omk-harvested)` |
 | duplicate | — | `> Moved: [[k:<existing page>]]` or `> Moved: [[g:<slug>]]` | like "all knowledge" |
 | obsolete / not worth keeping | `cp -p` + `cmp` into `_retired/harvested/` | `> Moved: [[k:_retired/harvested/YYYY-MM-DD/<encoded dir>/<name>]]` | `- <trigger> → [[k:_retired/harvested/…]] (omk-harvested)` (or ask the user) |
 
-- New KB pages get `verified` from the original's `metadata.modified`, else its modification date read **before** you change it (`date -r '<file>' +%F`); `evidence` = the SCHEMA's inferred value unless the content shows it was tested or documented. Add an index line for each new page (its sub-index or `projects/<p>/index.md`).
-- Always-on steps: reference.md. The plugin injects `projects/<p>/always-on.md` at session start.
+- New KB pages get `verified` from the original's `metadata.modified`, else its modification date read **before** you change it; `evidence` = the SCHEMA's inferred value unless the content shows it was tested or documented. Add an index line for each new page (its sub-index or `projects/<p>/index.md`).
+- Steps for always-on, more outcomes (progress only, redirect stub, `⚠` lines in `MEMORY.md`), which `MEMORY.md` lines to rewrite, marker edge cases, large harvests: reference.md.
 - Copy-and-verify (`cp -p` + `cmp`) before every outcome that changes an auto-memory file. No `MEMORY.md` line → none added. A `cmp` difference → stop, file untouched, report.
 
 Unclear split → list the files, ask. After **every** `MEMORY.md` write, re-check the marker line; restore it if lost or changed.

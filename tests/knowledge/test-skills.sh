@@ -221,10 +221,10 @@ for p in 'CLAUDE_CONFIG_DIR' 'rules/INDEX.md' 'setup step 6' '@<slug>.md' \
   need "$r" "$p" distill/reference.md
 done
 grep -F 'rules/<slug>.md' "$r" 2>/dev/null | grep -F 'verified' | grep -qF 'ask the user' || fail "reference: always-on rule proposal must carry verified frontmatter and ask the user"
-for o in 'all knowledge' 'mixed' 'duplicate' 'obsolete' 'always-on rule' 'project always-on'; do
+for o in 'all knowledge' 'mixed' 'duplicate' 'obsolete' 'always-on rule' 'project always-on' 'redirect stub'; do
   grep -F 'Copy-and-verify' "$r" 2>/dev/null | grep -qF "$o" || fail "reference: copy-and-verify must cover $o"
 done
-grep -F 'Copy-and-verify' "$r" 2>/dev/null | grep -qF 'six' || fail "reference: copy-and-verify must say six outcomes"
+grep -F 'Copy-and-verify' "$r" 2>/dev/null | grep -qF 'seven' || fail "reference: copy-and-verify must say seven outcomes"
 grep -F '<n> always-on' "$r" 2>/dev/null | grep -qF 'project always-on' || fail "reference: <n> always-on counting must include project always-on outcomes"
 grep -E 'say .make X a global rule' "$r" 2>/dev/null | grep -qiE 'report' || fail "reference: report must carry the promote hint"
 grep -F 'make X a global rule' "$r" 2>/dev/null | grep -qF 'rules-import check' || fail "reference: promote must run the rules-import check"
@@ -319,4 +319,54 @@ if [ -z "$snip" ]; then fail "handoff step 4 snippet not found"; else
 fi
 end_test
 
+
+start_test "distill/handoff: round-2 harvest safety (spec A)"
+r="$SKILLS/distill/reference.md"; f="$SKILLS/distill/SKILL.md"; h="$SKILLS/handoff/SKILL.md"; S="$PLUGIN/templates/SCHEMA.md"
+sz="$(wc -c < "$r" | tr -d ' ')"
+[ "$sz" -le 16000 ] || fail "reference.md is $sz bytes (> 16000)"
+# same <file> <label> <needle>... : one line containing every needle
+same() {
+  local file="$1" label="$2"; shift 2
+  local out; out="$(grep -F -- "$1" "$file" 2>/dev/null)"; shift
+  local n; for n in "$@"; do out="$(printf '%s\n' "$out" | grep -F -- "$n")"; done
+  [ -n "$out" ] || fail "$label: no single line has all needles"
+}
+same "$r" "reference status heading" 'first non-blank line below' 'heading'
+same "$r" "reference 已完成 next" '已完成' 'next'
+same "$r" "reference exactly two blocks" 'exactly' '## ⚡' 'done block'
+same "$r" "reference between blocks" 'between' 'outside the status section'
+same "$r" "reference overrides SCHEMA" 'overrides' 'SCHEMA.md'
+same "$r" "reference index-shaped" 'index-shaped' '(omk-harvested)'
+same "$r" "reference candidate index line" '(<file>.md)' '[[<file>]]' 'no other auto-memory file'
+same "$r" "reference mixed unchanged" 'mixed' 'unchanged'
+same "$r" "reference dedupe at most once" 'at most once' 'outside the status section'
+same "$r" "reference redirect stub final target" 'redirect stub' 'final target'
+same "$r" "reference cycle ask" 'cycle' 'ask'
+same "$r" "reference progress file unchanged" 'progress file' 'unchanged'
+need "$r" '<that page>' distill/reference.md
+same "$r" "reference no progress in the KB" 'No progress in the KB' 'pending' 'to-do' 'mixed'
+same "$r" "reference warning directive" '`⚠`' 'outside the status section'
+need "$r" 'Read the target back' distill/reference.md
+need "$r" 'distinct target' distill/reference.md
+same "$r" "reference contain arrow" 'contain' '→ [[k:'
+same "$r" "reference Glob Grep" 'Glob' 'Grep'
+need "$r" 're-judged' distill/reference.md
+for p in '600000' 'unique' 'Edit-only' 'shutil.copy2' 'filecmp'; do need "$r" "$p" distill/reference.md; done
+same "$r" "reference coordinator commit" 'coordinator' 'commit'
+for p in 'Harvest never changes a status-section line' 'verbatim' 'The marker goes after the done block, or after the `## ⚡` block without one' '-newermt' 'at most 30' '(skip if present)' 'progress file or a mixed file' 'Grep `→ \[\[k:`'; do need "$r" "$p" distill/reference.md; done
+same "$r" "reference done heading" 'above the marker line' '已完成'
+need "$h" 'next `##` with 已完成, above marker' handoff
+sed -n 3p "$r" | grep -qF 'except the status section' || fail "reference line 3 lacks 'except the status section'"
+phrase='first non-blank line below its heading'
+grep -qF "$phrase" "$r" || fail "reference lacks shared phrase"
+grep -qF "$phrase" "$h" || fail "handoff lacks shared phrase"
+grep -F 'type project:' "$f" | grep -F '→ [[k:' | grep -qF 'date -r' || fail "distill: type project line lacks '→ [[k:' and 'date -r'"
+grep -qF 'only files modified' "$f" && fail "distill: 'only files modified' still present"
+for p in 'moved text keeps its language' 'more outcomes' 'progress-free' '<that page>'; do need "$f" "$p" distill; done
+same "$h" "handoff exactly two blocks" 'exactly two blocks' 'reference.md'
+same "$h" "handoff between the blocks" 'between the blocks' 'byte-identical'
+need "$h" 'No done block yet' handoff
+grep -qF 'status-section boundary' "$h" && fail "handoff: 'status-section boundary' still present"
+same "$S" "SCHEMA status sentence" '## ⚡' 'distill reference'
+end_test
 print_summary
