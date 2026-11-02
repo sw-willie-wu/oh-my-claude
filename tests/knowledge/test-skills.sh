@@ -355,7 +355,7 @@ for p in '600000' 'unique' 'Edit-only' 'shutil.copy2' 'filecmp'; do need "$r" "$
 same "$r" "reference coordinator commit" 'coordinator' 'commit'
 for p in 'Harvest never changes a status-section line' 'verbatim' 'The marker goes after the done block, or after the `## ⚡` block without one' '-newermt' 'at most 30' '(skip if present)' 'progress file or a mixed file' 'Grep `→ \[\[k:`'; do need "$r" "$p" distill/reference.md; done
 same "$r" "reference done heading" 'above the marker line' '已完成'
-need "$h" 'next `##` with 已完成, above marker' handoff
+need "$h" 'next `##` containing 已完成 or its translation, above marker' handoff
 sed -n 3p "$r" | grep -qF 'except the status section' || fail "reference line 3 lacks 'except the status section'"
 phrase='first non-blank line below its heading'
 grep -qF "$phrase" "$r" || fail "reference lacks shared phrase"

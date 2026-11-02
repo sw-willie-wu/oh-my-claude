@@ -19,7 +19,7 @@ from the working directory. Exit 2 naming `knowledge_dir` or "knowledge base not
 
 ## 2. Rewrite the status section only
 
-The status section is exactly two blocks: the `## ⚡ 現況（YYYY-MM-DD）` block and the 已完成 (done) block (next `##` with 已完成, above marker). A block's body starts at the first non-blank line below its heading and ends before the next blank line or heading (full rule: distill reference.md, "Status section"). Write the heading and labels in the user's language (keep the wording of an existing heading). Schema, at most 20 lines, only work in flight:
+The status section is exactly two blocks: the `## ⚡ 現況（YYYY-MM-DD）` block and the 已完成 (done) block (next `##` containing 已完成 or its translation, above marker). A block's body starts at the first non-blank line below its heading and ends before the next blank line or heading (full rule: distill reference.md, "Status section"). Write the heading and labels in the user's language (keep the wording of an existing heading). Schema, at most 20 lines, only work in flight:
 
 ```
 ## ⚡ 現況（YYYY-MM-DD）
@@ -38,7 +38,7 @@ The status section is exactly two blocks: the `## ⚡ 現況（YYYY-MM-DD）` bl
 - Rewrite, do not append. Finished or merged items move to the done block, one line each with a pointer.
 - Change nothing outside the two blocks: replace each block's old text with its own Edit, so every other line — the marker line and any content between the blocks included — stays byte-identical.
 - No status section yet: insert it at the top of the file, before the marker line, followed by one blank line. No done block yet: insert one directly after the ⚡ block, one blank line between.
-- No conclusions or pitfalls here (they belong to distill); no stacked corrections; no session-only codes.
+- No conclusions or pitfalls here (they belong to distill); no session-only codes.
 
 Then Read the file again. If step 1 found a marker line: it must be present once, unchanged, after the status section with a blank line before it, within the first 200 lines. Restore it if lost or changed.
 
