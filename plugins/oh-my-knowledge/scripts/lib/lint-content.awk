@@ -10,6 +10,22 @@
 # (lib/project.sh); tests compare the two.
 
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+# nocode: drop inline code spans (a run of N backticks up to the next run of exactly N); an unmatched run stays.
+function nocode(s,   o, n, st, rest, t, off, k) {
+  o = ""
+  while (match(s, /`+/)) {
+    st = RSTART; n = RLENGTH
+    o = o substr(s, 1, st - 1); rest = substr(s, st + n)
+    t = rest; off = 0; k = 0
+    while (match(t, /`+/)) {
+      if (RLENGTH == n) { k = off + RSTART; break }
+      off += RSTART + RLENGTH - 1; t = substr(t, RSTART + RLENGTH)
+    }
+    if (k) s = substr(rest, k + n)
+    else { o = o substr(s, st, n); s = rest }
+  }
+  return o s
+}
 function unq(s) {
   s = trim(s)
   if (s ~ /^".*"$/ || s ~ /^\x27.*\x27$/) s = substr(s, 2, length(s) - 2)
@@ -80,7 +96,7 @@ BEGIN {
   icase = (ENVIRON["OMK_LINT_ICASE"] == "1")
   bom = sprintf("%c", 65279)
   uvre = "^> ⚠(" sprintf("%c", 65039) ")? UNVERIFIED\\y( \\(([^)]*)\\))?"
-  progre = "待 ?merge|待審|未排|進行中|下一步|\\yin progress\\y|\\ynext step|\\ypending merge\\y"
+  progre = "待 ?merge|未排|下一步(\\*\\*)?(:|：)|\\yin progress\\y|\\ynext steps?:|\\ypending merge\\y"
   # version: v1.2 | 1.2.3 (three parts; a.b.c.d is not) | latest/current/as of (whole words) | 目前 | 最新
   verre = "\\yv[0-9]+\\.[0-9]+|(^|[^0-9.])[0-9]+\\.[0-9]+\\.[0-9]+(\\.([^0-9]|$)|[^0-9.]|$)|\\y(latest|current|as of)\\y|目前|最新"
   movedre = "^> Moved: \\[\\[[^]]+\\]\\](, *\\[\\[[^]]+\\]\\])* *$"
@@ -203,7 +219,7 @@ BEGINFILE {
     }
   }
   c = c0
-  gsub(/`[^`]*`/, "", c)
+  c = nocode(c)
   if (ismark) c = ""   # the marker line is judged by project_marker_*; not also an external link
   rest = c
   while (match(rest, /\[\[[^]]+\]\]/)) {

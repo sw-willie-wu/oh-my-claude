@@ -12,6 +12,7 @@ LINT="$PLUGIN/scripts/lint.sh"
 AWKF="$PLUGIN/scripts/lib/lint-structure.awk"
 TPL="$PLUGIN/templates"
 FIX="$SCRIPT_DIR/fixtures/kb-lint"
+FIXD="$SCRIPT_DIR/fixtures"
 
 for v in $(compgen -e | grep -E '^(OMK_|CLAUDE_PLUGIN_OPTION_|CLAUDE_CONFIG_DIR$)'); do unset "$v"; done
 T="$(mktemp -d)"
@@ -184,6 +185,27 @@ assert_eq "yellow:0" "$(finding oversize global/oversize.md)" "oversize"
 assert_eq 1 "$(count_check oversize)" "only the big page"
 OMK_MAX_FILE_KB=20 run "$KB"
 assert_eq 0 "$(count_check oversize)" "limit raised"
+end_test
+
+start_test "broken_link: [[ inside code spans (1, 2 and mixed backtick runs) ignored; bare and unmatched-run links reported"
+fresh "$T/kbcs"
+page "$T/kbcs/global/probe.md" probe "$(cat "$FIXD/probe-code-spans.txt")"
+printf -- '- [[probe]]\n' >> "$T/kbcs/global/index_all.md"
+run "$T/kbcs"
+assert_eq "12,14" "$("$JQ" -r '[.findings[] | select(.check == "broken_link" and .file == "global/probe.md") | .line] | sort | map(tostring) | join(",")' "$T/out" | tr -d '\r')" "only the bare link and the link after an unmatched run"
+end_test
+
+start_test "oversize: root index.md exempt; global/index_x.md and projects/a/index.md are not"
+fresh "$T/kbov"; mkdir -p "$T/kbov/projects/a"
+head -c 9000 /dev/zero | tr '\0' 'x' > "$T/kbov/index.md"; printf '\n' >> "$T/kbov/index.md"
+run "$T/kbov"
+assert_eq 0 "$(count_check oversize)" "9000 B root index.md not oversize"
+page "$T/kbov/global/index_x.md" index_x; head -c 9000 /dev/zero | tr '\0' 'y' >> "$T/kbov/global/index_x.md"; printf '\n' >> "$T/kbov/global/index_x.md"
+page "$T/kbov/projects/a/index.md" index; head -c 9000 /dev/zero | tr '\0' 'z' >> "$T/kbov/projects/a/index.md"; printf '\n' >> "$T/kbov/projects/a/index.md"
+run "$T/kbov"
+assert_eq "yellow:0" "$(finding oversize global/index_x.md)" "global/index_x.md oversize"
+assert_eq "yellow:0" "$(finding oversize projects/a/index.md)" "projects/a/index.md oversize"
+assert_eq none "$(finding oversize index.md)" "root index.md still exempt"
 end_test
 
 start_test "long_index_line blue: characters, not bytes"

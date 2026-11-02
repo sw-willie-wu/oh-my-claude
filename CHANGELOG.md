@@ -59,8 +59,8 @@ Releases are identified by the git tag: the manifests carry no version and
 - Runtime paths are unchanged (`~/.claude/oh-my-claude/`,
   `~/.claude/oh-my-claude.conf`).
 - An existing knowledge base's `SCHEMA.md` is not updated automatically: copy
-  the `always-on.md` paragraph from `plugins/oh-my-knowledge/templates/SCHEMA.md`
-  into it.
+  the `always-on.md` paragraph and the rule-5 `index.md` exemption from
+  `plugins/oh-my-knowledge/templates/SCHEMA.md` into it.
 
 ## 1.2.0 (2026-10-20)
 

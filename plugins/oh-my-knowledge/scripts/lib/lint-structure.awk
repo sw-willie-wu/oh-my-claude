@@ -7,6 +7,22 @@
 # separate awk file and emit the same F lines.
 
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+# nocode: drop inline code spans (a run of N backticks up to the next run of exactly N); an unmatched run stays.
+function nocode(s,   o, n, st, rest, t, off, k) {
+  o = ""
+  while (match(s, /`+/)) {
+    st = RSTART; n = RLENGTH
+    o = o substr(s, 1, st - 1); rest = substr(s, st + n)
+    t = rest; off = 0; k = 0
+    while (match(t, /`+/)) {
+      if (RLENGTH == n) { k = off + RSTART; break }
+      off += RSTART + RLENGTH - 1; t = substr(t, RSTART + RLENGTH)
+    }
+    if (k) s = substr(rest, k + n)
+    else { o = o substr(s, st, n); s = rest }
+  }
+  return o s
+}
 function unq(s) {
   s = trim(s)
   if (s ~ /^".*"$/ || s ~ /^\x27.*\x27$/) s = substr(s, 2, length(s) - 2)
@@ -119,7 +135,7 @@ BEGINFILE {
   if (isidx && line ~ /^[ \t]*[-*+] / && maxch > 0 && length(line) > maxch)
     add("long_index_line", "blue", rel, ln, length(line) " characters (limit " maxch ")")
   c = nocomment(line)
-  gsub(/`[^`]*`/, "", c)
+  c = nocode(c)
   if (rel == "rules/INDEX.md" && c ~ /^@[^ \t]+[ \t]*$/) {
     ni++; imp[ni] = trim(substr(c, 2)); impln[ni] = ln
   }
@@ -157,7 +173,7 @@ function endfile_checks() {
       if (miss != "") add("missing_frontmatter", "yellow", rel, 0, miss)
     }
   }
-  if (maxkb > 0 && (rel in size) && size[rel] > maxkb * 1024)
+  if (maxkb > 0 && rel != "index.md" && (rel in size) && size[rel] > maxkb * 1024)
     add("oversize", "yellow", rel, 0, size[rel] " bytes (limit " maxkb " KB)")
 }
 

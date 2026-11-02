@@ -182,6 +182,9 @@ assert_has "$TP/SCHEMA.md" 'handoff later creates the status section above it' "
 real="$(awk '/^```/{f=!f; next} !f && /^## \[/{print}' "$TP/log.md")"
 assert_eq "" "$real" "log.md has no unfenced entry heading"
 assert_has "$TP/log.md" '## [YYYY-MM-DD] <action> | <title>' "log example present"
+case "$(grep -F 'max_file_kb' "$TP/SCHEMA.md" | grep -F 'index.md' | grep -F 'exempt')" in
+  '') echo "    FAIL: SCHEMA max_file_kb line lacks the index.md exemption" >&2; TEST_FAILED=1 ;;
+esac
 sz=$(wc -c < "$TP/SCHEMA.md" 2>/dev/null || echo 0)
 [ "$sz" -le 8192 ] || { printf '    FAIL: SCHEMA.md %s bytes > 8 KB\n' "$sz" >&2; TEST_FAILED=1; }
 end_test

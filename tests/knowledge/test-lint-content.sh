@@ -63,9 +63,9 @@ run "$KB" --checks content
 assert_eq 0 "$RC" "fixture content run exit"
 
 start_test "progress_leak: reported lines, not URLs/code/headings/#N alone"
-assert_eq "10,11,12,13" "$(lines_of progress_leak global/leaks.md)" "LEAK1..4 only"
+assert_eq "10,11,12,13,18,19" "$(lines_of progress_leak global/leaks.md)" "LEAK1..6 only (OK5..8 are not progress)"
 assert_eq "yellow" "$(q '[.findings[] | select(.check=="progress_leak")][0].severity')" "severity yellow"
-assert_eq 4 "$(count_check progress_leak)" "no other progress_leak in the fixture"
+assert_eq 6 "$(count_check progress_leak)" "no other progress_leak in the fixture"
 end_test
 
 start_test "stale: verified old + version words; fresh / plain / no-version are not stale"
@@ -221,7 +221,7 @@ end_test
 start_test "CRLF stubs/pages: stub with CRLF counts as stub; links and progress still seen"
 fresh "$T/kbc"; rm -rf "$M"; mkdir -p "$M/c1/memory"
 printf -- '---\r\nname: s\r\ndescription: d\r\n---\r\n\r\n> Moved: [[k:global/t]]\r\n' > "$T/kbc/global/s.md"
-page "$T/kbc/global/t.md" t "待審 here"
+page "$T/kbc/global/t.md" t "待 merge here"
 printf -- '---\r\nname: u\r\ndescription: d\r\ntype: feedback\r\n---\r\n\r\n> Moved: [[k:global/t]]\r\n' > "$M/c1/memory/u.md"
 runc "$T/kbc" "$M"
 assert_eq "global/s.md" "$(files_of stub_unreferenced)" "CRLF KB stub recognised"
@@ -308,8 +308,8 @@ end_test
 
 start_test "_retired/ and lint/ pages exist as link targets (no false ext_link_missing); nothing else runs on them"
 fresh "$T/kbx"; mkdir -p "$T/kbx/_retired/2026-10-30/harvested/enc" "$T/kbx/lint"
-printf -- '待審 old note\n' > "$T/kbx/_retired/2026-10-30/harvested/enc/x.md"
-printf -- '待審 report\n' > "$T/kbx/lint/lint-2026-10-30.md"
+printf -- '待 merge old note\n' > "$T/kbx/_retired/2026-10-30/harvested/enc/x.md"
+printf -- '待 merge report\n' > "$T/kbx/lint/lint-2026-10-30.md"
 rm -rf "$T/amx"; mkdir -p "$T/amx/p/memory"
 printf -- '---\nname: x\ndescription: d\ntype: feedback\n---\n> Moved: [[k:_retired/2026-10-30/harvested/enc/x]]\n' > "$T/amx/p/memory/x.md"
 printf -- 'See [[k:lint/lint-2026-10-30]] and [[k:_retired/2026-10-30/nope]]\n' > "$T/amx/p/memory/MEMORY.md"
@@ -358,7 +358,7 @@ end_test
 start_test "fences: a 4-backtick block is not closed by a 3-backtick line; ~~~ does not close backticks"
 fresh "$T/kbf"
 { printf -- '---\nname: f\ndescription: d\nmetadata:\n  type: reference\n  verified: 2026-10-20\n  evidence: tested\n---\n'
-  printf '%s\n' '````' '待審 a' '```' '待審 b' '~~~' '待審 c' '````' '待審 outside' '```' '待審 d' '~~~' '待審 e' '```' '待審 outside2'
+  printf '%s\n' '````' '待 merge a' '```' '待 merge b' '~~~' '待 merge c' '````' '待 merge outside' '```' '待 merge d' '~~~' '待 merge e' '```' '待 merge outside2'
 } > "$T/kbf/global/f.md"
 runc "$T/kbf" "$T/none"
 assert_eq "16,22" "$(lines_of progress_leak global/f.md)" "only the lines outside both fences"
@@ -373,7 +373,7 @@ printf -- '- [[s3]] seen\n' > "$T/kbi/inbox.md"
 printf -- '## [2026-10-30] x | [[k:global/s2]]\n' > "$T/kbi/log.md"
 runc "$T/kbi" "$T/none"
 assert_eq 0 "$(count_check stub_unreferenced)" "s3 via inbox.md, s2 via log.md, s1 via the others"
-printf -- '待審 here\n' >> "$T/kbi/log.md"
+printf -- '待 merge here\n' >> "$T/kbi/log.md"
 runc "$T/kbi" "$T/none"
 assert_eq 0 "$(count_check progress_leak)" "inbox/log content is not otherwise checked"
 end_test
@@ -410,12 +410,12 @@ end_test
 start_test "progress_leak: raised on a normal project page, not on projects/<p>/always-on.md"
 fresh "$T/kbao"
 printf -- '- a\n' > "$T/kbao/projects/a/index.md"
-page "$T/kbao/projects/a/normal.md" normal '- 下一步 先問我 (MR 待審)'
-page "$T/kbao/projects/a/always-on.md" always-on '- 下一步 先問我 (MR 待審)'
-page "$T/kbao/projects/b/always-on.md" always-on '- 進行中的事不要動'
+page "$T/kbao/projects/a/normal.md" normal '- 下一步：先問我 (MR 待 merge)'
+page "$T/kbao/projects/a/always-on.md" always-on '- 下一步：先問我 (MR 待 merge)'
+page "$T/kbao/projects/b/always-on.md" always-on '- 下一步：不要動'
 mkdir -p "$T/kbao/projects/a/sub"
-page "$T/kbao/global/always-on.md" always-on '- 下一步 先問我 (MR 待審)'
-page "$T/kbao/projects/a/sub/always-on.md" always-on '- 下一步 先問我 (MR 待審)'
+page "$T/kbao/global/always-on.md" always-on '- 下一步：先問我 (MR 待 merge)'
+page "$T/kbao/projects/a/sub/always-on.md" always-on '- 下一步：先問我 (MR 待 merge)'
 runc "$T/kbao" "$T/no-am"
 assert_eq "9" "$(lines_of progress_leak global/always-on.md)" "global/always-on.md is still flagged"
 assert_eq "9" "$(lines_of progress_leak projects/a/sub/always-on.md)" "nested always-on.md is still flagged"
@@ -423,6 +423,13 @@ assert_eq "9" "$(lines_of progress_leak projects/a/normal.md)" "normal page is f
 assert_eq "" "$(lines_of progress_leak projects/a/always-on.md)" "always-on.md of a is skipped"
 assert_eq "" "$(lines_of progress_leak projects/b/always-on.md)" "always-on.md of b is skipped"
 assert_eq 3 "$(count_check progress_leak)" "normal page + global/ + nested only"
+end_test
+
+start_test "auto_memory_link_broken: [[ inside code spans (1, 2 and mixed backtick runs) ignored"
+fresh "$T/kbcs"; rm -rf "$T/amcs"; mkdir -p "$T/amcs/p/memory"
+cp "$SCRIPT_DIR/fixtures/probe-code-spans.txt" "$T/amcs/p/memory/MEMORY.md"
+runc "$T/kbcs" "$T/amcs"
+assert_eq "4,6" "$(lines_of auto_memory_link_broken "$(RES "$T/amcs/p/memory")/MEMORY.md")" "only the bare link and the link after an unmatched run"
 end_test
 
 print_summary
