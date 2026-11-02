@@ -7,7 +7,7 @@
 # Symlinked files are skipped (find -type f). long_index_line looks at bullet lines of index.md / index_*.md files. Groups come only from the structure pass
 # (--checks content returns none). Content/reference checks (lib/lint-content.awk) cover KB pages, auto memory
 # (OMK_AUTO_MEMORY_GLOB) and OMK_CLAUDE_MD in one gawk pass. Any failing find/gawk is fatal (exit 1).
-# Exit: 0 | 1 a pass failed | 2 usage error, KB, gawk or jq missing.
+# Exit: 0 | 1 a pass failed | 2 usage error, KB missing or not set up, gawk or jq missing.
 set -u
 set -o pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,7 +29,7 @@ case "$CHECKS" in structure|content|all) ;; *) echo "$USAGE" >&2; exit 2 ;; esac
 command -v gawk >/dev/null 2>&1 || { echo "lint.sh: gawk is required but was not found on PATH" >&2; exit 2; }
 command -v "$OMK_JQ" >/dev/null 2>&1 || { echo "lint.sh: jq is required but was not found ($OMK_JQ)" >&2; exit 2; }
 KB="$OMK_KNOWLEDGE_DIR"
-[ -d "$KB" ] || { echo "lint.sh: knowledge base not found: $KB" >&2; exit 2; }
+[ -f "$KB/SCHEMA.md" ] || { echo "lint.sh: knowledge base not found or not set up (no SCHEMA.md): $KB; run /oh-my-knowledge:setup" >&2; exit 2; }
 
 RAW="$(mktemp)" || exit 2
 trap 'rm -f "$RAW"' EXIT

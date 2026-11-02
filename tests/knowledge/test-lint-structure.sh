@@ -42,7 +42,7 @@ nfind() { q '.findings | length'; }
 qc() { "$JQ" -c "$1" "$T/out" | tr -d '\r'; }
 has() { case "$1" in *"$2"*) return 0 ;; esac; echo "    FAIL: $3 (missing: $2 in: $1)" >&2; TEST_FAILED=1; return 1; }
 # fresh <dir>: minimal clean KB skeleton (meta files only)
-fresh() { rm -rf "$1"; mkdir -p "$1/rules" "$1/global" "$1/projects"; cp "$TPL/index.md" "$1/index.md"; cp "$TPL/rules-INDEX.md" "$1/rules/INDEX.md"; }
+fresh() { rm -rf "$1"; mkdir -p "$1/rules" "$1/global" "$1/projects"; cp "$TPL/index.md" "$1/index.md"; cp "$TPL/rules-INDEX.md" "$1/rules/INDEX.md"; : > "$1/SCHEMA.md"; }
 # page <file> <name> [extra body]: valid page
 page() { printf -- '---\nname: %s\ndescription: d\nmetadata:\n  type: reference\n  verified: 2026-10-01\n  evidence: tested\n---\n%s\n' "$2" "${3:-body}" > "$1"; }
 
@@ -249,9 +249,9 @@ fresh "$T/kb8"
 run "$T/kb8"
 assert_eq "[]" "$(qc .findings)" "skeleton: []"
 assert_eq "[]" "$(qc .groups)" "skeleton: no groups"
-rm -rf "$T/kb8"; mkdir -p "$T/kb8"
+rm -rf "$T/kb8"; mkdir -p "$T/kb8"; : > "$T/kb8/SCHEMA.md"
 run "$T/kb8"
-assert_eq 0 "$RC" "totally empty KB dir"
+assert_eq 0 "$RC" "empty KB (SCHEMA.md only)"
 assert_eq "[]" "$(qc .findings)" "empty dir: []"
 fresh "$T/kb8"
 printf -- '---\r\nname: crlf\r\ndescription: d\r\nmetadata:\r\n  type: user\r\n  verified: 2026-10-01\r\n  evidence: tested\r\n---\r\nbody\r\n' > "$T/kb8/global/crlf.md"
@@ -418,6 +418,16 @@ assert_eq "red:13" "$(finding broken_link global/g1.md)" "only the link after th
 has "$(detail broken_link global/g1.md)" "real-broken" "target" || true
 assert_eq "red:13" "$(finding broken_link global/g2.md)" "info-string fence inside a 4-backtick fence does not close it"
 has "$(detail broken_link global/g2.md)" "outside-1" "target" || true
+end_test
+
+start_test "KB without SCHEMA.md is not set up (exit 2)"
+fresh "$T/kbns"; rm -f "$T/kbns/SCHEMA.md"
+run "$T/kbns"
+assert_eq 2 "$RC" "no SCHEMA.md"
+has "$(cat "$T/err")" "knowledge base not found or not set up" "no SCHEMA.md message"
+run "$T/does-not-exist"
+assert_eq 2 "$RC" "missing folder"
+has "$(cat "$T/err")" "knowledge base not found or not set up" "missing folder message"
 end_test
 
 print_summary

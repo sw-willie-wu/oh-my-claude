@@ -5,8 +5,9 @@
 # Exit: 0 committed | 3 nothing to commit (callers treat as success) |
 #       4 lock still held after retries |
 #       2 usage error, path outside the KB, a .git path, or no committable path |
-#       1 KB missing, git add could not read a path (e.g. "Filename too long"
-#         on Windows without core.longpaths) or any other git failure.
+#       1 KB missing or not set up, git add could not read a path (e.g.
+#         "Filename too long" on Windows without core.longpaths) or any other
+#         git failure.
 # A listed path that neither exists nor is tracked, or an empty directory (no
 # files or symlinks below it) with nothing tracked under it, is dropped with an
 # "ignored" line on stderr.
@@ -35,7 +36,7 @@ export GIT_LITERAL_PATHSPECS=1
 CI=0
 case "${OSTYPE:-}" in msys*|cygwin*) CI=1 ;; esac
 
-[ -d "$KB" ] || { echo "commit.sh: knowledge base not found: $KB" >&2; exit 1; }
+[ -f "$KB/SCHEMA.md" ] || { echo "commit.sh: knowledge base not found or not set up (no SCHEMA.md): $KB; run /oh-my-knowledge:setup" >&2; exit 1; }
 
 # Resolve a path (which may not exist) through its nearest existing ancestor.
 resolve_path() {

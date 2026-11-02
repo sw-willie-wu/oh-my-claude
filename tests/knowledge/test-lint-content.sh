@@ -47,7 +47,7 @@ RES() { bash -c '. "$1"; omk_native_path "$2"' _ "$PLUGIN/scripts/lib/common.sh"
 has() { case "$1" in *"$2"*) return 0 ;; esac; echo "    FAIL: $3 (missing: $2 in: $1)" >&2; TEST_FAILED=1; return 1; }
 hasnt() { case "$1" in *"$2"*) echo "    FAIL: $3 (unexpected: $2 in: $1)" >&2; TEST_FAILED=1; return 1 ;; esac; return 0; }
 # fresh <dir>: minimal KB skeleton
-fresh() { rm -rf "$1"; mkdir -p "$1/rules" "$1/global" "$1/projects/a" "$1/projects/b"; printf '# KB\n' > "$1/index.md"; }
+fresh() { rm -rf "$1"; mkdir -p "$1/rules" "$1/global" "$1/projects/a" "$1/projects/b"; printf '# KB\n' > "$1/index.md"; : > "$1/SCHEMA.md"; }
 page() { printf -- '---\nname: %s\ndescription: d\nmetadata:\n  type: reference\n  verified: 2026-10-20\n  evidence: tested\n---\n%s\n' "$2" "${3:-body}" > "$1"; }
 # runc <kb> <am-glob-parent> [args]: run with a custom auto-memory tree and no CLAUDE.md
 runc() { local k="$1" g="$2"; shift 2; OMK_AUTO_MEMORY_GLOB="$g/*/memory" OMK_CLAUDE_MD="$T/no-claude.md" run "$k" "$@"; }

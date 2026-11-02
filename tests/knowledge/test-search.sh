@@ -303,7 +303,7 @@ done
 end_test
 
 start_test "ranking, caps and long-line cut"
-CK="$T/capkb"; mkdir -p "$CK/global"
+CK="$T/capkb"; mkdir -p "$CK/global"; : > "$CK/SCHEMA.md"
 i=1; while [ $i -le 20 ]; do
   n=$i; : > "$CK/global/t$(printf %02d $i).md"; while [ $n -gt 0 ]; do echo "Capword line" >> "$CK/global/t$(printf %02d $i).md"; n=$((n-1)); done; i=$((i+1))
 done
@@ -398,6 +398,16 @@ printf '# M\n- Knowledge base project: [[k:projects/demo/index]] (omk-project)' 
 assert_eq "ok demo" "$(pcall omk_project_marker_status "$SD")" "marker as last line without trailing newline"
 printf '# M\n- Knowledge base project: [[k:projects/demo/index]] (omk-project)\r' > "$SD/MEMORY.md"
 assert_eq "ok demo" "$(pcall omk_project_marker_status "$SD")" "last line CR only, no newline"
+end_test
+
+start_test "KB without SCHEMA.md is not set up (exit 2)"
+NS="$T/nosch"; rm -rf "$NS"; cp -r "$FIX" "$NS"; rm -f "$NS/SCHEMA.md"
+KBENV="$NS" run "$CWD" widget
+assert_eq 2 "$RC" "no SCHEMA.md"
+assert_has "$T/err" "knowledge base not found or not set up" "no SCHEMA.md message"
+KBENV="$T/does-not-exist" run "$CWD" widget
+assert_eq 2 "$RC" "missing folder"
+assert_has "$T/err" "knowledge base not found or not set up" "missing folder message"
 end_test
 
 print_summary

@@ -16,7 +16,7 @@
 # Index-type lines are `rel:line:text`, other files `rel:count`. Caps: 40 index
 # lines and 15 topic files per section, lines cut to 260 characters; a capped
 # sub-list ends with `… N more index lines` or `… N more files`.
-# Exit: 0 (also for "no hits") | 1 a search tool failed | 2 usage error, KB or gawk missing.
+# Exit: 0 (also for "no hits") | 1 a search tool failed | 2 usage error, KB missing or not set up, or gawk missing.
 set -u
 set -o pipefail
 if ! command -v gawk >/dev/null 2>&1; then
@@ -36,7 +36,7 @@ if [ "$#" -lt 1 ]; then
   exit 2
 fi
 KB="$OMK_KNOWLEDGE_DIR"
-[ -d "$KB" ] || { echo "search.sh: knowledge base not found: $KB" >&2; exit 2; }
+[ -f "$KB/SCHEMA.md" ] || { echo "search.sh: knowledge base not found or not set up (no SCHEMA.md): $KB; run /oh-my-knowledge:setup" >&2; exit 2; }
 
 # Pattern list: each keyword plus its ASCII lower/upper variants, newline-separated.
 PATS=""

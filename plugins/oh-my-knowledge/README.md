@@ -140,11 +140,11 @@ Other storage (a remote git repository, a cloud drive, an MCP notebook) is futur
 
 ## Troubleshooting
 
-- **"knowledge base not found"** from lookup or lint: run `/oh-my-knowledge:setup`, or check `knowledge_dir`.
+- **"knowledge base not found or not set up"** from lookup, lint or distill: run `/oh-my-knowledge:setup`, or check `knowledge_dir`.
 - **Windows path too long (`commit.sh` exits 1 with a "Filename too long" hint, typically deep `_retired/harvested/…` paths):** run `git -C <knowledge_dir> config core.longpaths true` (repo-local), then re-run the commit.
 - **Changed a setting and nothing happened:** restart the session.
 - **Auto handoff never fires:** check that oh-my-status is installed and its statusline is active (it writes `ctx-<sid>`), that `auto_handoff` is `true`, that the knowledge base is set up (it has `SCHEMA.md`; otherwise run `/oh-my-knowledge:setup`), and that the threshold is reachable. After it fires (or after a handoff), it asks again only once usage has grown by `auto_handoff_repeat` points past the usage recorded in `handoff-<sid>` (5 points if that value is below the threshold); with a recorded value at or above the threshold and above `100 - auto_handoff_repeat` it does not ask again in that window. A compact or `/clear` starts a new window.
-- **`gawk is required`, or lint/search exit 2:** a tool from Requirements is missing, the knowledge base was not found, `knowledge_dir` is a configuration error (relative path, see below), or the command was used wrongly. Hooks do nothing, silently, when `jq` is missing.
+- **`gawk is required`, or lint/search exit 2:** a tool from Requirements is missing, the knowledge base was not found or not set up (no `SCHEMA.md`), `knowledge_dir` is a configuration error (relative path, see below), or the command was used wrongly. Hooks do nothing, silently, when `jq` is missing.
 - **Lock errors (commit exit 4):** `commit.sh` already retried 3 times. A stale `.git/index.lock` left by a crashed git can be removed once no git process is running (`commit.sh` prints the lock path).
 - **`knowledge_dir` rejected:** it must not contain `'`, and it must be absolute (`/…`, `C:/…`, a UNC path) or start with `~/` (`\` is read as `/`). A relative value such as `kb` or `./kb` is a configuration error: the scripts print `knowledge_dir must be an absolute path or start with ~/ (got: …); run /oh-my-knowledge:setup` and exit 2, SessionStart shows the same message, and the lookup reminder and the automatic handoff stay silent until it is fixed. Run `/oh-my-knowledge:setup` to correct it.
 - **A local skill shadows a plugin skill:** call the plugin's by full name, `/oh-my-knowledge:lookup`.

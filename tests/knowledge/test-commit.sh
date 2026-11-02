@@ -141,9 +141,10 @@ assert_eq "0" "$RC" "exit"
 end_test
 
 start_test "KB without .git exits 1, commits nothing"
-NG="$T/nogit"; mkdir -p "$NG"; echo z > "$NG/z.md"
+NG="$T/nogit"; mkdir -p "$NG"; echo z > "$NG/z.md"; : > "$NG/SCHEMA.md"
 KBENV="$NG" run 'msg' z.md
 assert_eq "1" "$RC" "exit"
+grep -qF "is not a git repository" "$T/out" || { printf '    FAIL: .git guard message missing\n' >&2; TEST_FAILED=1; }
 [ ! -e "$NG/.git" ] || { printf '    FAIL: .git created\n' >&2; TEST_FAILED=1; }
 end_test
 
@@ -211,6 +212,7 @@ end_test
 start_test "missing KB exits 1"
 KBENV="$T/does-not-exist" run 'msg' z.md
 assert_eq "1" "$RC" "missing KB"
+grep -qF "knowledge base not found or not set up" "$T/out" || { printf '    FAIL: missing-KB message\n' >&2; TEST_FAILED=1; }
 end_test
 
 start_test "tracked CJK-named files: move and delete commit cleanly"
@@ -313,6 +315,18 @@ end_test
 start_test "common.sh stays bash-3.2 compatible"
 hits="$(grep -nE '\^\^|,,\}|declare -A|mapfile|readarray' "$PLUGIN/scripts/lib/common.sh")"
 assert_eq "" "$hits" "bash4-only constructs in common.sh"
+end_test
+
+start_test "KB without SCHEMA.md is not set up (exit 1, nothing committed)"
+newkb noschema
+before="$(nlog)"
+echo more >> "$KB/index.md"
+rm -f "$KB/SCHEMA.md"
+run 'x' index.md
+assert_eq "1" "$RC" "exit"
+grep -qF "knowledge base not found or not set up" "$T/out" || { echo "    FAIL: message missing" >&2; TEST_FAILED=1; }
+assert_eq "$before" "$(nlog)" "no new commit"
+git -C "$KB" diff --quiet -- index.md; assert_eq "1" "$?" "index.md still modified"
 end_test
 
 print_summary
