@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased (2026-10-31)
+## 2.0.0 (2026-11-04)
 
-Releases are identified by the git tag: the manifests carry no version and
-`/plugin` shows a commit sha. This heading gets the tag name at release time.
+From this release on, releases are identified by the git tag (`v2.0.0`): the
+manifests carry no version and `/plugin` shows a commit sha. Each release
+heading is the tag name without the `v`.
 
 ### Changed (breaking)
 - Split the repository into two plugins under `plugins/`: `oh-my-status` (the
@@ -53,6 +54,8 @@ Releases are identified by the git tag: the manifests carry no version and
   `/plugin uninstall oh-my-claude@oh-my-claude`,
   `/plugin install oh-my-status@oh-my-claude`, then
   `/plugin disable oh-my-status@oh-my-claude`.
+- `oh-my-knowledge` is a new plugin and is not installed by the update: run
+  `/plugin install oh-my-knowledge@oh-my-claude`, then `/oh-my-knowledge:setup`.
 - `--plugin-dir` users: point it at `<repo>/plugins/oh-my-status` (and
   `<repo>/plugins/oh-my-knowledge`), not the repository root.
 - A project-level `.claude/settings.json` that enables
