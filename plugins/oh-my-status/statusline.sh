@@ -1,0 +1,579 @@
+#!/bin/bash
+# oh-my-claude - Themeable statusline for Claude Code
+# https://github.com/anthropics/claude-code
+
+# Use BASH_SOURCE so this resolves correctly whether the file is executed
+# directly or sourced (e.g. by statusline.sh.lib_test_loader.sh).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OMC_DIR="${OMC_DIR:-$SCRIPT_DIR}"
+OMC_CONF="${OMC_CONF:-$HOME/.claude/oh-my-claude.conf}"
+
+# Defaults
+THEME="catppuccin"
+LAYOUT="default"
+
+# Load config
+[ -f "$OMC_CONF" ] && source "$OMC_CONF"
+
+# Worker defaults (overridden by user's conf if set).
+: "${WORKERS_ENABLED:=true}"
+: "${WORKERS_SHOW_SHELLS:=true}"
+: "${WORKERS_SHOW_ELAPSED:=true}"
+: "${WORKERS_MAX:=5}"
+# WORKERS_SHELL_ICON defaults in each theme;
+# user conf overrides (use empty string to disable the icon).
+: "${WORKERS_SHELL_MAX_AGE:=3600}"
+# When `ps` is entirely unusable (no output from any ps form — e.g.
+# Windows/MSYS where ps -efww/-ef/-Wef return nothing), is_shell_alive
+# cannot tell a live PID-less bg-shell from a dead one. Such rows are KEPT
+# (fail-safe) but reaped once older than this many seconds so a dead shell
+# cannot linger / grow the state file. Only affects the ps-unusable path;
+# ps-working hosts never hit it. Independent of WORKERS_SHELL_MAX_AGE.
+: "${WORKERS_SHELL_UNKNOWN_MAX_AGE:=60}"
+# Grace window for shell rows whose col7 (PID) hasn't been filled yet by
+# PostToolUse — covers both the placeholder gap (col3="-") and the brief
+# sub-window between the two `update_col` writes inside post (col3 set,
+# col7 still empty). Without it, a statusline tick inside either gap
+# false-prunes the row.
+: "${WORKERS_PLACEHOLDER_GRACE_SEC:=60}"
+# git_info() result cache TTL (seconds). Makes a low statusLine
+# refreshInterval (recommended: 3) affordable by not running git every
+# tick. 0 = disable caching (always
+# recompute = exact legacy behavior). Non-numeric/negative → 3.
+: "${GIT_CACHE_TTL:=3}"
+# Account segment (spec §3.1). ACCOUNT_ICON is dash form: explicit "" disables it.
+: "${ACCOUNT_SHOW:=true}"
+: "${ACCOUNT_FORMAT:=name}"
+# Model context tag (spec §8): append " [NM]" to MODEL when context size >= 1M.
+: "${MODEL_CTX_TAG:=true}"
+ACCOUNT_ICON="${ACCOUNT_ICON-$'\xef\x80\x87'}"
+
+LIB_DIR="${OMC_DIR}/lib"
+[ -d "$LIB_DIR" ] || LIB_DIR="$SCRIPT_DIR/lib"
+# shellcheck source=lib/state-lock.sh
+. "$LIB_DIR/state-lock.sh"
+
+# Load theme and layout
+THEME_FILE="${OMC_DIR}/themes/${THEME}.sh"
+LAYOUT_FILE="${OMC_DIR}/layouts/${LAYOUT}.sh"
+
+[ -f "$THEME_FILE" ] || THEME_FILE="${OMC_DIR}/themes/catppuccin.sh"
+[ -f "$LAYOUT_FILE" ] || LAYOUT_FILE="${OMC_DIR}/layouts/default.sh"
+
+source "$THEME_FILE"
+source "$LAYOUT_FILE"
+
+# RESET fallback (themes usually define it).
+: "${RESET:=$'\033[0m'}"
+
+# ---------------------------------------------------------------------------
+# Helper functions — defined before the render gate so test loaders can
+# source this file (with OMC_TEST_LIB_ONLY=1) and access them without
+# triggering JSON parsing or the render pipeline.
+# ---------------------------------------------------------------------------
+
+unescape_field() {
+  # Reverse of escape_field: \t → tab, \n → newline, \\ → backslash.
+  # Implemented in awk because sed replacement strings can't portably
+  # contain literal newlines.
+  awk 'BEGIN {
+    s = ARGV[1]
+    n = length(s)
+    out = ""
+    i = 1
+    while (i <= n) {
+      c = substr(s, i, 1)
+      if (c == "\\" && i < n) {
+        nc = substr(s, i + 1, 1)
+        if (nc == "t") { out = out "\t"; i += 2; continue }
+        if (nc == "n") { out = out "\n"; i += 2; continue }
+        if (nc == "\\") { out = out "\\"; i += 2; continue }
+      }
+      out = out c
+      i += 1
+    }
+    printf "%s", out
+    exit
+  }' "$1"
+}
+
+format_elapsed() {
+  local s="$1"
+  if [ "$s" -lt 60 ]; then
+    printf '%ds' "$s"
+  elif [ "$s" -lt 3600 ]; then
+    printf '%dm%ds' $((s / 60)) $((s % 60))
+  else
+    printf '%dh%dm' $((s / 3600)) $(((s % 3600) / 60))
+  fi
+}
+
+is_alive() {
+  local pid="$1"
+  [ -z "$pid" ] && return 1
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      # MSYS bash's kill -0 doesn't recognize native Windows PIDs (the kind ps -W returns).
+      # ps -W col1 is the MSYS/cygwin PID, col4 is the native WINPID; match either.
+      ps -W 2>/dev/null | awk -v p="$pid" '$1==p || $4==p {f=1} END {exit !f}'
+      ;;
+    *)
+      command -v kill >/dev/null 2>&1 || return 0
+      kill -0 "$pid" 2>/dev/null
+      ;;
+  esac
+}
+
+# Liveness for bg-Bash shell rows. The Post-hook PID fingerprint is racy at
+# launch (the child often isn't in the process table yet), and bg-Bash has
+# no on-disk completion marker (the .output file is sticky), so PID=0 rows
+# can't be reaped via a file check. Instead, at render time (well past the
+# launch instant) fingerprint-match the stored command (col5) against ps:
+# present → alive, absent → done. Mirrors the hook's match logic (b3310c5):
+# the bare child (`sleep 50` → index==1) and the MSYS eval-wrapper
+# (`… eval 'sleep 50…` → needle hit) both count.
+# Returns: 0=alive (ps had output, fp matched); 1=dead (ps had output but
+# no match, or empty fp/cmd); 2=ps unusable (all ps forms empty) — caller
+# decides keep-vs-reap.
+is_shell_alive() {
+  local cmd fp out
+  cmd="$(unescape_field "$1")"
+  fp="${cmd:0:60}"
+  [ -z "$fp" ] && return 1
+  # cygwin -Wefww/-efww exit 1; -ef/-Wef carry full args. linux -efww does.
+  # Empty-output fallthrough, NOT || exit-code chaining (cygwin ps exit
+  # codes are unreliable — an args-stripped variant can win a || chain).
+  out=$(ps -efww 2>/dev/null); [ -z "$out" ] && out=$(ps -ef 2>/dev/null)
+  [ -z "$out" ] && out=$(ps -Wef 2>/dev/null)
+  [ -z "$out" ] && return 2        # ps unusable → unknown (NOT dead)
+  printf '%s\n' "$out" | awk -v fp="$fp" 'NR>1 {
+      c=""
+      for (i=6; i<=NF; i++) c = c (i>6 ? " " : "") $i
+      needle = "eval \047" fp
+      if (index(c, fp)==1 || index(c, needle)>0) { f=1; exit }
+    } END { exit !f }'
+}
+
+# Sweep crash-orphaned temp files (>30s old) from the state dir. A writer
+# SIGKILL'd between creating its temp file and the atomic rename leaves a
+# `*.prune.<pid>` (prune_state_and_emit) or a `gitcache-*.tmp.<pid>`
+# (cached_git_info) behind. A live writer renames its temp file within the
+# same sub-second critical section, so 30s is far past any legitimate
+# lifetime — nothing in use is ever swept. Best-effort, never fatal.
+# SessionStart's 24h sweep is the coarse backstop; this keeps the dir tidy
+# within a long-lived session. An unmatched glob stays literal and is
+# filtered out by the `[ -f ]` test.
+_omc_sweep_stale_tmp() {
+  local now mt f
+  now=$(date +%s 2>/dev/null) || return 0
+  for f in "$OMC_STATE_DIR"/*.prune.* "$OMC_STATE_DIR"/gitcache-*.tmp.* "$OMC_STATE_DIR"/account-*.tmp.*; do
+    [ -f "$f" ] || continue
+    mt=$(stat -c %Y "$f" 2>/dev/null) || continue
+    [ $((now - mt)) -gt 30 ] && rm -f "$f" 2>/dev/null
+  done
+}
+
+prune_state_and_emit() {
+  local sf="$WORKERS_STATE_FILE"
+  [ -f "$sf" ] || return 0
+  local tmp="${sf}.prune.$$"
+  # A SIGKILL mid-prune can't be caught (the sweep above is the backstop
+  # for that), but any non-KILL early return must not leak the temp file.
+  # Self-clear the trap once fired so it can't outlive this function.
+  trap 'rm -f "$tmp" 2>/dev/null; trap - RETURN' RETURN
+  : > "$tmp"
+  while IFS=$'\t' read -r kind tool_use_id col3 desc col5 col6 col7 || [ -n "$kind" ]; do
+    [ -z "$kind" ] && continue
+    [ "$kind" = "shell" ] || continue   # 1.2.0: only shell rows are tracked; anything else is dropped
+    local keep=true
+    if [ "$kind" = "shell" ]; then
+      if [ -n "$col7" ] && [ "$col7" -gt 0 ] 2>/dev/null; then
+        is_alive "$col7" || keep=false
+      else
+        # col7 missing/0: row is either the PreToolUse placeholder, the
+        # gap between post's two update_col writes, a legacy 6-col row,
+        # or a row whose PID acquisition failed (PID=0).
+        # Within grace: always keep — covers the hook race window AND the
+        # brief post-launch window before the child is in the process table.
+        # Beyond grace: if col3 still "-", PostToolUse never ran → reap;
+        # otherwise fingerprint-match the stored command against ps
+        # (bg-Bash has no on-disk completion marker; the .output file is
+        # sticky so existence is useless).
+        local now_ts age within_grace=false
+        now_ts=$(date +%s)
+        if [ -n "$col6" ] && [ "$col6" -gt 0 ] 2>/dev/null; then
+          age=$((now_ts - col6))
+          [ "$age" -le "$WORKERS_PLACEHOLDER_GRACE_SEC" ] && within_grace=true
+        fi
+        if [ "$within_grace" = "true" ]; then
+          : # keep
+        elif [ "$col3" = "-" ]; then
+          keep=false
+        else
+          is_shell_alive "$col5"; local sa=$?
+          if [ "$sa" -eq 1 ]; then
+            keep=false                       # ps worked, process gone
+          elif [ "$sa" -eq 2 ]; then
+            # ps unusable: cannot disprove liveness → keep, but bound so a
+            # dead shell on a permanently-ps-blind box can't linger. age is
+            # already computed above when col6 (start_unix) is valid; if
+            # col6 is unusable the row is corrupt/unbounded → reap.
+            if [ -n "$col6" ] && [ "$col6" -gt 0 ] 2>/dev/null; then
+              [ "$age" -gt "$WORKERS_SHELL_UNKNOWN_MAX_AGE" ] && keep=false
+            else
+              keep=false
+            fi
+          fi
+          # sa == 0 → keep (alive)
+        fi
+      fi
+    fi
+    [ "$keep" = "true" ] || continue
+    printf '%s\t%s\t%s\t%s\t%s\t%s' "$kind" "$tool_use_id" "$col3" "$desc" "$col5" "$col6" >> "$tmp"
+    [ -n "$col7" ] && printf '\t%s' "$col7" >> "$tmp"
+    printf '\n' >> "$tmp"
+  done < "$sf"
+  mv "$tmp" "$sf"
+  cat "$sf"
+}
+
+emit_workers() {
+  [ "$WORKERS_ENABLED" != "true" ] && return 0
+  [ "$WORKERS_SHOW_SHELLS" != "true" ] && return 0
+  [ -z "$SESSION_ID" ] && return 0
+  [ -f "$WORKERS_STATE_FILE" ] || return 0
+
+  local rendered
+  rendered="$(omc_with_lock prune_state_and_emit)"
+  [ -z "$rendered" ] && return 0
+
+  local now count=0
+  now=$(date +%s)
+  local width="${COLUMNS:-120}"
+
+  printf '%s\n' "$rendered" | while IFS=$'\t' read -r kind tool_use_id col3 desc col5 col6 col7; do
+    [ -z "$kind" ] && continue
+    [ "$kind" = "shell" ] || continue
+    [ "$WORKERS_MAX" != "0" ] && [ "$count" -ge "$WORKERS_MAX" ] && break
+
+    local start icon detail elapsed_str body_plain tail_plain total_len
+    start="$col6"
+    local desc_u cmd_u
+    desc_u="$(unescape_field "$desc")"
+    cmd_u="$(unescape_field "$col5")"
+    if [ -n "$desc_u" ]; then
+      detail="${desc_u}: ${cmd_u}"
+    else
+      detail="$cmd_u"
+    fi
+    icon="$WORKERS_SHELL_ICON"
+    local color="$C_ACCENT"
+
+    if [ -z "$start" ] || ! [[ "$start" =~ ^[0-9]+$ ]]; then
+      continue
+    fi
+    local age=$((now - start))
+    if [ "$age" -gt "$WORKERS_SHELL_MAX_AGE" ]; then
+      color="$C_SUBTEXT"
+      detail="${detail} ?"
+    fi
+
+    if [ "$WORKERS_SHOW_ELAPSED" = "true" ]; then
+      elapsed_str=$(format_elapsed "$age")
+    else
+      elapsed_str=""
+    fi
+
+    body_plain="${icon} ${detail}"
+    if [ -n "$elapsed_str" ]; then
+      tail_plain="  ${elapsed_str}"
+    else
+      tail_plain=""
+    fi
+    total_len=$(( ${#body_plain} + ${#tail_plain} ))
+
+    if [ "$total_len" -gt $((width - 2)) ]; then
+      local keep=$(( width - 5 - ${#tail_plain} ))
+      [ "$keep" -lt 1 ] && keep=1
+      body_plain="${body_plain:0:$keep}..."
+    fi
+
+    if [ -n "$elapsed_str" ]; then
+      printf '%b%s%b  %b%s%b\n' "$color" "$body_plain" "$RESET" "$C_SUBTEXT" "$elapsed_str" "$RESET"
+    else
+      printf '%b%s%b\n' "$color" "$body_plain" "$RESET"
+    fi
+
+    count=$((count + 1))
+  done
+}
+
+# Git working-tree summary. Pure: runs git in the caller's $PWD, mutates no
+# globals. stdout = exactly one line, 6 TAB-joined fields (NO trailing newline):
+#   <BRANCH>\t<ADD>\t<MOD>\t<DEL>\t<LINES_ADD>\t<LINES_DEL>
+# not-a-repo and detached HEAD → field 1 empty; fields 2–6 are integers.
+# Values are byte-identical to the former inline block in repos with no
+# submodules (the common case); only the plumbing changed plus the §8.1
+# submodule guard below.
+git_info() {
+  local branch="" add=0 mod=0 del=0 ladd=0 ldel=0 toplevel
+  # `git status` opportunistically refreshes the index, taking .git/index.lock.
+  # Claude Code kills a statusline that overruns its budget; a git killed
+  # mid-refresh leaves a stale 0-byte index.lock that blocks the user's own
+  # `git add`/`commit`. GIT_OPTIONAL_LOCKS=0 skips that optional write. `local`
+  # + export scopes it to this function and the git children it spawns
+  # (including the nested ones under `submodule foreach`).
+  local GIT_OPTIONAL_LOCKS=0; export GIT_OPTIONAL_LOCKS
+  # `--show-toplevel` doubles as the in-a-worktree gate AND gives the path for
+  # the .gitmodules check below in a single git call (replacing the old bare
+  # `rev-parse --git-dir` gate; a bare repo with no worktree → treated as
+  # non-repo, which is correct for a working-tree status line).
+  if toplevel=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$toplevel" ]; then
+    branch=$(git branch --show-current 2>/dev/null)
+    local status sub_status all_status diff_stats has_sub=""
+    # §8.1: `git submodule foreach` pays a heavy per-call process/startup cost
+    # on MSYS (~7s observed) even with ZERO submodules, and git_info calls it
+    # twice (status + diff) ⇒ ~14s of pure waste ⇒ statusline exceeds Claude
+    # Code's render budget ⇒ blank. Only scan submodules if the repo actually
+    # tracks them (.gitmodules at the worktree toplevel).
+    [ -f "$toplevel/.gitmodules" ] && has_sub=1
+    status=$(git status --porcelain -uall 2>/dev/null)
+    if [ -n "$has_sub" ]; then
+      sub_status=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
+    else
+      sub_status=""
+    fi
+    all_status=$(printf '%s\n%s' "$status" "$sub_status")
+    add=$(echo "$all_status" | grep -c '^A\|^??')
+    mod=$(echo "$all_status" | grep -c '^ M\|^M\|^MM\|^AM')
+    del=$(echo "$all_status" | grep -c '^ D\|^D')
+    if [ -n "$has_sub" ]; then
+      diff_stats=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
+    else
+      diff_stats=$(git diff HEAD --numstat 2>/dev/null)
+    fi
+    ladd=$(echo "$diff_stats" | awk '{s+=$1} END {print s+0}')
+    ldel=$(echo "$diff_stats" | awk '{s+=$2} END {print s+0}')
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s' "$branch" "$add" "$mod" "$del" "$ladd" "$ldel"
+}
+
+# Short-TTL on-disk cache around git_info(), keyed by $PWD (the dir git runs
+# in — NOT current_dir (display-only), which differs from
+# $PWD under MSYS). Makes a low statusLine refreshInterval affordable. OMC_STATE_DIR
+# is already in scope (set by lib/state-lock.sh, sourced above). Stale-write
+# safety: per-cwd file + atomic tmp+mv (no lock — independent of worker state;
+# worst case is N concurrent dupes, self-healing).
+cached_git_info() {
+  local ttl="$GIT_CACHE_TTL"
+  # empty / negative / decimal / non-integer → 3; "0" (disabled) preserved.
+  case "$ttl" in ''|*[!0-9]*) ttl=3 ;; esac
+  if [ "$ttl" = "0" ]; then
+    git_info
+    return
+  fi
+  local wd key file content now mtime age out
+  # Key off the ACTUAL cwd (getcwd via `pwd -P`), not the $PWD variable:
+  # Claude Code can invoke the statusLine command with $PWD empty, which
+  # collapsed key="" so every repo shared one "gitcache-" file and got
+  # served another repo's git info. If even getcwd is unavailable (cwd
+  # deleted), bypass the cache entirely — compute fresh, write nothing —
+  # so a missing cwd can never poison a shared key.
+  wd=$(pwd -P 2>/dev/null)
+  if [ -z "$wd" ]; then
+    git_info
+    return
+  fi
+  key=$(printf '%s' "$wd" | sed 's/[^A-Za-z0-9]/-/g')
+  file="$OMC_STATE_DIR/gitcache-${key}"
+  if [ -f "$file" ]; then
+    # OMC_NOW_OVERRIDE: test-only clock seam so the TTL-boundary tests are
+    # deterministic instead of racing wall-clock on a slow box. Unset in
+    # production → identical behaviour (date +%s).
+    now=${OMC_NOW_OVERRIDE:-$(date +%s)}
+    mtime=$(stat -c %Y "$file" 2>/dev/null)
+    [ -z "$mtime" ] && mtime=$(date -r "$file" +%s 2>/dev/null)
+    if [ -n "$mtime" ]; then
+      age=$((now - mtime))
+      if [ "$age" -le "$ttl" ]; then
+        content=$(cat "$file")          # $() strips trailing \n (none written)
+        local TAB; TAB=$'\t'
+        # Well-formed = exactly one line, 6 fields, fields 2–6 integers. The
+        # anchored bash regex (no /m) also enforces single-line: a 0-byte,
+        # truncated, or multi-line file fails. $re MUST stay unquoted.
+        local re="^[^${TAB}]*${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+$"
+        if [[ "$content" =~ $re ]]; then
+          printf '%s' "$content"
+          return
+        fi
+      fi
+    fi
+  fi
+  out=$(git_info)                                                  # MISS
+  mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+  { printf '%s' "$out" > "$file.tmp.$$" && mv "$file.tmp.$$" "$file"; } 2>/dev/null  # atomic
+  printf '%s' "$out"
+}
+
+# Parse the statusLine JSON ($1) into globals. Pure (no stdin/render side
+# effects) so the lib loader can test it. §8.3 Task B: ONE `jq --raw-output0`
+# pass replaces ~30 `echo|grep -o` forks (spec §4.1–§4.4). jq is a render-side
+# hard dep (already a hook-side one); on jq absent/too-old/malformed input the
+# 9 reads leave SESSION_ID empty and the render gate emits the §4.6 notice.
+# SANITIZED_SID/WORKERS_STATE_FILE are kept here as fork-free var assignments
+# (no I/O); the gate's empty-SESSION_ID guard exits before anything WRITES
+# state-*.tsv, preserving spec §4.6 (deviation noted in spec §10).
+parse_status_json() {
+  local input="$1"
+  local _jqfilter='
+    .session_id // "",
+    .model.display_name // "",
+    .workspace.current_dir // "",
+    ((.context_window.used_percentage // 0) | floor),
+    ((.rate_limits.five_hour.used_percentage // "") | (if type=="number" then floor else . end)),
+    (.rate_limits.five_hour.resets_at // ""),
+    ((.rate_limits.seven_day.used_percentage // "") | (if type=="number" then floor else . end)),
+    (.rate_limits.seven_day.resets_at // ""),
+    ((.context_window.context_window_size // 0) | (if type=="number" and . >= 0 and . < 1e15 then floor else 0 end))'
+  SESSION_ID=""; MODEL=""; DIR=""; CTX_PCT=""
+  RATE5_PCT=""; RATE5_RESET=""; RATE7_PCT=""; RATE7_RESET=""; CTX_SIZE=""
+  # --raw-output0: raw scalars (backslashes stay SINGLE — no @tsv re-doubling)
+  # NUL-delimited (no \n, so winget jq's CRLF line-xlate never runs). Not
+  # chained with ||/&& (spec §4.7): a normal "rate_limits absent" payload
+  # must not abort the render.
+  {
+    IFS= read -r -d '' SESSION_ID
+    IFS= read -r -d '' MODEL
+    IFS= read -r -d '' DIR
+    IFS= read -r -d '' CTX_PCT
+    IFS= read -r -d '' RATE5_PCT
+    IFS= read -r -d '' RATE5_RESET
+    IFS= read -r -d '' RATE7_PCT
+    IFS= read -r -d '' RATE7_RESET
+    IFS= read -r -d '' CTX_SIZE
+  } < <(printf '%s' "$input" | jq --raw-output0 "$_jqfilter")
+  MODEL="${MODEL%% (*}"                              # strip " (…)" suffix
+  SANITIZED_SID="${SESSION_ID//[^A-Za-z0-9_-]/_}"    # tr -c equivalent, no fork
+  WORKERS_STATE_FILE="$HOME/.claude/oh-my-claude/state/state-${SANITIZED_SID}.tsv"
+  # Windows path → ~/relative (display). Faithfully reproduces the old
+  # `sed 's|\\|/|g; s|C:/Users/[^/]*/|~/|i'`: drive C only (case-insensitive),
+  # Users case-insensitive, one segment; other drives unchanged.
+  DIR="${DIR//\\//}"
+  if [[ "$DIR" =~ ^[Cc]:/[Uu][Ss][Ee][Rr][Ss]/[^/]*/(.*)$ ]]; then
+    DIR="~/${BASH_REMATCH[1]}"
+  fi
+}
+
+# Model context tag (spec §8.2). Pure, builtin-only, `set -u` safe. The regex
+# check precedes any arithmetic so CTX_SIZE is never evaluated unchecked.
+apply_model_ctx_tag() {
+  [ "${MODEL_CTX_TAG-}" = true ] || return 0
+  [ -n "${MODEL-}" ] || return 0
+  [[ ${CTX_SIZE-} =~ ^[1-9][0-9]{0,14}$ ]] || return 0
+  if [ "$CTX_SIZE" -ge 1000000 ]; then
+    MODEL="${MODEL} [$((CTX_SIZE / 1000000))M]"
+  fi
+}
+
+# Account segment (spec §3.2/§3.3). Sets ACC_NAME/ACC_FULL/ACC_EMAIL/ACC_ORG,
+# already sanitized and backslash-doubled (safe for `echo -e`). MUST be called
+# directly, never inside $( ), so the globals survive and a hit forks nothing.
+cached_account_fields() {
+  ACC_NAME=""; ACC_FULL=""; ACC_EMAIL=""; ACC_ORG=""
+  [ "$ACCOUNT_SHOW" = true ] || return 0
+  local src cache raw rc
+  local _accfilter='(.oauthAccount? | objects) // {} | [.displayName, .fullName, .emailAddress, .organizationName]
+    | map((. // "") | tostring | gsub("[\u0000-\u001f\u007f-\u009f]"; "")
+          | gsub("^[[:space:]]+|[[:space:]]+$"; "") | gsub("\\\\"; "\\\\"))
+    | join("\u001f")'
+  src="${OMC_ACCOUNT_FILE:-${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json}"
+  [ -f "$src" ] || return 0
+  cache="$OMC_STATE_DIR/account-${src//[^A-Za-z0-9]/-}"
+  if [ -f "$cache" ] && ! [ "$src" -nt "$cache" ]; then
+    IFS=$'\x1f' read -r ACC_NAME ACC_FULL ACC_EMAIL ACC_ORG < "$cache"
+    return 0
+  fi
+  raw=$(jq -j "$_accfilter" "$src" 2>/dev/null)
+  rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
+    # Failure / half-written source: serve the old cache if any, write nothing.
+    if [ -f "$cache" ]; then
+      IFS=$'\x1f' read -r ACC_NAME ACC_FULL ACC_EMAIL ACC_ORG < "$cache"
+    fi
+    return 0
+  fi
+  [ -d "$OMC_STATE_DIR" ] || mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+  { printf '%s\n' "$raw" > "$cache.tmp.$$" && mv -f "$cache.tmp.$$" "$cache"; } 2>/dev/null
+  IFS=$'\x1f' read -r ACC_NAME ACC_FULL ACC_EMAIL ACC_ORG <<<"$raw"
+  return 0
+}
+
+# ACCOUNT from ACCOUNT_FORMAT: first non-empty field in the chain wins.
+resolve_account() {
+  case "$ACCOUNT_FORMAT" in
+    fullname) ACCOUNT="${ACC_FULL:-${ACC_NAME:-$ACC_EMAIL}}" ;;
+    email)    ACCOUNT="$ACC_EMAIL" ;;
+    org)      ACCOUNT="${ACC_ORG:-$ACC_EMAIL}" ;;
+    *)        ACCOUNT="${ACC_NAME:-${ACC_FULL:-$ACC_EMAIL}}" ;;
+  esac
+}
+
+# Split cached_git_info's 6 TAB fields into globals. §8.3 Task C: zero-fork
+# (was 6× `cut`). Translate TAB→US (\x1f) then `IFS=$'\x1f' read`: \x1f is
+# NOT IFS-whitespace so an empty leading BRANCH (non-repo / detached HEAD,
+# locked d85481a) is preserved — a naive `IFS=$'\t' read` would drop it.
+# git refnames forbid control chars ⇒ cached_git_info output can never
+# contain \x1f ⇒ collision-free (spec §4.5). Byte-identical to the old cut.
+split_gi_line() {
+  local GI_LINE="$1" _gi
+  _gi="${GI_LINE//$'\t'/$'\x1f'}"
+  IFS=$'\x1f' read -r BRANCH ADD_FILES MOD_FILES DEL_FILES LINES_ADD \
+    LINES_DEL <<<"$_gi"
+}
+
+# ---------------------------------------------------------------------------
+# Render pipeline — gated so test loaders can source this file without
+# blocking on stdin or triggering side-effects.
+# ---------------------------------------------------------------------------
+if [ -z "${OMC_TEST_LIB_ONLY:-}" ]; then
+
+# Read JSON input from stdin
+input=$(cat)
+parse_status_json "$input"
+# jq-failure / empty-session guard (spec §4.6). `.session_id` is documented
+# always-present, so an empty SESSION_ID unambiguously means jq is absent,
+# too old (`--raw-output0` unknown), or `$input` was malformed. One cheap
+# test, no extra fork — and it runs BEFORE cached_git_info/render so no
+# state-*.tsv is ever written on the failure path. Same effective outcome as
+# the old grep code (empty session → no useful statusline), but loud.
+if [ -z "$SESSION_ID" ]; then
+  printf 'oh-my-claude: jq required (winget install jqlang.jq)\n'
+  exit 0
+fi
+# Usage file for oh-my-knowledge auto-handoff (builtins only).
+[ -d "$OMC_STATE_DIR" ] || mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+[ -n "$CTX_PCT" ] && { printf '%s %s\n' "$CTX_PCT" "$CTX_SIZE" > "$OMC_STATE_DIR/ctx-$SANITIZED_SID"; } 2>/dev/null
+apply_model_ctx_tag
+# Reap any crash-orphaned temp files before this render writes its own.
+_omc_sweep_stale_tmp
+GI_LINE=$(cached_git_info)
+split_gi_line "$GI_LINE"
+cached_account_fields; resolve_account
+
+# Rate limit reset info
+RATE5_SUFFIX=""
+if [ "${RATE5_PCT:-0}" -gt 80 ] && [ -n "$RATE5_RESET" ]; then
+  RATE5_HOUR=$(date -d "@$RATE5_RESET" '+%H:%M' 2>/dev/null || date -r "$RATE5_RESET" '+%H:%M' 2>/dev/null)
+  RATE5_SUFFIX=" (${RATE5_HOUR})"
+fi
+RATE7_SUFFIX=""
+if [ "${RATE7_PCT:-0}" -gt 80 ] && [ -n "$RATE7_RESET" ]; then
+  RATE7_DATE=$(date -d "@$RATE7_RESET" '+%m/%d' 2>/dev/null || date -r "$RATE7_RESET" '+%m/%d' 2>/dev/null)
+  RATE7_SUFFIX=" (${RATE7_DATE})"
+fi
+
+# Layouts own placement of worker rows — each render() decides where to call
+# emit_workers (top, middle, bottom, or skip).
+render
+
+fi # end OMC_TEST_LIB_ONLY gate

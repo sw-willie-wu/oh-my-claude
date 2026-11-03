@@ -1,5 +1,72 @@
 # Changelog
 
+## Unreleased (2026-10-31)
+
+Releases are identified by the git tag: the manifests carry no version and
+`/plugin` shows a commit sha. This heading gets the tag name at release time.
+
+### Changed (breaking)
+- Split the repository into two plugins under `plugins/`: `oh-my-status` (the
+  statusline, formerly `oh-my-claude`) and `oh-my-knowledge` (a new
+  knowledge-base plugin, see below). The marketplace is still
+  named `oh-my-claude`.
+- Slash commands moved from the old `oh-my-claude` prefix to `/oh-my-status:`
+  (`/oh-my-status:setup`, `/oh-my-status:set-theme`, `/oh-my-status:list-themes`).
+- Plugin manifests and marketplace entries no longer carry a `version`.
+  All plugins in this marketplace update together on each release.
+- The marketplace declares `renames: {"oh-my-claude": "oh-my-status"}`, so
+  enabled installs migrate automatically.
+
+### Changed
+- The 24 h SessionStart sweep also removes stale `ctx-*` and `handoff-*`
+  files from the state directory. A `handoff-<sid>` older than 24 h is kept
+  while its `ctx-<sid>` is fresher than 24 h (the session is still in use).
+- The repository has a `.gitattributes` (LF line endings everywhere).
+- oh-my-status hides the 5h / 7d segment when Claude Code sends no such window
+  (plans without that limit, API-key sessions, the first render); a present
+  0 % still shows `0%`.
+
+### Added
+- `oh-my-knowledge` plugin: a local, git-versioned knowledge base with five
+  skills (`setup`, `lookup`, `distill`, `handoff`, `lint`), a lookup-reminder
+  hook, an automatic handoff hook (needs `oh-my-status`, which now writes
+  `ctx-<sid>`), and scripts for init, commit, search and lint. Requires bash,
+  gawk, GNU find (BSD date is fine), and jq. See
+  `plugins/oh-my-knowledge/README.md`.
+  The automatic handoff fires at the threshold and again once usage has grown
+  by `auto_handoff_repeat` points (default 20, range 10-60) past the usage
+  recorded in `handoff-<sid>` at the last handoff; `/compact` and `/clear`
+  start a new window.
+- Project always-on directives: `projects/<p>/always-on.md` holds directives
+  that apply to one project in every reply. The SessionStart hook injects its
+  `- ` lines (up to 4000 bytes) for a migrated project; distill harvests such
+  directives into it and promotes them to a rule on request ("make X a global
+  rule"). Lint skips `progress_leak` on that page and lists its line counts.
+
+### Upgrading
+- Run `/plugin marketplace update oh-my-claude`, then close all sessions and
+  restart Claude Code twice: the first restart installs `oh-my-status` in the
+  background, the second makes it active. Every running Claude Code session
+  must be restarted after updating: an old session's SessionStart would copy
+  the old files back, so do not leave one running.
+- If you had `oh-my-claude` disabled, run
+  `/plugin uninstall oh-my-claude@oh-my-claude`,
+  `/plugin install oh-my-status@oh-my-claude`, then
+  `/plugin disable oh-my-status@oh-my-claude`.
+- `--plugin-dir` users: point it at `<repo>/plugins/oh-my-status` (and
+  `<repo>/plugins/oh-my-knowledge`), not the repository root.
+- A project-level `.claude/settings.json` that enables
+  `oh-my-claude@oh-my-claude` needs the key renamed to
+  `oh-my-status@oh-my-claude` by hand; the automatic rename was verified only
+  for user settings.
+- Runtime paths are unchanged (`~/.claude/oh-my-claude/`,
+  `~/.claude/oh-my-claude.conf`).
+- An existing knowledge base's `SCHEMA.md` is not updated automatically: copy
+  the `always-on.md` paragraph, the rule-5 `index.md` exemption and the status
+  sentence in `## Projects` from
+  `plugins/oh-my-knowledge/templates/SCHEMA.md` into it. The plugin's rule
+  (distill reference) applies regardless.
+
 ## 1.2.0 (2026-10-20)
 
 ### Added

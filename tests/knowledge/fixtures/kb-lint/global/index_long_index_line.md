@@ -1,0 +1,3 @@
+# Index with a long line
+
+- [[tool-a]] — longlonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglonglllonglongll ends here

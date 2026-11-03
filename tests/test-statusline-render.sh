@@ -8,7 +8,7 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=test-helpers.sh
 . "$SCRIPT_DIR/test-helpers.sh"
 
-STATUSLINE="$REPO_ROOT/statusline.sh"
+STATUSLINE="$REPO_ROOT/plugins/oh-my-status/statusline.sh"
 
 # Each test sets up its own session_id and state file under ~/.claude/oh-my-claude/state/
 # (real path, since statusline.sh derives it from $HOME). Cleanup after each test.
@@ -17,6 +17,7 @@ mkdir -p "$RENDER_STATE_DIR"
 
 cleanup_render_state() {
   rm -f "$RENDER_STATE_DIR"/state-render-test-*.tsv
+  rm -f "$RENDER_STATE_DIR"/ctx-render-test-* "$RENDER_STATE_DIR"/handoff-render-test-*
 }
 
 # Strip ANSI escape sequences so we can measure visible width and assert on text.
@@ -1043,7 +1044,8 @@ end_test
 
 start_test "no workdir-raw variable left in tests or statusline"
 tok=WORKDIR; tok+=_RAW   # built at runtime so this test's own source never matches
-assert_eq "" "$(grep -rn -- "$tok" "$REPO_ROOT/tests" "$REPO_ROOT/statusline.sh")" "variable removed"
+[ -f "$REPO_ROOT/plugins/oh-my-status/statusline.sh" ] || { printf '    FAIL: statusline.sh missing\n' >&2; TEST_FAILED=1; }
+assert_eq "" "$(grep -rn -- "$tok" "$REPO_ROOT/tests" "$REPO_ROOT/plugins/oh-my-status/statusline.sh")" "variable removed"
 end_test
 
 # ---------------------------------------------------------------------------
@@ -1275,10 +1277,10 @@ case "$s" in *'b\c'*) ;; *) printf '    FAIL: b\c missing in [%s]\n' "$s" >&2; T
 end_test
 
 start_test "T4.5 preview shows account; ACCOUNT_SHOW=false hides it"
-p=$(OMC_DIR="$REPO_ROOT" OMC_CONF=/dev/null bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
+p=$(OMC_DIR="$REPO_ROOT/plugins/oh-my-status" OMC_CONF=/dev/null bash "$REPO_ROOT/plugins/oh-my-status/preview.sh" layouts 2>/dev/null | strip_ansi)
 if ! printf "%s" "$p" | grep -qw you; then printf '    FAIL: preview lacks you\n' >&2; TEST_FAILED=1; fi
 printf 'ACCOUNT_SHOW=false\n' > "$T4D/p.conf"
-p=$(OMC_DIR="$REPO_ROOT" OMC_CONF="$T4D/p.conf" bash "$REPO_ROOT/preview.sh" layouts 2>/dev/null | strip_ansi)
+p=$(OMC_DIR="$REPO_ROOT/plugins/oh-my-status" OMC_CONF="$T4D/p.conf" bash "$REPO_ROOT/plugins/oh-my-status/preview.sh" layouts 2>/dev/null | strip_ansi)
 if printf "%s" "$p" | grep -qw you; then printf '    FAIL: preview shows you when disabled\n' >&2; TEST_FAILED=1; fi
 end_test
 
@@ -1291,6 +1293,124 @@ done
 s=$(EXTRA_CONF="MODEL_CTX_TAG=false" render_layout default '' strip "$P1M" | head -1)
 case "$s" in *"Opus 5.5"*) ;; *) printf '    FAIL: off: no model [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
 case "$s" in *"["*) printf '    FAIL: off: has [ in [%s]\n' "$s" >&2; TEST_FAILED=1;; esac
+end_test
+
+start_test "no handoff badge in any layout, with or without a marker; ctx file written"
+for l in $LAYOUTS4; do
+  s=$(render_layout "$l" '' strip | tr '\n' ' ')
+  case "$s" in *handoff*) printf '    FAIL: %s badge without marker [%s]\n' "$l" "$s" >&2; TEST_FAILED=1;; esac
+done
+: > "$OMC_STATE_DIR/handoff-render-test-acc"
+for l in $LAYOUTS4; do
+  s=$(render_layout "$l" '' strip | tr '\n' ' ')
+  case "$s" in
+    *'✓ handoff'*|*'handoff ok'*) printf '    FAIL: %s shows a badge with marker [%s]\n' "$l" "$s" >&2; TEST_FAILED=1;;
+  esac
+done
+rm -f "$OMC_STATE_DIR/handoff-render-test-acc"
+[ -f "$OMC_STATE_DIR/ctx-render-test-acc" ] || { printf '    FAIL: ctx file missing\n' >&2; TEST_FAILED=1; }
+end_test
+
+
+# ---- Task 5: absent rate-limit windows are hidden ----
+RLL="default fancy minimal mygo powerline pure"
+rl_payload() {  # $1=layout $2=case $3=rate_limits JSON or '-' for absent
+  local rl=''
+  [ "$3" = "-" ] || rl=",\"rate_limits\":$3"
+  printf '{"session_id":"rl-%s-%s","model":{"display_name":"X"},"workspace":{"current_dir":"/tmp/d"},"context_window":{"used_percentage":8}%s}' "$1" "$2" "$rl"
+}
+rl_line() {  # $1=layout $2=case $3=rate_limits -> the stripped line containing "8%"
+  render_layout "$1" '' strip "$(rl_payload "$1" "$2" "$3")" | grep -F '8%' | head -1
+}
+rl_check() {  # $1=layout $2=case $3=rate_limits $4=expected % count
+  local l="$1" line n
+  line=$(rl_line "$1" "$2" "$3")
+  [ -n "$line" ] || { printf '    FAIL: %s/%s: no line with 8%%\n' "$1" "$2" >&2; TEST_FAILED=1; return; }
+  n=$(printf '%s' "$line" | tr -cd '%' | wc -c | tr -d ' ')
+  [ "$n" = "$4" ] || { printf '    FAIL: %s/%s: %% count %s != %s [%s]\n' "$1" "$2" "$n" "$4" "$line" >&2; TEST_FAILED=1; }
+  case "$line" in *"    "*) printf '    FAIL: %s/%s: 4+ spaces [%s]\n' "$1" "$2" "$line" >&2; TEST_FAILED=1;; esac
+  if [ "$l" != fancy ]; then
+    case "$line" in *"   "*) printf '    FAIL: %s/%s: 3 spaces [%s]\n' "$1" "$2" "$line" >&2; TEST_FAILED=1;; esac
+  fi
+  if [ "$l" != powerline ]; then
+    case "$line" in *" ") printf '    FAIL: %s/%s: trailing space [%s]\n' "$1" "$2" "$line" >&2; TEST_FAILED=1;; esac
+  fi
+  RL_LINE="$line"
+}
+rl_has() {  # $1=layout $2=case $3=glob the selected line must match (values are really printed, in order)
+  case "$RL_LINE" in *$3*) ;; *) printf '    FAIL: %s/%s: line lacks %s [%s]
+' "$1" "$2" "$3" "$RL_LINE" >&2; TEST_FAILED=1;; esac
+}
+rl_norm() { printf '%s' "$1" | LC_ALL=C sed 's/[^ -~][^ -~]*/#/g'; }  # bar/arrow glyph runs -> '#'
+rl_golden() {  # $1=layout $2=case $3=exact expected normalized line
+  local got; got=$(rl_norm "$RL_LINE")
+  [ "$got" = "$3" ] || { printf '    FAIL: %s/%s: golden [%s] != [%s]
+' "$1" "$2" "$got" "$3" >&2; TEST_FAILED=1; }
+}
+rl_nolabel() {  # $1=layout $2=label: fail when label shown in layouts that print one
+  case "$1" in fancy|mygo|powerline|pure)
+    case "$RL_LINE" in *"$2"*) printf '    FAIL: %s shows %s [%s]\n' "$1" "$2" "$RL_LINE" >&2; TEST_FAILED=1;; esac;;
+  esac
+}
+
+start_test "T5.a rate_limits absent: only ctx % shown"
+for l in $RLL; do rl_check "$l" a - 1; done
+end_test
+
+start_test "T5.b rate_limits {}: only ctx % shown"
+for l in $RLL; do rl_check "$l" b '{}' 1; done
+end_test
+
+start_test "T5.c only seven_day: 5h hidden"
+for l in $RLL; do rl_check "$l" c '{"seven_day":{"used_percentage":41}}' 2; rl_nolabel "$l" 5h; rl_has "$l" c '*8%*41%'; done
+end_test
+
+start_test "T5.d only five_hour: 7d hidden"
+for l in $RLL; do rl_check "$l" d '{"five_hour":{"used_percentage":23}}' 2; rl_nolabel "$l" 7d; rl_has "$l" d '*8%*23%'; done
+end_test
+
+start_test "T5.e both present at 0: three 0% shown"
+for l in $RLL; do
+  rl_check "$l" e '{"five_hour":{"used_percentage":0},"seven_day":{"used_percentage":0}}' 3
+  case "$l" in
+    default)   rl_golden "$l" e '# 8%  # 0%  # 0%';;
+    fancy)     rl_golden "$l" e 'ctx # 8%   5h # 0%   7d # 0%';;
+    minimal)   rl_golden "$l" e 'X | /tmp/d | 8% 0% 0%';;
+    mygo)      rl_golden "$l" e 'ctx # 8%  5h # 0%  7d # 0%';;
+    powerline) rl_golden "$l" e ' X #  /tmp/d #  ctx:8% 5h:0% 7d:0% ';;
+    pure)      rl_golden "$l" e 'X  /tmp/d  ctx:8%  5h:0%  7d:0%';;
+  esac
+  case "$l" in powerline|pure) case "$RL_LINE" in *"5h:0%"*) ;; *) printf '    FAIL: %s lacks 5h:0%% [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1;; esac;; esac
+done
+end_test
+
+start_test "T5.h both present with different values: 5h then 7d, each its own value"
+for l in $RLL; do
+  rl_check "$l" h '{"five_hour":{"used_percentage":23},"seven_day":{"used_percentage":41}}' 3
+  rl_has "$l" h '*8%*23%*41%'
+done
+end_test
+
+start_test "T5.f five_hour 90 + resets_at: time suffix kept"
+for l in $RLL; do
+  rl_check "$l" f '{"five_hour":{"used_percentage":90,"resets_at":1738425600}}' 2
+  rl_has "$l" f '*8%*90%'
+  case "$l" in
+    default|fancy|mygo) printf '%s' "$RL_LINE" | grep -Eq '\([0-9]{2}:[0-9]{2}\)' || { printf '    FAIL: %s no (HH:MM) [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1; };;
+    *) case "$RL_LINE" in *"("*) printf '    FAIL: %s has ( [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1;; esac;;
+  esac
+done
+end_test
+
+start_test "T5.g seven_day 90 + resets_at: date suffix kept"
+for l in $RLL; do
+  rl_check "$l" g '{"seven_day":{"used_percentage":90,"resets_at":1738857600}}' 2
+  rl_has "$l" g '*8%*90%'
+  case "$l" in
+    default|fancy|mygo) printf '%s' "$RL_LINE" | grep -Eq '\([0-9]{2}/[0-9]{2}\)' || { printf '    FAIL: %s no (MM/DD) [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1; };;
+    *) case "$RL_LINE" in *"("*) printf '    FAIL: %s has ( [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1;; esac;;
+  esac
+done
 end_test
 
 rm -rf "$T4D"
