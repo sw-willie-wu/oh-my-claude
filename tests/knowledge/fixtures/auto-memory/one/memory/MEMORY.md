@@ -1,0 +1,7 @@
+- Knowledge base project: [[k:projects/a/index]] (omk-project)
+- [[fb1.md]] x
+- [Ref](ref1.md) y
+- [[gone-note]] broken
+- [Bad](missing-file.md) broken
+- [Stub](stub1.md) ok
+- See [[k:global/stub-ext]] and [[k:global/no-such-ext]] and [[g:extref]]

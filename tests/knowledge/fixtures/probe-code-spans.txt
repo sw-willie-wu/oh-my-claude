@@ -1,0 +1,6 @@
+single `$[[ inputs.a ]]` ok
+double ``$[[ inputs.b ]]`` x
+mixed `` a`$[[ inputs.c ]]` `` x
+bare $[[ inputs.d ]]
+| cell | `x \| $[[ inputs.g ]]` |
+x ``` y [[real-missing]]

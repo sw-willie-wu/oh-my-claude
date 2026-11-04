@@ -1,6 +1,6 @@
 #!/bin/bash
 # oh-my-claude standalone installer (for users not using the plugin system)
-# For plugin users: just run /oh-my-claude:setup after installing the plugin
+# For plugin users: just run /oh-my-status:setup after installing the plugin
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -9,7 +9,7 @@ SETTINGS="$HOME/.claude/settings.json"
 echo "Installing oh-my-claude..."
 
 # Copy runtime files
-bash "$SCRIPT_DIR/setup.sh"
+bash "$SCRIPT_DIR/plugins/oh-my-status/setup.sh"
 
 # Configure statusLine in settings.json
 if [ -f "$SETTINGS" ]; then
@@ -41,7 +41,7 @@ echo "Note: the Workers section (live background-shell rows)"
 echo "needs the plugin's tool hooks and is not active for standalone installs."
 echo ""
 echo "Recommended: install as plugin for slash commands and Workers:"
-echo "  claude --plugin-dir $SCRIPT_DIR"
+echo "  claude --plugin-dir $SCRIPT_DIR/plugins/oh-my-status"
 echo ""
 echo "Or preview themes now:"
 echo "  bash ~/.claude/oh-my-claude/preview.sh"
