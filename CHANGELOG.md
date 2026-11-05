@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- `statusLine.refreshInterval` is now opt-in. `/oh-my-status:setup` no longer
+  adds `"refreshInterval": 3` by default; it asks whether to enable timer
+  refresh (default "No", alternative "Refresh every 10 seconds"). On Windows a
+  statusline render takes seconds, so a 3 s timer stacked overlapping renders
+  across sessions and loaded the whole machine. The setup upgrade prompt that
+  offered to add `refreshInterval` to an existing statusLine is removed, and an
+  existing `refreshInterval` value is never touched.
+
 ## 2.0.0 (2026-11-04)
 
 From this release on, releases are identified by the git tag (`v2.0.0`): the
