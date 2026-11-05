@@ -68,7 +68,7 @@ GIT_CACHE_TTL=3                   # git-info cache TTL (s); 0 = disable (always 
 - Background shells that crash without being polled (`BashOutput`) may continue to show as running. After `WORKERS_SHELL_MAX_AGE` (default 1h) they are visually dimmed and marked with `?`. Use Claude Code's built-in `/tasks` command for the true running state.
 - The statusline itself needs `jq` 1.7 or newer. The hooks need it too: without it the hook silently no-ops and no worker lines appear.
 - Plugin-only. The Workers section relies on the plugin's tool hooks, so it works only when oh-my-status is installed as a plugin (marketplace or `--plugin-dir`). Standalone `install.sh` installs get the statusline but no worker rows.
-- For elapsed time to keep updating while the main agent is idle, set `"refreshInterval": 3` in your `statusLine` settings (the `/oh-my-status:setup` command does this automatically). 3 rather than 1 is deliberate — on Windows a 1-second tick can outpace a render and spawn overlapping statusline processes that contend for the worker-state lock. To keep frequent refreshes affordable, git info is cached for `GIT_CACHE_TTL` seconds (default 3) instead of running git on every tick. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
+- Timer refresh is opt-in. By default the statusline re-renders only on Claude Code events, so background-shell elapsed time freezes while the main agent is idle. To keep it ticking, add `"refreshInterval": 10` to your `statusLine` settings (`/oh-my-status:setup` asks about this; it is never added by default). Avoid values below 10: on Windows a render can take several seconds, so a short timer stacks overlapping statusline processes across sessions, burns CPU and contends for the worker-state lock. If you do enable a timer, git info is cached for `GIT_CACHE_TTL` seconds (default 3) instead of running git on every tick. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
 
 ## Account
 
@@ -158,7 +158,7 @@ If a project-level `.claude/settings.json` enables `oh-my-claude@oh-my-claude`, 
 
 ### Upgrading
 
-If you installed oh-my-claude before 1.1.0, re-run `/oh-my-status:setup` and accept the prompt to add `refreshInterval` to your `statusLine` settings — it enables the live background-shell elapsed-time refresh (git info is cached for `GIT_CACHE_TTL` seconds so the 3-second refresh stays cheap). Existing themes/layouts are unaffected.
+If you installed oh-my-claude before 1.1.0, re-run `/oh-my-status:setup` to pick up newer conf options. Timer refresh (`refreshInterval`) is opt-in and no longer prompted for on upgrade; see Limitations above. Existing themes/layouts are unaffected.
 
 ## Usage
 

@@ -36,9 +36,9 @@ LAYOUT="default"
 # col7 still empty). Without it, a statusline tick inside either gap
 # false-prunes the row.
 : "${WORKERS_PLACEHOLDER_GRACE_SEC:=60}"
-# git_info() result cache TTL (seconds). Makes a low statusLine
-# refreshInterval (recommended: 3) affordable by not running git every
-# tick. 0 = disable caching (always
+# git_info() result cache TTL (seconds). Makes a statusLine
+# refreshInterval (opt-in; if used, 10 or more) affordable by not running
+# git every tick. 0 = disable caching (always
 # recompute = exact legacy behavior). Non-numeric/negative → 3.
 : "${GIT_CACHE_TTL:=3}"
 # Account segment (spec §3.1). ACCOUNT_ICON is dash form: explicit "" disables it.
@@ -360,7 +360,7 @@ git_info() {
 
 # Short-TTL on-disk cache around git_info(), keyed by $PWD (the dir git runs
 # in — NOT current_dir (display-only), which differs from
-# $PWD under MSYS). Makes a low statusLine refreshInterval affordable. OMC_STATE_DIR
+# $PWD under MSYS). Makes an opt-in statusLine refreshInterval affordable. OMC_STATE_DIR
 # is already in scope (set by lib/state-lock.sh, sourced above). Stale-write
 # safety: per-cwd file + atomic tmp+mv (no lock — independent of worker state;
 # worst case is N concurrent dupes, self-healing).
