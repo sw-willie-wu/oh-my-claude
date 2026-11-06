@@ -42,13 +42,17 @@ Each candidate gets exactly one outcome (step-by-step in reference.md — follow
 | all knowledge | progress-free (reference.md) into the page that covers it, new or existing, in `projects/<p>/` or `global/` | `> Moved: [[k:<that page>]]` | `- <trigger> → [[k:…]] (omk-harvested)` — trigger only, no conclusion |
 | progress + knowledge | write the knowledge part | keep the progress; a non-leading line `→ [[k:…]]`; frontmatter type → `project` | stays a progress line, no `(omk-harvested)` |
 | duplicate | — | `> Moved: [[k:<existing page>]]` or `> Moved: [[g:<slug>]]` | like "all knowledge" |
-| obsolete / not worth keeping | the backup only | `> Moved: [[k:<backup path without .md>]]` | `- <trigger> → [[k:<backup path without .md>]] (omk-harvested)` (or ask the user) |
+| obsolete / not worth keeping (no KB page links it) | the backup only | `> Moved: [[k:<backup path without .md>]]` | `- <trigger> → [[k:<backup path without .md>]] (omk-harvested)` (or ask the user) |
 
 - New KB pages get `verified` from the original's `metadata.modified`, else its modification date read **before** you change it; `evidence` = the SCHEMA's inferred value unless the content shows it was tested or documented. Add an index line for each new page (its sub-index or `projects/<p>/index.md`).
 - Always-on steps, more outcomes (progress only, redirect stub, `⚠` lines in `MEMORY.md`), which `MEMORY.md` lines to rewrite, marker edge cases, large harvests: reference.md.
 - Copy-and-verify before every outcome that changes an auto-memory file (one call per batch; prints each verified `_retired/harvested/…` path; a file without one → stop, file untouched, report):
   ```bash
   OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' bash "${CLAUDE_PLUGIN_ROOT}/scripts/harvest-copy.sh" '<auto-memory dir>/<file>' …
+  ```
+- After writing the KB page, before stubbing (mixed: after the auto-memory edit, plus that file; always-on: `--spans-only`); exit 1 or 3 (not success) → reference.md step 3b:
+  ```bash
+  bash "${CLAUDE_PLUGIN_ROOT}/scripts/check-move.sh" '<backup path>' '<KB page>' …
   ```
 - No `MEMORY.md` line → none added.
 

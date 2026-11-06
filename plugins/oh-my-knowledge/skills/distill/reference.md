@@ -28,7 +28,8 @@ This overrides any status-section wording in `SCHEMA.md`.
 **All knowledge**
 1. Before changing anything, record the original's date: its frontmatter `metadata.modified` if present, else `date -r '<file>' +%F`.
 2. Copy and verify the original with the SKILL.md copy-and-verify command line (`harvest-copy.sh`; never re-type the file). Use the backup path it prints (a changed file backed up earlier the same day gets `<name>.2.md`, …). No path printed → stop, leave the auto-memory file untouched, report.
-3. Run the **No progress in the KB** check first. Write the knowledge into `projects/<p>/<slug>.md` or `global/<slug>.md` (layering per SCHEMA; merge into an existing page when one covers the subject). Rewrite machine-specific paths. Frontmatter: `metadata.verified` = the date from step 1; `evidence` = the SCHEMA's inferred value unless the content shows it was tested or documented. A new page also gets an index line (its `global/index_<topic>.md` sub-index, or `projects/<p>/index.md`).
+3. Run the **No progress in the KB** check first. Rewrite links only outside inline code and fenced blocks; text inside backticks or a fence is copied byte for byte (a `[[` there is literal). Never link into `[[k:_retired/…]]`. Write the knowledge into `projects/<p>/<slug>.md` or `global/<slug>.md` (layering per SCHEMA; merge into an existing page when one covers the subject). Rewrite machine-specific paths. Frontmatter: `metadata.verified` = the date from step 1; `evidence` = the SCHEMA's inferred value unless the content shows it was tested or documented. A new page also gets an index line (its `global/index_<topic>.md` sub-index, or `projects/<p>/index.md`).
+3b. Run the SKILL.md `check-move.sh` command line (original = the backup path). Exit 1 → read each `missing` item: restore it, or confirm it was reworded or dropped on purpose (merge delta, path rewrite) and name it in the report. Exit 3 → read both; continue only if the shrink is intended.
 4. Replace the auto-memory file's body with `> Moved: [[k:<that page>]]`: the page that received the content, new or existing (`[[g:<slug>]]` for a global page also works).
 5. Rewrite its index lines (see Status section) into `- <trigger situation> → [[k:…]] (omk-harvested)`. Keep the trigger, drop the conclusion. Example: `- before touching production → [[k:projects/p0001/deploy-prod]] (omk-harvested)`. No line → add none.
 
@@ -39,14 +40,14 @@ This overrides any status-section wording in `SCHEMA.md`.
 4. No import: offer setup step 6 first. Accepted → run setup step 6 (backup, append the import), then continue with step 5. If the user declines the import offer → project always-on.
 5. Import present: if an existing rule already covers the directive, reuse it (no new rule file) and go to step 7 with that rule. Otherwise list the proposed `rules/<slug>.md` files (one short rule each; frontmatter per SCHEMA with `verified` from step 1, never today's date; link to a `global/` page only if details are needed) and ask the user. If the user declines the rule → project always-on.
 6. Approved: write the rule and add the line `@<slug>.md` to `rules/INDEX.md`.
-7. Copy-and-verify the original (all-knowledge step 2). Then body → `> Moved: [[k:rules/<slug>]]`, and rewrite its index lines (if any) pointer-only: `- always-on rule → [[k:rules/<slug>]] (omk-harvested)`. The rule loads every session itself; no second copy of the directive. Then the pointer dedupe (Status section) applies.
+7. Copy-and-verify the original (all-knowledge step 2), write the rule, run step 3b with `--spans-only`. Then body → `> Moved: [[k:rules/<slug>]]`, and rewrite its index lines (if any) pointer-only: `- always-on rule → [[k:rules/<slug>]] (omk-harvested)`. The rule loads every session itself; no second copy of the directive. Then the pointer dedupe (Status section) applies.
 
 **Project always-on** (the directive is for this project only, or the rule or the import was declined). The plugin injects `projects/<p>/always-on.md` into every session of this project, so the KB holds the only copy.
 1. Record the original's date (step 1 above); copy-and-verify the original (all-knowledge step 2).
 2. Edit `projects/<p>/always-on.md`. If a line with the same directive already exists, add nothing (dedupe). Otherwise append one line `- <directive>`: self-contained, in the user's language; links only as `[[g:…]]` / `[[k:…]]` (details can live on a normal project page, linked at the end of the line).
    - Page missing → create it: frontmatter per SCHEMA (`description`, `verified` = the date from step 1, `evidence` inferred unless the content shows otherwise) and add its index line to `projects/<p>/index.md`. Appending to an existing page does not change `verified`.
    - Stub page (its last line was promoted earlier, body is `> Moved: …`): replace the body with the new line and restore its index line in `projects/<p>/index.md` only if it was removed or repointed.
-3. Stub the auto-memory file: body → `> Moved: [[k:projects/<p>/always-on]]`. Rewrite its index lines (if any) pointer-only: `- always-on (this project) → [[k:projects/<p>/always-on]] (omk-harvested)`. With no line, add none. If that exact pointer line already exists in `MEMORY.md`, remove this file's line instead of adding a second one. The general pointer dedupe (Status section) also applies.
+3. Run step 3b with `--spans-only`, then stub the auto-memory file: body → `> Moved: [[k:projects/<p>/always-on]]`. Rewrite its index lines (if any) pointer-only: `- always-on (this project) → [[k:projects/<p>/always-on]] (omk-harvested)`. With no line, add none. If that exact pointer line already exists in `MEMORY.md`, remove this file's line instead of adding a second one. The general pointer dedupe (Status section) also applies.
 4. The report names each such directive and says how to make it global later: say 'make X a global rule' (in the user's language).
 
 Copy-and-verify (`harvest-copy.sh`, all-knowledge step 2) comes before each of the seven outcomes that change an auto-memory file: all knowledge, mixed, duplicate, obsolete, always-on rule, project always-on, redirect stub. A mismatch stops that file.
@@ -55,12 +56,12 @@ In the harvest log line, `<n> always-on` counts the rule outcomes (a new or a re
 
 **Progress + knowledge (mixed)**
 1. Record the date (step 1 above) and copy-and-verify the original (step 2 above), then move the knowledge part into the KB as in step 3.
-2. In the auto-memory file, replace the moved part with one line `→ [[k:…]]`; it must not be the first body line (the file is not a stub and stays searchable).
+2. In the auto-memory file, replace the moved part with one line `→ [[k:…]]`; it must not be the first body line (the file is not a stub and stays searchable). Then run step 3b with the edited auto-memory file as an extra target.
 3. Set its frontmatter type to `project`. Its `MEMORY.md` line keeps describing the progress; no `(omk-harvested)`.
 
 **Duplicate** of an existing page: copy-and-verify first (step 2 above), then body → `> Moved: [[k:<existing relpath>]]` (or `[[g:<slug>]]`); rewrite its index lines (if any) like "all knowledge".
 
-**Obsolete / not worth keeping**: copy and verify as in step 2, body → `> Moved: [[k:<printed backup path without .md>]]`; rewrite its index lines (if any) trigger-only to `- <trigger> → [[k:<same path>]] (omk-harvested)`, or ask the user. Never delete the line silently.
+**Obsolete / not worth keeping**: first Grep (fixed strings, `files_with_matches`) `[[<name>]]`, `[[<name>.md]]`, `(<name>.md)`, `/<name>]]` over `rules/ global/ projects/ index.md` and this harvest's other candidates; a page that stays links it → not obsolete: move it as all knowledge, or rewrite that text first. Then copy and verify as in step 2, body → `> Moved: [[k:<printed backup path without .md>]]`; rewrite its index lines (if any) trigger-only to `- <trigger> → [[k:<same path>]] (omk-harvested)`, or ask the user. Never delete the line silently.
 
 Links from other auto-memory files to a harvested file stay valid (the file still exists, as a stub).
 

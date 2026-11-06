@@ -47,6 +47,9 @@ echo
 echo "=== knowledge harvest-copy tests ==="
 bash "$REPO_ROOT/tests/knowledge/test-harvest-copy.sh" || FAIL=1
 echo
+echo "=== knowledge check-move tests ==="
+bash "$REPO_ROOT/tests/knowledge/test-check-move.sh" || FAIL=1
+echo
 echo "=== knowledge skills tests ==="
 bash "$REPO_ROOT/tests/knowledge/test-skills.sh" || FAIL=1
 exit "$FAIL"

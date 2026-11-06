@@ -204,6 +204,9 @@ need "$f" 'always-on directive' distill
 grep -F 'always-on directive' "$f" 2>/dev/null | grep -F 'duplicate' | grep -qF 'all knowledge' || fail "distill: always-on row must state precedence over duplicate/all knowledge"
 grep -F '<n> always-on' "$f" 2>/dev/null | grep -qF '<n> retired' || fail "distill: harvest log line lacks <n> always-on"
 need "$f" 'copy-and-verify' distill
+need "$f" 'scripts/check-move.sh' distill; need "$f" '--spans-only' distill; need "$f" 'not success' distill; need "$f" 'no KB page links it' distill
+need "$r" 'outside inline code' distill/reference.md; need "$r" 'on purpose' distill/reference.md; need "$r" 'extra target' distill/reference.md
+grep -F 'Obsolete / not worth keeping' "$r" 2>/dev/null | grep -qF 'links it' || fail "distill: reference obsolete line must mention that a page links it"
 need "$f" '- always-on rule → [[k:rules/<slug>]] (omk-harvested)' distill
 need "$f" '> Moved: [[k:rules/<slug>]]' distill
 # G: no tags anywhere

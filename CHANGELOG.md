@@ -29,6 +29,8 @@
   retired copy.
 - oh-my-knowledge: distill's migrate / attach / close steps and the always-on
   requests moved to `skills/distill/modes.md`.
+- oh-my-knowledge: distill checks that no knowledge-base page links an
+  auto-memory file before retiring it as obsolete.
 
 ### Fixed
 - oh-my-knowledge: harvest backups use
@@ -38,6 +40,10 @@
   renamed; projects with long folder names get a second, short backup folder
   from now on. A same-day re-harvest of a changed file keeps both backups
   (`<name>.2.md`).
+- oh-my-knowledge: distill rewrites links only outside inline code and fences,
+  and `scripts/check-move.sh` makes it re-read any code span or fenced line
+  holding `[[` that is missing from the knowledge-base page after a move (a
+  2026-11-02 migration had stripped or truncated them in 10 pages).
 
 ## 2.0.0 (2026-11-04)
 
