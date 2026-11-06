@@ -120,7 +120,7 @@ end_test
 
 start_test "cached_git_info: fresh cache is a HIT (git_info not re-invoked)"
 ST=$(mktemp -d); WD=$(mktemp -d)
-OUT1=$(cgi "$WD" "$ST" 3); OUT2=$(cgi "$WD" "$ST" 3)
+OUT1=$(cgi "$WD" "$ST" 300); OUT2=$(cgi "$WD" "$ST" 300)
 assert_eq "1" "$(cat "$ST/.gitcnt")" "second call must be a cache HIT (counter stays 1)"
 assert_eq "$STUB_LINE" "$OUT2" "HIT returns cached content"
 rm -rf "$ST" "$WD"
@@ -193,8 +193,8 @@ end_test
 start_test "cached_git_info: valid non-repo line passes the guard and HITs"
 ST=$(mktemp -d); WD=$(mktemp -d)
 NONREPO=$(printf '\t0\t0\t0\t0\t0')
-cgi "$WD" "$ST" 3 "$NONREPO" >/dev/null
-OUT2=$(cgi "$WD" "$ST" 3 "$NONREPO")
+cgi "$WD" "$ST" 300 "$NONREPO" >/dev/null
+OUT2=$(cgi "$WD" "$ST" 300 "$NONREPO")
 assert_eq "1" "$(cat "$ST/.gitcnt")" "non-repo line (empty field1) must pass guard → HIT"
 assert_eq "$NONREPO" "$OUT2" "HIT returns the cached non-repo line"
 rm -rf "$ST" "$WD"
@@ -202,14 +202,14 @@ end_test
 
 start_test "cached_git_info: non-numeric GIT_CACHE_TTL falls back to default 3 (not 0/disabled)"
 ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" abc >/dev/null; cgi "$WD" "$ST" abc >/dev/null
+NOWFIX=$(date +%s); OMC_NOW_OVERRIDE=$NOWFIX cgi "$WD" "$ST" abc >/dev/null; OMC_NOW_OVERRIDE=$NOWFIX cgi "$WD" "$ST" abc >/dev/null
 assert_eq "1" "$(cat "$ST/.gitcnt")" "abc→3: fresh second call must HIT (would be 2 if treated as 0)"
 rm -rf "$ST" "$WD"
 end_test
 
 start_test "cached_git_info: negative GIT_CACHE_TTL falls back to default 3"
 ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" -5 >/dev/null; cgi "$WD" "$ST" -5 >/dev/null
+NOWFIX=$(date +%s); OMC_NOW_OVERRIDE=$NOWFIX cgi "$WD" "$ST" -5 >/dev/null; OMC_NOW_OVERRIDE=$NOWFIX cgi "$WD" "$ST" -5 >/dev/null
 assert_eq "1" "$(cat "$ST/.gitcnt")" "-5→3: fresh second call must HIT"
 rm -rf "$ST" "$WD"
 end_test
@@ -1002,6 +1002,65 @@ for l in $RLL; do
   esac
 done
 end_test
+
+# --- spawn budgets (spec §0) ---
+# count_spawns (test-helpers.sh) runs the statusline with PATH=<shim dir> only and
+# counts forks + execs. Ceilings = measured + 2 (Windows fork-count variance).
+BT=$(mktemp -d)
+BUDGET_ACCT="$BT/acct.json"
+printf '{"oauthAccount":{"displayName":"w"}}' > "$BUDGET_ACCT"
+touch -d "@$(( $(date +%s) - 10 ))" "$BUDGET_ACCT"
+BUDGET_PAYLOAD='{"session_id":"budget","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"},"context_window":{"used_percentage":8}}'
+
+budget_env() {  # $1=state-dir $2=ttl -> writes $1.conf / $1.in
+  printf 'LAYOUT=default\nGIT_CACHE_TTL=%s\n' "$2" > "$1.conf"
+  printf '%s' "$BUDGET_PAYLOAD" > "$1.in"
+}
+budget_prewarm() {  # $1=dir $2=state-dir : one normal render, same env as budget_case
+  ( cd "$1" && OMC_CONF="$2.conf" OMC_STATE_DIR="$2" OMC_ACCOUNT_FILE="$BUDGET_ACCT" COLUMNS=120 \
+      OMC_NOW_OVERRIDE=1793800000 bash "$STATUSLINE" < "$2.in" >/dev/null 2>&1 )
+}
+budget_case() {  # $1=label $2=dir $3=state-dir $4=ttl
+  budget_env "$3" "$4"
+  ( cd "$2" && OMC_CONF="$3.conf" OMC_STATE_DIR="$3" OMC_ACCOUNT_FILE="$BUDGET_ACCT" COLUMNS=120 \
+      OMC_NOW_OVERRIDE=1793800000 count_spawns "$3.cnt" "$3.in" "$STATUSLINE"; \
+      printf '%s %s %s\n' "$SPAWNS" "$SPAWN_FORKS" "$SPAWN_EXECS" > "$3.res"; \
+      grep '^MISSING' "$SPAWN_LOG" > "$3.missing" || : )
+  read -r SPAWNS SPAWN_FORKS SPAWN_EXECS < "$3.res"
+  SPAWN_MISSING=$(wc -l < "$3.missing" | tr -d ' '); SPAWN_LOG="$3.cnt/log"
+  printf '    measured %s: %s spawns (forks %s + execs %s)\n' "$1" "$SPAWNS" "$SPAWN_FORKS" "$SPAWN_EXECS"
+  [ -s "$3.cnt/stdout" ] || { printf '    FAIL: %s: empty stdout\n' "$1" >&2; TEST_FAILED=1; }
+  head -1 "$3.cnt/stdout" | grep -qF 'M' || { printf '    FAIL: %s: line 1 lacks the model\n' "$1" >&2; TEST_FAILED=1; }
+}
+
+# P2 measured: R1=26 R2=66 R3=36. Final targets (P6): R1<=3 R2<=8 R3<=3.
+BUDGET_R1=28; BUDGET_R2=68; BUDGET_R3=38
+
+BREPO=$(mktemp -d); gi_mkrepo "$BREPO" main
+
+start_test "spawn budget R1: repo, git cache HIT, account cache HIT"
+BS="$BT/r1"; budget_env "$BS" 300; budget_prewarm "$BREPO" "$BS"
+budget_case R1 "$BREPO" "$BS" 300
+assert_spawns_le "$BUDGET_R1" "R1"
+assert_eq "0" "$(grep -c '^EXEC git ' "$SPAWN_LOG" || true)" "R1 cache HIT must not run git"
+end_test
+
+start_test "spawn budget R2: repo, git cache MISS"
+BS="$BT/r2"; budget_case R2 "$BREPO" "$BS" 300
+assert_spawns_le "$BUDGET_R2" "R2"
+end_test
+
+start_test "spawn budget R3: non-repo cwd"
+BNOGIT=$(mktemp -d)
+if git -C "$BNOGIT" rev-parse 2>/dev/null; then
+  printf '    SKIP: temp dir is inside a git repo\n'
+else
+  BS="$BT/r3"; budget_case R3 "$BNOGIT" "$BS" 300
+  assert_spawns_le "$BUDGET_R3" "R3"
+fi
+rm -rf "$BNOGIT"
+end_test
+rm -rf "$BREPO" "$BT"
 
 rm -rf "$T4D"
 print_summary

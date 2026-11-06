@@ -17,6 +17,40 @@ export OMC_ACCOUNT_FILE="${OMC_ACCOUNT_FILE:-$OMC_STATE_DIR/no-such.json}"
 
 # Real jq, resolved before any test prepends a shim dir to PATH.
 REAL_JQ="$(command -v jq 2>/dev/null || true)"
+REAL_PATH="$PATH"
+BASH_BIN="$(command -v bash)"
+
+# count_spawns <outdir> <stdin-file> <script> [args...]
+# Runs `bash -x <script>` with PATH=<outdir>/shim only. Sets SPAWNS, SPAWN_FORKS,
+# SPAWN_EXECS, SPAWN_MISSING (count of un-shimmed externals). stdout → <outdir>/stdout.
+count_spawns() {
+  local out="$1" in="$2"; shift 2
+  local name real
+  rm -rf "$out"; mkdir -p "$out/shim"; : > "$out/log"
+  for name in git jq date stat cat sed awk grep ps uname mkdir mv rm rmdir tr dirname basename \
+              find touch cp head tail sort wc cut od paste tar sleep ls; do
+    real=$(PATH="$REAL_PATH" command -v "$name" 2>/dev/null) || continue
+    printf '#!%s\nprintf "EXEC %%s %%s %%s\\n" %q "$$" "$PPID" >> %q\nPATH=%q exec %q "$@"\n' \
+      "$BASH_BIN" "$name" "$out/log" "$REAL_PATH" "$real" > "$out/shim/$name"
+    chmod +x "$out/shim/$name"
+  done
+  SPAWN_LOG="$out/log"; export SPAWN_LOG
+  command_not_found_handle() { printf 'MISSING %s\n' "$1" >> "$SPAWN_LOG"; return 127; }
+  export -f command_not_found_handle
+  PATH="$out/shim" PS4='+${BASHPID} ' BASH_XTRACEFD=9 "$BASH_BIN" -x "$@" \
+    < "$in" > "$out/stdout" 2>/dev/null 9> "$out/trace"
+  unset -f command_not_found_handle
+  { grep -a -o '^+*[0-9]\+' "$out/trace" | tr -d '+'; awk '$1=="EXEC"{print $3; print $4}' "$out/log"; } \
+    | sort -u > "$out/pids"
+  SPAWN_FORKS=$(( $(wc -l < "$out/pids") - 1 ))
+  SPAWN_EXECS=$(grep -c '^EXEC ' "$out/log" || true)
+  SPAWN_MISSING=$(grep -c '^MISSING ' "$out/log" || true)
+  SPAWNS=$(( SPAWN_FORKS + SPAWN_EXECS ))
+}
+assert_spawns_le() {  # $1=ceiling $2=label ; uses the last count_spawns result
+  [ "${SPAWN_MISSING:-0}" -eq 0 ] || { printf '    FAIL: %s: un-shimmed external(s):\n%s\n' "$2" "$(grep '^MISSING' "$SPAWN_LOG")" >&2; TEST_FAILED=1; }
+  [ "$SPAWNS" -le "$1" ] || { printf '    FAIL: %s: %s spawns (forks %s + execs %s) > %s\n%s\n' "$2" "$SPAWNS" "$SPAWN_FORKS" "$SPAWN_EXECS" "$1" "$(awk '{print $2}' "$SPAWN_LOG" | sort | uniq -c)" >&2; TEST_FAILED=1; }
+}
 
 # make_jq_shim <dir> <log> [fail]: write an executable <dir>/jq that logs one
 # 'CALL <%q argv>' line per invocation, then execs the real jq (or exits 1).

@@ -145,6 +145,25 @@ assert_eq "0" "$rc" "setup.sh exit code"
 rm -rf "$sbox"
 end_test
 
+start_test "setup cleanup is spawn-free when nothing is left to clean (no rm call)"
+sbox=$(mktemp -d); st="$sbox/state"; od="$sbox/omc"
+mkdir -p "$st/state.lock" "$od/hooks" "$od/lib"
+printf x > "$st/state-a.tsv"; printf 1 > "$st/state.lock/pid"; printf x > "$st/track-workers.log"
+printf x > "$od/hooks/track-workers.sh"; printf x > "$od/lib/state-lock.sh"; printf x > "$od/lib/conf-keys.sh"
+run_setup "$sbox"        # first run: cleans the seeded leftovers
+cat > "$sbox/run.sh" <<EOS
+#!/bin/bash
+export HOME="$sbox/home" OMC_DIR="$od" OMC_CONF="$sbox/c.conf" OMC_STATE_DIR="$st" \
+  OMC_CONF_TEMPLATE="$STATUS_DIR/oh-my-claude.conf"
+"$BASH" "$STATUS_DIR/setup.sh"
+EOS
+count_spawns "$sbox/cnt" /dev/null "$sbox/run.sh"
+assert_eq "0" "$SPAWN_MISSING" "un-shimmed externals in setup.sh"
+assert_eq "0" "$(grep -c '^EXEC rm ' "$sbox/cnt/log" || true)" "rm calls on the second (clean) run"
+[ "$SPAWN_EXECS" -gt 0 ] || { printf '    FAIL: harness saw no setup.sh externals (vacuous)\n' >&2; TEST_FAILED=1; }
+rm -rf "$sbox"
+end_test
+
 start_test "setup does not copy lib/ any more"
 sbox=$(mktemp -d)
 run_setup "$sbox"; rc=$?
