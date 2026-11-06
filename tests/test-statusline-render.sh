@@ -1033,8 +1033,8 @@ budget_case() {  # $1=label $2=dir $3=state-dir $4=ttl
   head -1 "$3.cnt/stdout" | grep -qF 'M' || { printf '    FAIL: %s: line 1 lacks the model\n' "$1" >&2; TEST_FAILED=1; }
 }
 
-# P2 measured: R1=26 R2=66 R3=36. Final targets (P6): R1<=3 R2<=8 R3<=3.
-BUDGET_R1=28; BUDGET_R2=68; BUDGET_R3=38
+# P2 measured: R1=26 R2=66 R3=36. P3 measured: R1=16 R2=56 R3=26. Final targets (P6): R1<=3 R2<=8 R3<=3.
+BUDGET_R1=18; BUDGET_R2=58; BUDGET_R3=28
 
 BREPO=$(mktemp -d); gi_mkrepo "$BREPO" main
 
@@ -1061,6 +1061,74 @@ fi
 rm -rf "$BNOGIT"
 end_test
 rm -rf "$BREPO" "$BT"
+
+# --- P3: render startup builtins (spec 2.4) ---
+P3=$(mktemp -d); mkdir -p "$P3/nogit" "$P3/st"
+printf '{}' > "$P3/none.json"
+git -C "$P3/nogit" rev-parse 2>/dev/null && { printf '    NOTE: temp dir is inside a git repo; P3 spawn tests are not meaningful\n'; }
+p3_count() {  # $1=payload $2=layout(default) ; runs the render under count_spawns, log in $P3/cnt/log
+  rm -rf "$P3/st"; mkdir -p "$P3/st"   # fresh state: a git-cache HIT would exec cat (until P4)
+  printf '%s' "$1" > "$P3/in"; printf 'LAYOUT=%s\n' "${2:-default}" > "$P3/conf"
+  ( cd "$P3/nogit" && OMC_CONF="$P3/conf" OMC_STATE_DIR="$P3/st" OMC_ACCOUNT_FILE="$P3/none.json" COLUMNS=120 \
+      count_spawns "$P3/cnt" "$P3/in" "$STATUSLINE" )
+  [ -s "$P3/cnt/stdout" ] || { printf '    FAIL: p3_count: empty stdout\n' >&2; TEST_FAILED=1; }
+  head -1 "$P3/cnt/stdout" | grep -qF 'M' || { printf '    FAIL: p3_count: line 1 lacks the model\n' >&2; TEST_FAILED=1; }
+}
+p3_execs() { grep -c "^EXEC $1 " "$P3/cnt/log" || true; }
+P3_PLAIN='{"session_id":"p3","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"},"context_window":{"used_percentage":8}}'
+
+start_test "P3.1 sourcing statusline.sh runs no dirname (SCRIPT_DIR from BASH_SOURCE)"
+printf 'OMC_TEST_LIB_ONLY=1; . "%s"\n' "$STATUSLINE" > "$P3/src.sh"
+count_spawns "$P3/csrc" /dev/null "$P3/src.sh"
+assert_eq "0" "$(grep -c '^EXEC dirname ' "$P3/csrc/log" || true)" "dirname execs when sourcing statusline.sh"
+printf 'OMC_TEST_LIB_ONLY=1; . "%s"\n' "$STATUSLINE.lib_test_loader.sh" > "$P3/src2.sh"
+count_spawns "$P3/csrc2" /dev/null "$P3/src2.sh"
+assert_eq "0" "$(grep -c '^EXEC dirname ' "$P3/csrc2/log" || true)" "dirname execs when sourcing the lib loader"
+end_test
+
+start_test "P3.1 statusline.sh invoked via a Windows (backslash) path still finds its themes/layouts"
+if command -v cygpath >/dev/null 2>&1; then
+  WINSL=$(cygpath -w "$STATUSLINE")
+  mkdir -p "$P3/nogit"
+  OUT=$(cd "$P3/nogit" && printf '%s' "$P3_PLAIN" | OMC_CONF=/dev/null OMC_STATE_DIR="$P3/st" OMC_ACCOUNT_FILE="$P3/none.json" bash "$WINSL" 2>/dev/null | strip_ansi)
+  printf '%s\n' "$OUT" | head -1 | grep -qF 'M' \
+    || { printf '    FAIL: no model on line 1 via %s\n      got: %q\n' "$WINSL" "$OUT" >&2; TEST_FAILED=1; }
+else
+  printf '    SKIP: no cygpath (not MSYS)\n'
+fi
+end_test
+
+start_test "P3.2 parse_status_json without argument reads the inherited stdin"
+OUT=$(printf '%s' "$DOCS_JSON" | timeout 20 bash -c 'OMC_TEST_LIB_ONLY=1; source "$0"; parse_status_json; printf "%s" "$SESSION_ID"' "$STATUSLINE")
+assert_eq "abc123..." "$OUT" "SESSION_ID from stdin"
+end_test
+
+start_test "P3.2 a normal render runs no cat"
+p3_count "$P3_PLAIN"
+assert_eq "0" "$(p3_execs cat)" "cat execs"
+end_test
+
+start_test "P3.3 a render without orphan temp files or a >80% rate runs no date"
+rm -rf "$P3/st"; mkdir -p "$P3/st"
+p3_count "$P3_PLAIN"
+assert_eq "0" "$(p3_execs date)" "date execs"
+end_test
+
+start_test "P3.3 rate suffix with an integer resets_at runs no date"
+p3_count '{"session_id":"p3","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":90,"resets_at":1738425600},"seven_day":{"used_percentage":90,"resets_at":1738857600}}}'
+assert_eq "0" "$(p3_execs date)" "date execs"
+end_test
+
+start_test "P3.3 resets_at suffix: integer, 'abc' and 1.5 match the old date chain"
+for ra in 1738425600 abc 1.5 0123; do
+  if [[ $ra =~ ^(0|[1-9][0-9]*)$ ]]; then jr=$ra; else jr="\"$ra\""; fi
+  [[ $ra == 1.5 ]] && jr=1.5
+  want=$(date -d "@$ra" '+%H:%M' 2>/dev/null || date -r "$ra" '+%H:%M' 2>/dev/null)
+  got=$(render_layout default '' strip "{\"session_id\":\"p3b\",\"model\":{\"display_name\":\"M\"},\"workspace\":{\"current_dir\":\"/tmp/d\"},\"context_window\":{\"used_percentage\":8},\"rate_limits\":{\"five_hour\":{\"used_percentage\":90,\"resets_at\":$jr}}}" | grep -o '([^)]*)' | head -1)
+  assert_eq "($want)" "$got" "5h suffix for resets_at=$ra"
+done
+end_test
+rm -rf "$P3"
 
 rm -rf "$T4D"
 print_summary

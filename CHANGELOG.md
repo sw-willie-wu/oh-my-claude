@@ -18,6 +18,9 @@
   across sessions and loaded the whole machine. The setup upgrade prompt that
   offered to add `refreshInterval` to an existing statusLine is removed, and an
   existing `refreshInterval` value is never touched.
+- The statusline starts without helper processes: no `cat`/`dirname`/`date`
+  on a normal render (stdin goes straight to jq; bash builtins for the
+  clock and time formatting).
 
 ### Migration (3.0.0)
 - Restart every Claude Code session after updating. Until then an old 2.x

@@ -4,7 +4,7 @@
 
 # Use BASH_SOURCE so this resolves correctly whether the file is executed
 # directly or sourced (e.g. by statusline.sh.lib_test_loader.sh).
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case ${BASH_SOURCE[0]} in */*|*\\*) SCRIPT_DIR=${BASH_SOURCE[0]%[/\\]*} ;; *) SCRIPT_DIR=. ;; esac
 OMC_DIR="${OMC_DIR:-$SCRIPT_DIR}"
 OMC_CONF="${OMC_CONF:-$HOME/.claude/oh-my-claude.conf}"
 
@@ -48,6 +48,23 @@ source "$LAYOUT_FILE"
 # triggering JSON parsing or the render pipeline.
 # ---------------------------------------------------------------------------
 
+# Clock without a fork on bash >= 5 (EPOCHSECONDS); `date` otherwise.
+# OMC_NOW_OVERRIDE is the test-only clock seam. Sets REPLY.
+_omc_now() { REPLY=${OMC_NOW_OVERRIDE:-${EPOCHSECONDS:-$(date +%s)}}; }
+
+# _omc_strftime <fmt in date syntax, without '+'> <epoch> -> REPLY.
+# printf '%()T' only for a plain decimal integer (no leading zero: printf would
+# read it as octal; at most 15 digits: larger values error out); everything
+# else runs the old `date` chain verbatim, so odd resets_at values keep their
+# old output (e.g. "" or "abc" -> empty).
+_omc_strftime() {
+  if [[ $2 =~ ^(0|[1-9][0-9]{0,14})$ ]] && (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2) )); then
+    printf -v REPLY "%($1)T" "$2"
+  else
+    REPLY=$(date -d "@$2" "+$1" 2>/dev/null || date -r "$2" "+$1" 2>/dev/null)
+  fi
+}
+
 # Sweep crash-orphaned temp files (>30s old) from the state dir. A writer
 # SIGKILL'd between creating its temp file and the atomic rename leaves a
 # `gitcache-*.tmp.<pid>` (cached_git_info) or `account-*.tmp.<pid>` behind.
@@ -58,10 +75,11 @@ source "$LAYOUT_FILE"
 # within a long-lived session. An unmatched glob stays literal and is
 # filtered out by the `[ -f ]` test.
 _omc_sweep_stale_tmp() {
-  local now mt f
-  now=$(date +%s 2>/dev/null) || return 0
+  local now="" mt f
   for f in "$OMC_STATE_DIR"/gitcache-*.tmp.* "$OMC_STATE_DIR"/account-*.tmp.*; do
     [ -f "$f" ] || continue
+    # The clock is only needed once a real orphan exists.
+    if [ -z "$now" ]; then _omc_now; now=$REPLY; fi
     mt=$(stat -c %Y "$f" 2>/dev/null) || continue
     [ $((now - mt)) -gt 30 ] && rm -f "$f" 2>/dev/null
   done
@@ -149,7 +167,7 @@ cached_git_info() {
     # OMC_NOW_OVERRIDE: test-only clock seam so the TTL-boundary tests are
     # deterministic instead of racing wall-clock on a slow box. Unset in
     # production → identical behaviour (date +%s).
-    now=${OMC_NOW_OVERRIDE:-$(date +%s)}
+    _omc_now; now=$REPLY
     mtime=$(stat -c %Y "$file" 2>/dev/null)
     [ -z "$mtime" ] && mtime=$(date -r "$file" +%s 2>/dev/null)
     if [ -n "$mtime" ]; then
@@ -174,7 +192,21 @@ cached_git_info() {
   printf '%s' "$out"
 }
 
-# Parse the statusLine JSON ($1) into globals. Pure (no stdin/render side
+# The 9 NUL-delimited reads of parse_status_json (stdin = jq output).
+_omc_read_status_fields() {
+  IFS= read -r -d '' SESSION_ID
+  IFS= read -r -d '' MODEL
+  IFS= read -r -d '' DIR
+  IFS= read -r -d '' CTX_PCT
+  IFS= read -r -d '' RATE5_PCT
+  IFS= read -r -d '' RATE5_RESET
+  IFS= read -r -d '' RATE7_PCT
+  IFS= read -r -d '' RATE7_RESET
+  IFS= read -r -d '' CTX_SIZE
+}
+
+# Parse the statusLine JSON into globals: from $1 when given (tests), else from the
+# inherited stdin (render path). Pure (no render side
 # effects) so the lib loader can test it. §8.3 Task B: ONE `jq --raw-output0`
 # pass replaces ~30 `echo|grep -o` forks (spec §4.1–§4.4). jq is a render-side
 # hard dep (already a hook-side one); on jq absent/too-old/malformed input the
@@ -182,7 +214,6 @@ cached_git_info() {
 # SANITIZED_SID is a fork-free var assignment (no I/O); the gate's
 # empty-SESSION_ID guard exits before anything is written (spec §4.6).
 parse_status_json() {
-  local input="$1"
   local _jqfilter='
     .session_id // "",
     .model.display_name // "",
@@ -199,17 +230,13 @@ parse_status_json() {
   # NUL-delimited (no \n, so winget jq's CRLF line-xlate never runs). Not
   # chained with ||/&& (spec §4.7): a normal "rate_limits absent" payload
   # must not abort the render.
-  {
-    IFS= read -r -d '' SESSION_ID
-    IFS= read -r -d '' MODEL
-    IFS= read -r -d '' DIR
-    IFS= read -r -d '' CTX_PCT
-    IFS= read -r -d '' RATE5_PCT
-    IFS= read -r -d '' RATE5_RESET
-    IFS= read -r -d '' RATE7_PCT
-    IFS= read -r -d '' RATE7_RESET
-    IFS= read -r -d '' CTX_SIZE
-  } < <(printf '%s' "$input" | jq --raw-output0 "$_jqfilter")
+  if [ $# -gt 0 ]; then
+    _omc_read_status_fields < <(jq --raw-output0 "$_jqfilter" <<<"$1")
+  else
+    # No argument: jq reads the stdin this shell inherited (a procsub child
+    # inherits it), so the render path needs no `cat`.
+    _omc_read_status_fields < <(jq --raw-output0 "$_jqfilter")
+  fi
   MODEL="${MODEL%% (*}"                              # strip " (…)" suffix
   SANITIZED_SID="${SESSION_ID//[^A-Za-z0-9_-]/_}"    # tr -c equivalent, no fork
   # Windows path → ~/relative (display). Faithfully reproduces the old
@@ -295,8 +322,7 @@ split_gi_line() {
 if [ -z "${OMC_TEST_LIB_ONLY:-}" ]; then
 
 # Read JSON input from stdin
-input=$(cat)
-parse_status_json "$input"
+parse_status_json
 # jq-failure / empty-session guard (spec §4.6). `.session_id` is documented
 # always-present, so an empty SESSION_ID unambiguously means jq is absent,
 # too old (`--raw-output0` unknown), or `$input` was malformed. One cheap
@@ -320,12 +346,12 @@ cached_account_fields; resolve_account
 # Rate limit reset info
 RATE5_SUFFIX=""
 if [ "${RATE5_PCT:-0}" -gt 80 ] && [ -n "$RATE5_RESET" ]; then
-  RATE5_HOUR=$(date -d "@$RATE5_RESET" '+%H:%M' 2>/dev/null || date -r "$RATE5_RESET" '+%H:%M' 2>/dev/null)
+  _omc_strftime '%H:%M' "$RATE5_RESET"; RATE5_HOUR=$REPLY
   RATE5_SUFFIX=" (${RATE5_HOUR})"
 fi
 RATE7_SUFFIX=""
 if [ "${RATE7_PCT:-0}" -gt 80 ] && [ -n "$RATE7_RESET" ]; then
-  RATE7_DATE=$(date -d "@$RATE7_RESET" '+%m/%d' 2>/dev/null || date -r "$RATE7_RESET" '+%m/%d' 2>/dev/null)
+  _omc_strftime '%m/%d' "$RATE7_RESET"; RATE7_DATE=$REPLY
   RATE7_SUFFIX=" (${RATE7_DATE})"
 fi
 
