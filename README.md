@@ -16,7 +16,7 @@
 
 ---
 
-English | [繁體中文](README.zh-TW.md)
+<p align="center">English | <a href="README.zh-TW.md">繁體中文</a></p>
 
 This marketplace ships two plugins for [Claude Code](https://claude.com/claude-code): **oh-my-status** and **oh-my-knowledge**. They update together on each release.
 

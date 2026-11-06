@@ -16,7 +16,7 @@
 
 ---
 
-[English](README.md) | 繁體中文
+<p align="center"><a href="README.md">English</a> | 繁體中文</p>
 
 這個 marketplace 為 [Claude Code](https://claude.com/claude-code) 提供兩個外掛：**oh-my-status** 與 **oh-my-knowledge**，每次發版一起更新。
 

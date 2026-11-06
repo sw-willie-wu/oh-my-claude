@@ -1,6 +1,7 @@
 """Convert oh-my-status ANSI output (stdin) to a small terminal-window SVG.
 
-Usage: ansi-to-svg.py OUT.svg BG FG TITLE < render.ansi
+Usage: ansi-to-svg.py [--width N] OUT.svg BG FG TITLE < render.ansi
+  --width N  canvas width in px (default: fit the content; never narrower than it)
 
 Dev tool only (regenerates assets/statusline-*.svg; see render-statusline-svg.sh).
 GitHub shows SVG through <img>, so no web fonts load: Nerd Font icons and the
@@ -66,11 +67,19 @@ def shape(ch, x, y, c):
 
 
 def main():
-    out, bg, fg, title = sys.argv[1:5]
+    args = sys.argv[1:]
+    width = None
+    if "--width" in args:
+        i = args.index("--width")
+        width = int(args[i + 1])
+        del args[i:i + 2]
+    out, bg, fg, title = args[:4]
     lines = sys.stdin.read().replace("\r", "").rstrip("\n").split("\n")
     rows = [parse(l) for l in lines]
     ncols = max(len(r) for r in rows)
     w = round(PAD_X * 2 + ncols * CW)
+    if width is not None:
+        w = max(w, width)   # never clip content; extra space goes on the right
     h = PAD_TOP + len(rows) * LH + 18
     body = []
     for i, cells in enumerate(rows):
