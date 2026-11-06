@@ -184,8 +184,14 @@ done
 grep -iE 'precondition' "$f" 2>/dev/null | grep -F 'migrate this project' | grep -qF 'full harvest' \
   || fail "distill: close-mode precondition (migrate if unmapped, full harvest if mapped) not on one line"
 grep -E 'exit 3' "$f" 2>/dev/null | grep -qiE 'success' || fail "distill: commit.sh exit 3 = success missing"
-r="$SKILLS/distill/reference.md"
-for p in 'cp -p' 'cmp' 'date -r' 'metadata.modified' 'inferred value'; do need "$f" "$p" distill; need "$r" "$p" distill/reference.md; done
+r="$T/distill-ref.md"; cat "$SKILLS/distill/reference.md" "$SKILLS/distill/modes.md" > "$r" 2>/dev/null
+for p in 'date -r' 'metadata.modified' 'inferred value'; do need "$f" "$p" distill; need "$r" "$p" distill/reference.md; done
+need "$f" 'scripts/harvest-copy.sh' distill; need "$r" 'harvest-copy.sh' distill/reference.md
+[ -f "$SKILLS/distill/modes.md" ] || fail "distill/modes.md missing"
+msz="$(wc -c < "$SKILLS/distill/modes.md" 2>/dev/null | tr -d ' ')"; [ "${msz:-0}" -le 8192 ] || fail "distill/modes.md is $msz bytes (> 8192)"
+need "$f" '[modes.md](modes.md)' distill
+need "$r" '<backup dir>' distill/reference.md
+need "$r" '<name>.2.md' distill/reference.md
 grep -F 'already exists' "$f" 2>/dev/null | grep -qF 'attach <p>' || fail "distill: migrate rule 'projects/<p>/ already exists -> attach <p>' missing"
 grep -F 'already exists' "$r" 2>/dev/null | grep -qF 'attach <p>' || fail "reference: migrate rule 'already exists -> attach <p>' missing"
 grep -F 'invalid marker' "$r" 2>/dev/null | grep -qF 'never add a second marker' || fail "reference: attach with invalid marker replaces it"
@@ -193,11 +199,14 @@ need "$r" 'demo-old' distill/reference.md
 end_test
 
 start_test "distill: always-on directive outcomes (spec C rule path, spec G project always-on)"
-f="$SKILLS/distill/SKILL.md"; r="$SKILLS/distill/reference.md"
+f="$SKILLS/distill/SKILL.md"; r="$T/distill-ref.md"; cat "$SKILLS/distill/reference.md" "$SKILLS/distill/modes.md" > "$r" 2>/dev/null
 need "$f" 'always-on directive' distill
 grep -F 'always-on directive' "$f" 2>/dev/null | grep -F 'duplicate' | grep -qF 'all knowledge' || fail "distill: always-on row must state precedence over duplicate/all knowledge"
 grep -F '<n> always-on' "$f" 2>/dev/null | grep -qF '<n> retired' || fail "distill: harvest log line lacks <n> always-on"
 need "$f" 'copy-and-verify' distill
+need "$f" 'scripts/check-move.sh' distill; need "$f" '--spans-only' distill; need "$f" 'not success' distill; need "$f" 'no KB page links it' distill
+need "$r" 'outside inline code' distill/reference.md; need "$r" 'on purpose' distill/reference.md; need "$r" 'extra target' distill/reference.md
+grep -F 'Obsolete / not worth keeping' "$r" 2>/dev/null | grep -qF 'links it' || fail "distill: reference obsolete line must mention that a page links it"
 need "$f" '- always-on rule → [[k:rules/<slug>]] (omk-harvested)' distill
 need "$f" '> Moved: [[k:rules/<slug>]]' distill
 # G: no tags anywhere
@@ -256,6 +265,8 @@ end_test
 start_test "templates/SCHEMA.md and lint skill carry the always-on.md convention (spec G4)"
 S="$PLUGIN/templates/SCHEMA.md"; f="$SKILLS/lint/SKILL.md"
 need "$S" 'always-on.md' SCHEMA
+need "$S" 'no_promote' SCHEMA
+need "$S" 'never link into `_retired/`' SCHEMA
 grep -F 'always-on.md' "$S" | grep -qF 'reserved' || fail "SCHEMA: always-on.md must be a reserved slug"
 grep -F 'always-on.md' "$S" | grep -qF 'session start' || fail "SCHEMA: always-on.md loaded at session start"
 need "$f" 'always-on.md' lint
@@ -274,6 +285,19 @@ need "$f" 'missing_path' lint
 need "$f" 'absolute native path' lint
 need "$f" 'batches' lint
 need "$f" 'lower recall' lint
+grep -F '`promote_candidate`' "$f" | grep -qF 'no_promote' || fail "lint: promote_candidate row must mention no_promote"
+need "$f" 'Concurrent subagent limit reached' lint
+need "$f" 'at most 20' lint
+need "$f" 'foreground' lint
+grep -F 'batches' "$f" | grep -qF 'in parallel' && fail "lint: batches must go in waves, not 'in parallel'"
+lr="$SKILLS/lint/reference.md"
+[ -f "$lr" ] || fail "lint/reference.md missing"
+need "$lr" 'REPORT.md' lint/reference.md; need "$lr" '(`mv`)' lint/reference.md
+need "$f" '[reference.md](reference.md)' lint
+sz="$(wc -c < "$lr" 2>/dev/null | tr -d ' ')"; [ "${sz:-0}" -le 8192 ] || fail "lint/reference.md is $sz bytes (> 8192)"
+need "$f" 'link_into_retired' lint; need "$f" 'suspect_link_rewrite' lint
+need "$lr" 'never `_retired/`' lint/reference.md
+has "$lr" 'or the retired copy' && fail "lint/reference.md still offers a stub to the retired copy"
 grep -F '`missing_path`' "$f" | grep -qF 'report only' || fail "lint: missing_path row must be report only"
 grep -F '`broken_link`' "$f" | grep -qF 'backticks or a fence' || fail "lint: broken_link row must mention backticks or a fence"
 awk '/^## 3\. Mechanical fixes/{m=NR} /^## 4\. Report/{r=NR} END{exit !(m && r && m < r)}' "$f" || fail "lint: report must come after the mechanical fixes"
@@ -358,7 +382,7 @@ need "$r" 'distinct target' distill/reference.md
 same "$r" "reference contain arrow" 'contain' '→ [[k:'
 same "$r" "reference Glob Grep" 'Glob' 'Grep'
 need "$r" 're-judged' distill/reference.md
-for p in '600000' 'unique' 'Edit-only' 'shutil.copy2' 'filecmp'; do need "$r" "$p" distill/reference.md; done
+for p in '600000' 'unique' 'Edit-only' 'harvest-copy.sh' 'shell=True' 'OMK_KNOWLEDGE_DIR'; do need "$r" "$p" distill/reference.md; done
 same "$r" "reference coordinator commit" 'coordinator' 'commit'
 for p in 'Harvest never changes a status-section line' 'verbatim' 'The marker goes after the done block, or after the `## ⚡` block without one' '-newermt' 'at most 30' '(skip if present)' 'progress file or a mixed file' 'Grep `→ \[\[k:`'; do need "$r" "$p" distill/reference.md; done
 same "$r" "reference done heading" 'above the marker line' '已完成'
@@ -375,5 +399,13 @@ same "$h" "handoff between the blocks" 'between the blocks' 'byte-identical'
 need "$h" 'No done block yet' handoff
 grep -qF 'status-section boundary' "$h" && fail "handoff: 'status-section boundary' still present"
 same "$S" "SCHEMA status sentence" '## ⚡' 'distill reference'
+end_test
+
+start_test "supporting skill files carry no placeholders (substituted only in SKILL.md)"
+for f in "$SKILLS"/*/*.md; do
+  [ "${f##*/}" = SKILL.md ] && continue
+  grep -qE '\$\{(CLAUDE_(PLUGIN_[A-Z_]+|SKILL_DIR|SESSION_ID)|user_config\.)' "$f" && fail "${f#"$SKILLS"/} has a \${...} placeholder"
+done
+grep -F 'retire:' "$SKILLS/lint/SKILL.md" | grep -qF 'scripts/commit.sh' || fail "lint: the retire commit command must stay in SKILL.md"
 end_test
 print_summary

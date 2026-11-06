@@ -7,12 +7,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OMC_DIR="${OMC_DIR:-$HOME/.claude/oh-my-claude}"
 OMC_CONF="${OMC_CONF:-$HOME/.claude/oh-my-claude.conf}"
 OMC_CONF_TEMPLATE="${OMC_CONF_TEMPLATE:-$SCRIPT_DIR/oh-my-claude.conf}"
+OMC_STATE_DIR="${OMC_STATE_DIR:-$HOME/.claude/oh-my-claude/state}"
 
 mkdir -p "$OMC_DIR"
 cp "$SCRIPT_DIR/statusline.sh" "$OMC_DIR/"
 cp -r "$SCRIPT_DIR/themes" "$OMC_DIR/"
 cp -r "$SCRIPT_DIR/layouts" "$OMC_DIR/"
-cp -r "$SCRIPT_DIR/lib" "$OMC_DIR/"
 cp "$SCRIPT_DIR/preview.sh" "$OMC_DIR/"
 cp "$SCRIPT_DIR/generate-preview.sh" "$OMC_DIR/"
 
@@ -37,6 +37,37 @@ if [ -r "$SCRIPT_DIR/lib/conf-keys.sh" ]; then
     keys_csv="$(printf '%s' "$missing" | paste -sd, -)"
     printf '%s\n' "[oh-my-status] Context for the assistant: ${n} new config option(s) (${keys_csv}) exist in the bundled template but are not in the user's ~/.claude/oh-my-claude.conf. At a natural moment, mention to the user once (not repeatedly within this session) that running /oh-my-status:setup will add the new options with safe defaults while preserving existing values."
   fi
+fi
+
+# One-time cleanup of 2.x Workers leftovers (named files only; see spec 2.2).
+# Nothing here recurses into user-overridable dirs: hooks/ and lib/ are only
+# rmdir'd (which fails harmlessly when a user file is still inside). Every
+# loop ends in `|| :` because `set -e` would otherwise take a false trailing
+# `[ ... ] && ...` for a failure.
+old=()
+for p in "$OMC_STATE_DIR"/state-*.tsv "$OMC_STATE_DIR"/state-*.tsv.* "$OMC_STATE_DIR/state.lock" \
+         "$OMC_STATE_DIR/track-workers.log" "$OMC_DIR/hooks/track-workers.sh" \
+         "$OMC_DIR/lib/state-lock.sh" "$OMC_DIR/lib/conf-keys.sh"; do
+  [ -e "$p" ] && old+=("$p")        # unmatched glob stays literal -> -e false
+done || :
+[ ${#old[@]} -eq 0 ] || { rm -rf -- "${old[@]}"; rmdir "$OMC_DIR/hooks" "$OMC_DIR/lib"; } 2>/dev/null || :
+
+# Stale state sweep (moved here from the removed track-workers.sh; runs every
+# SessionStart for plugin installs, and on install.sh for standalone ones).
+# 24h age policy on the state dir. gitcache-* is the statusline's git-info
+# cache (an actively used cache is rewritten on every miss, so only dirs not
+# visited in 24h age out); account-* is the account cache. A handoff-<sid>
+# marker (which records the usage % of its window) is only removed when
+# ctx-<sid> is missing or also older than 24h, i.e. the session is gone; this
+# runs before the ctx-* sweep so the check sees the real mtime.
+if [ -d "$OMC_STATE_DIR" ]; then
+  find "$OMC_STATE_DIR" -maxdepth 1 -name 'gitcache-*' -type f -mmin +1440 -delete 2>/dev/null || :
+  find "$OMC_STATE_DIR" -maxdepth 1 -name 'account-*'  -type f -mmin +1440 -delete 2>/dev/null || :
+  find "$OMC_STATE_DIR" -maxdepth 1 -name 'handoff-*' -type f -mmin +1440 2>/dev/null | while IFS= read -r hf; do
+    hn="${hf##*/}"
+    [ -z "$(find "$OMC_STATE_DIR" -maxdepth 1 -name "ctx-${hn#handoff-}" -type f ! -mmin +1440 2>/dev/null)" ] && rm -f "$hf" 2>/dev/null
+  done || :
+  find "$OMC_STATE_DIR" -maxdepth 1 -name 'ctx-*' -type f -mmin +1440 -delete 2>/dev/null || :
 fi
 
 exit 0

@@ -10,350 +10,21 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 STATUSLINE="$REPO_ROOT/plugins/oh-my-status/statusline.sh"
 
-# Each test sets up its own session_id and state file under ~/.claude/oh-my-claude/state/
-# (real path, since statusline.sh derives it from $HOME). Cleanup after each test.
-RENDER_STATE_DIR="$HOME/.claude/oh-my-claude/state"
-mkdir -p "$RENDER_STATE_DIR"
-
-cleanup_render_state() {
-  rm -f "$RENDER_STATE_DIR"/state-render-test-*.tsv
-  rm -f "$RENDER_STATE_DIR"/ctx-render-test-* "$RENDER_STATE_DIR"/handoff-render-test-*
-}
-
 # Strip ANSI escape sequences so we can measure visible width and assert on text.
 strip_ansi() {
   sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g'
 }
 
-# Run statusline with given session_id and capture stdout. emit_workers always
-# runs BEFORE the layout's render(), so the worker lines are guaranteed to be
-# the leading lines of the output — assertions that need only worker content
-# can use `head -1` or grep for worker-specific patterns. Layout output (model,
-# bars, etc.) follows but doesn't interfere with these tests.
-run_workers() {
-  local sid="$1" cols="${2:-120}"
-  # Isolate from user's oh-my-claude.conf so tests don't depend on
-  # whichever LAYOUT/THEME the developer happens to use locally.
-  COLUMNS="$cols" OMC_CONF=/dev/null bash -c "
-    echo '{\"session_id\":\"$sid\",\"model\":{\"display_name\":\"X\"},\"workspace\":{\"current_dir\":\"/tmp\"}}' \
-      | bash $STATUSLINE 2>/dev/null
-  "
+# Render with a given session_id from a non-repo cwd. State goes to
+# $OMC_STATE_DIR (set by test-helpers.sh to a private mktemp dir), never to
+# the real ~/.claude.
+run_render() {  # $1=sid $2=cols
+  local nogit; nogit=$(mktemp -d)
+  ( cd "$nogit" && COLUMNS="${2:-120}" OMC_CONF=/dev/null bash -c "printf '%s' '{\"session_id\":\"$1\",\"model\":{\"display_name\":\"X\"},\"workspace\":{\"current_dir\":\"/tmp\"}}' | bash '$STATUSLINE' 2>/dev/null" )
+  rm -rf "$nogit"
 }
 
-cleanup_render_state
 printf 'Running statusline render tests\n\n'
-
-start_test "long line truncates and elapsed appears exactly once"
-SID="render-test-002"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-LONG_DESC="a very long description that exceeds terminal width definitely and goes on and on"
-printf 'shell\ttoolu_a2\t-\t%s\tsleep 99\t%s\n' "$LONG_DESC" "$((NOW - 12))" > "$SF"
-OUT="$(run_workers "$SID" 60 | strip_ansi)"
-LEN=$(printf '%s' "$OUT" | head -1 | awk '{print length}')
-[ "$LEN" -le 58 ] || { printf '    FAIL: line len=%d exceeds 58 (cols=60-2)\n      got: %q\n' "$LEN" "$OUT" >&2; TEST_FAILED=1; }
-COUNT_NS=$(printf '%s' "$OUT" | head -1 | grep -oE '[0-9]+s' | wc -l | tr -d ' ')
-assert_eq "1" "$COUNT_NS" "elapsed (Ns) should appear exactly once on first line (truncation regression)"
-echo "$OUT" | grep -qF '...' \
-  || { printf '    FAIL: ... marker missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "description with escaped tab/newline is unescaped on render"
-SID="render-test-003"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_a3\t-\ta\\tb\\nc\tsleep 99\t%s\n' "$((NOW - 5))" > "$SF"
-OUT="$(run_workers "$SID" 120 | strip_ansi)"
-TAB_PATTERN=$'a\tb'
-echo "$OUT" | head -1 | grep -qF "$TAB_PATTERN" \
-  || { printf '    FAIL: tab not unescaped in output\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "WORKERS_ENABLED=false produces zero worker lines"
-SID="render-test-004"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_a4\t-\tshould not appear\tsleep 99\t%s\n' "$((NOW - 1))" > "$SF"
-OUT="$(WORKERS_ENABLED=false run_workers "$SID" 120 | strip_ansi)"
-echo "$OUT" | grep -qF 'should not appear' \
-  && { printf '    FAIL: worker line emitted despite WORKERS_ENABLED=false\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "corrupt row (missing start_unix) is skipped silently"
-SID="render-test-005"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-# Row missing the trailing start_unix column.
-printf 'shell\ttoolu_a5\t-\tcorrupt row no timestamp\tsleep 99\n' > "$SF"
-OUT="$(run_workers "$SID" 120 | strip_ansi)"
-echo "$OUT" | grep -qF 'corrupt row no timestamp' \
-  && { printf '    FAIL: corrupt row should not render\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "is_alive returns true for running PID, false for dead PID"
-SID="render-test-isalive"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 30 &
-LIVE_PID=$!
-DEAD_PID=99999999
-ALIVE_OUT=$(bash -c "
-  source '$STATUSLINE.lib_test_loader.sh' 2>/dev/null || true
-  is_alive $LIVE_PID && echo ALIVE || echo DEAD
-")
-DEAD_OUT=$(bash -c "
-  source '$STATUSLINE.lib_test_loader.sh' 2>/dev/null || true
-  is_alive $DEAD_PID && echo ALIVE || echo DEAD
-")
-kill "$LIVE_PID" 2>/dev/null
-wait "$LIVE_PID" 2>/dev/null
-assert_eq "ALIVE" "$ALIVE_OUT" "running PID should be alive"
-assert_eq "DEAD" "$DEAD_OUT" "nonexistent PID should be dead"
-end_test
-
-
-start_test "prune_state_and_emit drops dead shell row from file (unit)"
-SID="render-test-prune-unit"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-DEAD_PID=99999999
-printf 'shell\ttoolu_b\tbash_x\tdesc\tcmd\t%s\t%s\n' "$NOW" "$DEAD_PID" > "$SF"
-RESULT=$(bash -c "
-  OMC_TEST_LIB_ONLY=1
-  source '$STATUSLINE'
-  WORKERS_STATE_FILE='$SF'
-  SESSION_ID='$SID'
-  prune_state_and_emit
-")
-assert_line_count "$SF" 0 "dead row should be removed by prune"
-end_test
-
-start_test "prune drops shell row with dead PID, keeps alive shell"
-SID="render-test-prune-1"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 30 &
-LIVE_PID=$!
-DEAD_PID=99999999
-{
-  printf 'shell\ttoolu_b_dead\tbash_dead\tdead bash\tsleep 99\t%s\t%s\n' "$NOW" "$DEAD_PID"
-  printf 'shell\ttoolu_b_live\tbash_live\tlive bash\tsleep 99\t%s\t%s\n' "$NOW" "$LIVE_PID"
-} > "$SF"
-OUT=$(run_workers "$SID" 200 | strip_ansi)
-kill "$LIVE_PID" 2>/dev/null
-wait "$LIVE_PID" 2>/dev/null
-echo "$OUT" | grep -qF 'live bash' \
-  || { printf '    FAIL: alive shell missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-echo "$OUT" | grep -qvF 'dead bash' \
-  || { printf '    FAIL: dead shell still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'bash_dead' "$SF" \
-  && { printf '    FAIL: dead row not removed from state\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "row with valid col3 but col7 empty (post inter-update gap) is kept within grace"
-SID="render-test-prune-postgap"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-# Simulates the window between post's first update_col (col3=bg id) and the
-# second (col7=PID). No output file present; only grace should keep it.
-printf 'shell\ttoolu_postgap\tbash_realid\tinflight\tsleep 99\t%s\n' "$NOW" > "$SF"
-OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-echo "$OUT" | grep -qF 'inflight' \
-  || { printf '    FAIL: post-gap row pruned during grace\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'toolu_postgap' "$SF" \
-  || { printf '    FAIL: post-gap row removed from state file during grace\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "row with valid col3 but col7 empty beyond grace pruned when no live process"
-SID="render-test-prune-postgap-stale"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-# col7 empty, beyond grace, no process matches the command → is_shell_alive
-# false → row pruned.
-printf 'shell\ttoolu_postgap2\tbash_missing\tdead\tomc_no_proc_%s_%s\t%s\n' "$$" "$RANDOM" "$((NOW - 120))" > "$SF"
-OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-echo "$OUT" | grep -qvF 'dead' \
-  || { printf '    FAIL: stale row with no live process still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'toolu_postgap2' "$SF" \
-  && { printf '    FAIL: stale row not pruned from state file\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "placeholder shell row (col3=- col7 missing) survives prune within grace"
-SID="render-test-prune-placeholder-1"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_pre1\t-\tjust started\tsleep 999\t%s\n' "$NOW" > "$SF"
-OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-echo "$OUT" | grep -qF 'just started' \
-  || { printf '    FAIL: placeholder row pruned during grace window\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'toolu_pre1' "$SF" \
-  || { printf '    FAIL: placeholder row removed from state file during grace\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "stale placeholder row is reaped after grace window"
-SID="render-test-prune-placeholder-2"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_pre2\t-\torphaned\tsleep 999\t%s\n' "$((NOW - 120))" > "$SF"
-OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-echo "$OUT" | grep -qvF 'orphaned' \
-  || { printf '    FAIL: stale placeholder still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'toolu_pre2' "$SF" \
-  && { printf '    FAIL: stale placeholder row not pruned from state file\n' >&2; TEST_FAILED=1; }
-end_test
-
-# --- bg-Bash render-side liveness: is_shell_alive helper ---
-call_is_shell_alive() {
-  # $1 = command string to fingerprint-check
-  bash -c "
-    OMC_TEST_LIB_ONLY=1
-    source '$STATUSLINE'
-    is_shell_alive \"\$1\" && echo YES || echo NO
-  " _ "$1"
-}
-
-start_test "is_shell_alive: YES for a live eval-wrapped bg process (needle path)"
-TAG="omcprobe_$$_$RANDOM"
-( /usr/bin/bash -c "eval 'sleep 8 && : $TAG' < /dev/null" ) &
-WRAP_PID=$!
-sleep 0.5
-RESULT=$(call_is_shell_alive "sleep 8 && : $TAG")
-kill "$WRAP_PID" 2>/dev/null; pkill -f "$TAG" 2>/dev/null; wait "$WRAP_PID" 2>/dev/null
-assert_eq "YES" "$RESULT" "running eval-wrapped process must be detected alive"
-end_test
-
-start_test "is_shell_alive: YES for a live bare process (index==1 path)"
-sleep 8 &
-BARE_PID=$!
-sleep 0.3
-RESULT=$(call_is_shell_alive "sleep 8")
-kill "$BARE_PID" 2>/dev/null; wait "$BARE_PID" 2>/dev/null
-assert_eq "YES" "$RESULT" "running bare process must be detected alive"
-end_test
-
-start_test "is_shell_alive: NO when no matching process exists"
-RESULT=$(call_is_shell_alive "omc_no_such_command_$$_$RANDOM xyzzy")
-assert_eq "NO" "$RESULT" "absent command must be reported dead"
-end_test
-
-start_test "is_shell_alive: NO for empty command"
-RESULT=$(call_is_shell_alive "")
-assert_eq "NO" "$RESULT" "empty command fingerprint must be dead"
-end_test
-
-# --- item-2: is_shell_alive 3-way (0 alive / 1 ps-worked-but-absent /
-# 2 ps-unusable) + rc-aware prune. Deterministic ps via injected ps()
-# function in the SAME bash -c as source (so it shadows the bare `ps`
-# calls); NOT run_workers (child bash can't see the function). ---
-call_isa_rc() {  # $1=command  $2=ps() definition → prints is_shell_alive rc
-  bash -c "
-    OMC_TEST_LIB_ONLY=1
-    source '$STATUSLINE'
-    $2
-    is_shell_alive \"\$1\"; echo \$?
-  " _ "$1"
-}
-
-start_test "is_shell_alive: rc=2 when ps is entirely unusable (ps-blind box)"
-RC=$(call_isa_rc "sleep 9 omc_t1" 'ps(){ :; }')
-assert_eq "2" "$RC" "all-empty ps → unknown(2), NOT dead(1)"
-end_test
-
-start_test "is_shell_alive: rc=0 when ps works and fingerprint matches"
-RC=$(call_isa_rc "omc_probe_t2" 'ps(){ printf "H H H H H H\nu p q r s omc_probe_t2\n"; }')
-assert_eq "0" "$RC" "ps output with matching cmd → alive(0)"
-end_test
-
-start_test "is_shell_alive: rc=1 when ps works but no match (still dead)"
-RC=$(call_isa_rc "omc_absent_t3" 'ps(){ printf "UID PID PPID C STIME TTY TIME CMD\nu 1 0 0 t ? 0 /sbin/init\n"; }')
-assert_eq "1" "$RC" "ps worked, no match → dead(1) — ps-working contract"
-end_test
-
-start_test "is_shell_alive: rc=1 for empty command even if ps unusable"
-RC=$(call_isa_rc "" 'ps(){ :; }')
-assert_eq "1" "$RC" "empty fp is dead(1), not a ps problem"
-end_test
-
-# prune: in-subshell source pattern (I1) so the injected ps() shadows
-# is_shell_alive's bare ps. Row: shell, col7 empty, col3 != "-", past
-# grace (grace=30). col6 drives age (race-free; no OMC_NOW_OVERRIDE seam).
-prune_with_ps() {  # $1=SF $2=SID $3=ps() def $4=WORKERS_SHELL_UNKNOWN_MAX_AGE(opt)
-  bash -c "
-    OMC_TEST_LIB_ONLY=1
-    source '$STATUSLINE'
-    $3
-    WORKERS_STATE_FILE='$1'; SESSION_ID='$2'
-    WORKERS_PLACEHOLDER_GRACE_SEC=30
-    ${4:+WORKERS_SHELL_UNKNOWN_MAX_AGE=$4}
-    prune_state_and_emit
-  " >/dev/null 2>&1
-}
-
-start_test "prune: ps-unusable, PID-less, past grace, age<=cap → row KEPT"
-SID="render-test-isa-keep"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-# age 45: past grace(30), within default cap(60). col7 absent, col3 != "-".
-printf 'shell\ttoolu_keep\tbash_x\tdesc\tomc_cmd_keep\t%s\n' "$((NOW - 45))" > "$SF"
-prune_with_ps "$SF" "$SID" 'ps(){ :; }'
-grep -qF 'toolu_keep' "$SF" \
-  || { printf '    FAIL: live-unknowable shell false-pruned on ps-blind box\n      SF: %q\n' "$(cat "$SF")" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "prune: ps-unusable, PID-less, past grace, age>cap → row reaped (bounded)"
-SID="render-test-isa-cap"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_cap\tbash_x\tdesc\tomc_cmd_cap\t%s\n' "$((NOW - 45))" > "$SF"
-prune_with_ps "$SF" "$SID" 'ps(){ :; }' 0   # cap=0 → age 45 > 0 → reap
-grep -qF 'toolu_cap' "$SF" \
-  && { printf '    FAIL: ps-unknown dead shell not bounded by UNKNOWN_MAX_AGE\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "prune: ps works but no match, PID-less past grace → reaped (rc1 unchanged)"
-SID="render-test-isa-nomatch"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_nm\tbash_x\tdesc\tomc_cmd_nm\t%s\n' "$((NOW - 45))" > "$SF"
-prune_with_ps "$SF" "$SID" 'ps(){ printf "UID PID CMD\nu 1 /sbin/init\n"; }'
-grep -qF 'toolu_nm' "$SF" \
-  && { printf '    FAIL: ps-working no-match shell not pruned (rc1 contract broken)\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "prune: ps-unusable + corrupt col6 (0) → reaped (cannot bound)"
-SID="render-test-isa-corrupt"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-printf 'shell\ttoolu_cor\tbash_x\tdesc\tomc_cmd_cor\t0\n' > "$SF"
-prune_with_ps "$SF" "$SID" 'ps(){ :; }'
-grep -qF 'toolu_cor' "$SF" \
-  && { printf '    FAIL: corrupt-col6 ps-unknown row not reaped\n' >&2; TEST_FAILED=1; }
-end_test
-
-# --- Task 2: prune shell branch uses is_shell_alive (not sticky output file) ---
-start_test "prune drops stale shell row when process dead despite sticky .output file"
-SID="render-test-shell-sticky-dead"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-TMPROOT=$(mktemp -d)
-WD_ID='-tmp'
-mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
-touch "$TMPROOT/claude/$WD_ID/$SID/tasks/bash_sticky.output"   # sticky file exists
-DEADCMD="omc_dead_cmd_$$_$RANDOM noproc"
-printf 'shell\ttoolu_sticky\tbash_sticky\tdesc\t%s\t%s\t0\n' "$DEADCMD" "$((NOW - 9999))" > "$SF"
-OUT=$(TEMP="$TMPROOT" WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-grep -qF 'toolu_sticky' "$SF" \
-  && { printf '    FAIL: dead shell kept because sticky .output still present (the bug)\n' >&2; TEST_FAILED=1; }
-rm -rf "$TMPROOT"
-end_test
-
-start_test "prune keeps shell row when matching process alive (col7=0, beyond grace)"
-SID="render-test-shell-live-noproc-pid"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 8 &
-LIVEPID=$!
-sleep 0.3
-printf 'shell\ttoolu_livecmd\tbash_live\tdesc\tsleep 8\t%s\t0\n' "$((NOW - 9999))" > "$SF"
-OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-kill "$LIVEPID" 2>/dev/null; wait "$LIVEPID" 2>/dev/null
-grep -qF 'toolu_livecmd' "$SF" \
-  || { printf '    FAIL: live-process shell row pruned (col7=0 fingerprint path)\n' >&2; TEST_FAILED=1; }
-end_test
 
 # --- Task A: git_info() extracted, pure, 6 TAB-joined fields ---
 call_git_info() {
@@ -414,12 +85,110 @@ assert_eq "6" "$GI_NF" "detached HEAD still emits 6 fields"
 rm -rf "$GI_DET"
 end_test
 
+# --- P4 Task 4.1: _omc_git_walk (builtin repo discovery) ---
+# Every row runs in its own process: the walk memoizes on $PWD, and GIT_* env
+# changes inside one process would see a stale result.
+gi_mkrepo() {  # $1=dir $2=initial branch name
+  mkdir -p "$1"
+  ( cd "$1" && git init -q . && git config user.email t@t.t && git config user.name t \
+      && echo a > f.txt && git add f.txt && git commit -qm i && git branch -m "$2" )
+}
+walk_in() {  # $1=dir ; extra env via prefix ; prints FOUND|ROOT|DIR|COMMON
+  ( cd "$1" && OMC_CONF=/dev/null bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "$0"
+      _omc_git_walk
+      printf "%s|%s|%s|%s" "$_OMC_GIT_FOUND" "$_OMC_GIT_ROOT" "$_OMC_GIT_DIR" "$_OMC_GIT_COMMON"' "$STATUSLINE" )
+}
+phys() { ( cd "$1" && pwd -P ); }   # normalized physical path (resolves .. and symlinks)
+
+start_test "walk: plain repo, cwd in a subdir"
+WR=$(mktemp -d); gi_mkrepo "$WR" main; mkdir -p "$WR/sub/deep"; P=$(phys "$WR")
+IFS='|' read -r f r d c <<<"$(walk_in "$WR/sub/deep")"
+assert_eq "repo" "$f" "found"; assert_eq "$P" "$r" "root"
+assert_eq "$P/.git" "$d" "dir"; assert_eq "$P/.git" "$c" "common"
+rm -rf "$WR"
+end_test
+
+start_test "walk: worktree resolves the relative commondir"
+WR=$(mktemp -d); gi_mkrepo "$WR/main" main; git -C "$WR/main" worktree add -q "$WR/wt" -b wtb >/dev/null 2>&1
+P=$(phys "$WR")
+IFS='|' read -r f r d c <<<"$(walk_in "$WR/wt")"
+assert_eq "repo" "$f" "found"; assert_eq "$P/wt" "$r" "root"
+case "$(phys "$d")" in "$P/main/.git/worktrees/"*) ;; *) printf '    FAIL: dir %s not under main/.git/worktrees/\n' "$d" >&2; TEST_FAILED=1 ;; esac
+assert_eq "$P/main/.git" "$(phys "$c")" "common (relative commondir resolved)"
+rm -rf "$WR"
+end_test
+
+start_test "walk: worktree with an absolute commondir"
+WR=$(mktemp -d); gi_mkrepo "$WR/main" main; git -C "$WR/main" worktree add -q "$WR/wt" -b wtb >/dev/null 2>&1
+ABS=$(phys "$WR/main/.git"); command -v cygpath >/dev/null 2>&1 && ABS=$(cygpath -m "$ABS")
+for cdf in "$WR"/main/.git/worktrees/*/commondir; do printf '%s\n' "$ABS" > "$cdf"; done
+IFS='|' read -r f r d c <<<"$(walk_in "$WR/wt")"
+assert_eq "repo" "$f" "found"; assert_eq "$ABS" "$c" "common is the absolute path as written"
+rm -rf "$WR"
+end_test
+
+start_test "walk: a .git dir without HEAD, or without objects/, above a real repo is skipped"
+WR=$(mktemp -d); gi_mkrepo "$WR" main; P=$(phys "$WR")
+mkdir -p "$WR/a/.git" "$WR/b/.git"; echo 'ref: refs/heads/x' > "$WR/b/.git/HEAD"
+IFS='|' read -r f r d c <<<"$(walk_in "$WR/a")"
+assert_eq "repo" "$f" "no-HEAD: found"; assert_eq "$P" "$r" "no-HEAD: real repo root"
+IFS='|' read -r f r d c <<<"$(walk_in "$WR/b")"
+assert_eq "repo" "$f" "no-objects: found"; assert_eq "$P" "$r" "no-objects: real repo root"
+rm -rf "$WR"
+end_test
+
+start_test "walk: non-repo directory finds nothing"
+WR=$(mktemp -d)
+assert_eq "none|||" "$(walk_in "$WR")" "non-repo"
+rm -rf "$WR"
+end_test
+
+start_test "walk: GIT_DIR set -> env (no shortcut)"
+WR=$(mktemp -d)
+assert_eq "env" "$(GIT_DIR=x walk_in "$WR" | cut -d'|' -f1)" "GIT_DIR"
+assert_eq "env" "$(GIT_WORK_TREE=x walk_in "$WR" | cut -d'|' -f1)" "GIT_WORK_TREE"
+assert_eq "env" "$(GIT_COMMON_DIR=x walk_in "$WR" | cut -d'|' -f1)" "GIT_COMMON_DIR"
+rm -rf "$WR"
+end_test
+
+start_test "walk: empty \$PWD inside the script is restored by cd -P -e ."
+WR=$(mktemp -d); gi_mkrepo "$WR" main; mkdir -p "$WR/sub"; P=$(phys "$WR")
+OUT=$( cd "$WR/sub" && OMC_CONF=/dev/null bash -c '
+    OMC_TEST_LIB_ONLY=1
+    source "$0"
+    PWD=""
+    _omc_git_walk
+    printf "%s|%s" "$_OMC_GIT_FOUND" "$_OMC_GIT_ROOT"' "$STATUSLINE" )
+assert_eq "repo|$P" "$OUT" "found with empty PWD"
+rm -rf "$WR"
+end_test
+
+start_test "walk: cwd reached through a symlink resolves to the physical repo"
+WR=$(mktemp -d); WL=$(mktemp -d); gi_mkrepo "$WR" main; mkdir -p "$WR/sub"; ln -s "$WR/sub" "$WL/link" 2>/dev/null
+if [ -L "$WL/link" ]; then
+  P=$(phys "$WR")
+  OUT=$( cd "$WL/link" && OMC_CONF=/dev/null bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "$0"
+      _omc_git_walk
+      printf "%s|%s" "$_OMC_GIT_FOUND" "$_OMC_GIT_ROOT"' "$STATUSLINE" )
+  assert_eq "repo|$P" "$OUT" "found via symlink, physical root"
+else
+  printf '    SKIP: ln -s does not create symlinks here\n'
+fi
+rm -rf "$WR" "$WL"
+end_test
+
 # --- Task B: cached_git_info() + GIT_CACHE_TTL ---
 # Cache-layer tests stub git_info() by REDEFINING it after sourcing (function
 # resolution is dynamic, so cached_git_info calls the stub). This decouples
-# the cache logic from real git — git parsing is already covered by Task A's
-# git_info tests. The stub bumps a persistent counter file so HIT (no bump)
-# vs MISS (bump) is observable across separate processes.
+# the cache logic from real git. The stub bumps a persistent counter file so HIT
+# (no bump) vs MISS (bump) is observable across separate processes. Work dirs
+# get a minimal fake repo (.git/HEAD + .git/objects/) so the walk finds a
+# "repo" and the stub is still reached; its HEAD is old, so the stamp is
+# strictly newer. The clock is driven by OMC_NOW_OVERRIDE.
 # $1=workdir(cd target → $PWD = cache key) $2=OMC_STATE_DIR $3=GIT_CACHE_TTL
 # $4=stub output (default well-formed 6-field line)
 cgi() {
@@ -434,56 +203,46 @@ cgi() {
       cached_git_info
   ' )
 }
+cgi_wd() {  # a temp dir with a minimal fake repo whose files are old
+  local d; d=$(mktemp -d); mkdir -p "$d/.git/objects"; echo 'ref: refs/heads/x' > "$d/.git/HEAD"
+  touch -d @1000000000 "$d/.git/HEAD" "$d/.git/objects"; printf '%s' "$d"
+}
+cache_file() { ls "$1"/gitcache-* 2>/dev/null | grep -v '\.stamp$' | head -1; }
 STUB_LINE=$(printf 'stub\t1\t2\t3\t4\t5')
+E=1000000000
 
-start_test "cached_git_info: miss invokes git_info once and creates the cache file"
-ST=$(mktemp -d); WD=$(mktemp -d)
-OUT=$(cgi "$WD" "$ST" 3)
+start_test "cached_git_info: miss invokes git_info once; cache file is '<epoch>TAB<line>' + newline; stamp written"
+ST=$(mktemp -d); WD=$(cgi_wd)
+OUT=$(OMC_NOW_OVERRIDE=$E cgi "$WD" "$ST" 3)
 assert_eq "$STUB_LINE" "$OUT" "miss must return git_info output"
 assert_eq "1" "$(cat "$ST/.gitcnt")" "git_info called exactly once on miss"
-CF=$(ls "$ST"/gitcache-* 2>/dev/null)
+CF=$(cache_file "$ST")
 [ -n "$CF" ] || { printf '    FAIL: no cache file created\n' >&2; TEST_FAILED=1; }
-assert_eq "$STUB_LINE" "$(cat "$CF" 2>/dev/null)" "cache file content == git_info output"
+assert_eq "$(printf '%s\t%s\nX' "$E" "$STUB_LINE")" "$(cat "$CF" 2>/dev/null; printf X)" "cache file content incl. trailing newline"
+[ -f "$CF.stamp" ] || { printf '    FAIL: no .stamp file\n' >&2; TEST_FAILED=1; }
 rm -rf "$ST" "$WD"
 end_test
 
 start_test "cached_git_info: fresh cache is a HIT (git_info not re-invoked)"
-ST=$(mktemp -d); WD=$(mktemp -d)
-OUT1=$(cgi "$WD" "$ST" 3); OUT2=$(cgi "$WD" "$ST" 3)
+ST=$(mktemp -d); WD=$(cgi_wd)
+OUT1=$(cgi "$WD" "$ST" 300); OUT2=$(cgi "$WD" "$ST" 300)
 assert_eq "1" "$(cat "$ST/.gitcnt")" "second call must be a cache HIT (counter stays 1)"
 assert_eq "$STUB_LINE" "$OUT2" "HIT returns cached content"
 rm -rf "$ST" "$WD"
 end_test
 
 start_test "cached_git_info: TTL boundary is <= (age==TTL HIT, age==TTL+1 MISS)"
-# Deterministic: pin the cache mtime to a fixed epoch E and drive cached_git_info's
-# clock via OMC_NOW_OVERRIDE, so age = NOW-E is exact regardless of how slow the
-# box is. (The old form raced wall-clock between `touch` and the 2nd call's own
-# date+%s; on a loaded MSYS box age slipped to TTL+1 → false MISS → flaky.)
-ST=$(mktemp -d); WD=$(mktemp -d)
-E=1000000000
-cgi "$WD" "$ST" 3 >/dev/null               # miss → counter=1, cache written
-CF=$(ls "$ST"/gitcache-*)
-touch -d "@$E" "$CF"                        # mtime = E (fixed)
-OMC_NOW_OVERRIDE=$((E + 3)) cgi "$WD" "$ST" 3 >/dev/null   # age == TTL(3)
+ST=$(mktemp -d); WD=$(cgi_wd)
+OMC_NOW_OVERRIDE=$E cgi "$WD" "$ST" 3 >/dev/null               # miss → counter=1
+OMC_NOW_OVERRIDE=$((E + 3)) cgi "$WD" "$ST" 3 >/dev/null       # age == TTL(3)
 assert_eq "1" "$(cat "$ST/.gitcnt")" "age == TTL must be a HIT (<= boundary, not <)"
-OMC_NOW_OVERRIDE=$((E + 4)) cgi "$WD" "$ST" 3 >/dev/null   # age == TTL+1
+OMC_NOW_OVERRIDE=$((E + 4)) cgi "$WD" "$ST" 3 >/dev/null       # age == TTL+1
 assert_eq "2" "$(cat "$ST/.gitcnt")" "age == TTL+1 must MISS (boundary excludes above)"
 rm -rf "$ST" "$WD"
 end_test
 
-start_test "cached_git_info: age beyond TTL is a MISS (cache rewritten)"
-ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" 3 >/dev/null
-CF=$(ls "$ST"/gitcache-*)
-touch -d "@$(( $(date +%s) - 4 ))" "$CF"   # TTL+1 old
-cgi "$WD" "$ST" 3 >/dev/null
-assert_eq "2" "$(cat "$ST/.gitcnt")" "expired cache must recompute"
-rm -rf "$ST" "$WD"
-end_test
-
 start_test "cached_git_info: GIT_CACHE_TTL=0 disables caching (no file, every call computes)"
-ST=$(mktemp -d); WD=$(mktemp -d)
+ST=$(mktemp -d); WD=$(cgi_wd)
 cgi "$WD" "$ST" 0 >/dev/null; cgi "$WD" "$ST" 0 >/dev/null
 assert_eq "2" "$(cat "$ST/.gitcnt")" "TTL=0 must compute every call"
 ls "$ST"/gitcache-* >/dev/null 2>&1 \
@@ -492,70 +251,143 @@ rm -rf "$ST" "$WD"
 end_test
 
 start_test "cached_git_info: distinct \$PWD yields distinct cache files"
-ST=$(mktemp -d); WD1=$(mktemp -d); WD2=$(mktemp -d)
+ST=$(mktemp -d); WD1=$(cgi_wd); WD2=$(cgi_wd)
 cgi "$WD1" "$ST" 3 >/dev/null; cgi "$WD2" "$ST" 3 >/dev/null
-N=$(ls "$ST"/gitcache-* 2>/dev/null | wc -l | tr -d ' ')
+N=$(ls "$ST"/gitcache-* 2>/dev/null | grep -vc '\.stamp$')
 assert_eq "2" "$N" "two different workdirs must key two different cache files"
 rm -rf "$ST" "$WD1" "$WD2"
 end_test
 
-start_test "cached_git_info: malformed (5-field) cache file fails the guard and recomputes"
-ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" 3 >/dev/null            # counter=1, valid cache
-CF=$(ls "$ST"/gitcache-*)
-printf 'bad\t1\t2\t3\t4' > "$CF"        # 5 fields, fresh mtime
-cgi "$WD" "$ST" 3 >/dev/null
-assert_eq "2" "$(cat "$ST/.gitcnt")" "5-field cache must fail guard → recompute"
-rm -rf "$ST" "$WD"
-end_test
-
-start_test "cached_git_info: empty (0-byte) cache file fails the guard and recomputes"
-ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" 3 >/dev/null
-CF=$(ls "$ST"/gitcache-*)
-: > "$CF"                               # 0-byte, fresh mtime
-cgi "$WD" "$ST" 3 >/dev/null
-assert_eq "2" "$(cat "$ST/.gitcnt")" "0-byte cache must fail guard → recompute"
-rm -rf "$ST" "$WD"
+# Guard tests: overwrite the cache with a damaged file after a normal miss at
+# epoch E, then render again at E (age 0, so only the guard can cause a miss).
+guard_case() {  # $1=label $2=printf format (one %s = E)
+  local ST WD CF
+  ST=$(mktemp -d); WD=$(cgi_wd)
+  OMC_NOW_OVERRIDE=$E cgi "$WD" "$ST" 300 >/dev/null            # counter=1, valid cache
+  CF=$(cache_file "$ST")
+  # shellcheck disable=SC2059
+  printf "$2" "$E" > "$CF"
+  OMC_NOW_OVERRIDE=$E cgi "$WD" "$ST" 300 >/dev/null
+  assert_eq "2" "$(cat "$ST/.gitcnt")" "$1 must fail the guard → recompute"
+  rm -rf "$ST" "$WD"
+}
+start_test "cached_git_info: malformed cache files fail the guard and recompute"
+guard_case "5-field line" '%s\tbad\t1\t2\t3\t4\n'
+guard_case "0-byte file" ''
+guard_case "line without trailing newline" '%s\tstub\t1\t2\t3\t4\t5'
+guard_case "old 6-field format" 'stub\t1\t2\t3\t4\t5\n'
+guard_case "epoch with a leading zero (09, invalid octal)" '09\tmain\t0\t0\t0\t0\t0\n'
 end_test
 
 start_test "cached_git_info: valid non-repo line passes the guard and HITs"
-ST=$(mktemp -d); WD=$(mktemp -d)
+ST=$(mktemp -d); WD=$(cgi_wd)
 NONREPO=$(printf '\t0\t0\t0\t0\t0')
-cgi "$WD" "$ST" 3 "$NONREPO" >/dev/null
-OUT2=$(cgi "$WD" "$ST" 3 "$NONREPO")
+cgi "$WD" "$ST" 300 "$NONREPO" >/dev/null
+OUT2=$(cgi "$WD" "$ST" 300 "$NONREPO")
 assert_eq "1" "$(cat "$ST/.gitcnt")" "non-repo line (empty field1) must pass guard → HIT"
 assert_eq "$NONREPO" "$OUT2" "HIT returns the cached non-repo line"
 rm -rf "$ST" "$WD"
 end_test
 
-start_test "cached_git_info: non-numeric GIT_CACHE_TTL falls back to default 3 (not 0/disabled)"
-ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" abc >/dev/null; cgi "$WD" "$ST" abc >/dev/null
-assert_eq "1" "$(cat "$ST/.gitcnt")" "abc→3: fresh second call must HIT (would be 2 if treated as 0)"
-rm -rf "$ST" "$WD"
+start_test "cached_git_info: non-numeric/negative/empty GIT_CACHE_TTL fall back to 10"
+for bad in abc -5 ''; do
+  ST=$(mktemp -d); WD=$(cgi_wd)
+  OMC_NOW_OVERRIDE=$E cgi "$WD" "$ST" "$bad" >/dev/null
+  OMC_NOW_OVERRIDE=$((E + 10)) cgi "$WD" "$ST" "$bad" >/dev/null
+  assert_eq "1" "$(cat "$ST/.gitcnt")" "'$bad' → 10: age 10 must HIT"
+  OMC_NOW_OVERRIDE=$((E + 11)) cgi "$WD" "$ST" "$bad" >/dev/null
+  assert_eq "2" "$(cat "$ST/.gitcnt")" "'$bad' → 10: age 11 must MISS"
+  rm -rf "$ST" "$WD"
+done
 end_test
 
-start_test "cached_git_info: negative GIT_CACHE_TTL falls back to default 3"
-ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" -5 >/dev/null; cgi "$WD" "$ST" -5 >/dev/null
-assert_eq "1" "$(cat "$ST/.gitcnt")" "-5→3: fresh second call must HIT"
-rm -rf "$ST" "$WD"
-end_test
-
-start_test "cached_git_info: no .tmp.* leftover after a normal miss (atomic write)"
-ST=$(mktemp -d); WD=$(mktemp -d)
+start_test "cached_git_info: no .tmp.* leftover after a normal miss (direct write)"
+ST=$(mktemp -d); WD=$(cgi_wd)
 cgi "$WD" "$ST" 3 >/dev/null
 ls "$ST"/gitcache-*.tmp.* >/dev/null 2>&1 \
-  && { printf '    FAIL: temp file left behind after atomic write\n' >&2; TEST_FAILED=1; }
+  && { printf '    FAIL: temp file left behind\n' >&2; TEST_FAILED=1; }
 rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: non-repo dir never calls git_info and writes no cache"
+ST=$(mktemp -d); WD=$(mktemp -d)
+OUT=$(cgi "$WD" "$ST" 300)
+assert_eq "$(printf '\t0\t0\t0\t0\t0')" "$OUT" "non-repo line"
+assert_eq "0" "$(cat "$ST/.gitcnt")" "git_info must not be called outside a repo"
+ls "$ST"/gitcache-* >/dev/null 2>&1 && { printf '    FAIL: cache file written for a non-repo\n' >&2; TEST_FAILED=1; }
+GIT_DIR=/nonexistent cgi "$WD" "$ST" 300 >/dev/null
+assert_eq "1" "$(cat "$ST/.gitcnt")" "GIT_DIR set → git is consulted (no shortcut)"
+rm -rf "$ST" "$WD"
+end_test
+
+# Invalidation: real repos, real git_info, TTL 300. A repo write must show at the next render.
+cgr() {  # $1=dir $2=state ; prints the 6-field line via the real git_info
+  ( cd "$1" && OMC_STATE_DIR="$2" GIT_CACHE_TTL=300 OMC_CONF=/dev/null bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "'"$STATUSLINE"'"
+      cached_git_info' )
+}
+inval_case() {  # $1=label $2=repo-dir(cwd) $3=state $4=mutation command (run in $2)
+  local before after
+  before=$(cgr "$2" "$3")
+  ( cd "$2" && eval "$4" ) >/dev/null 2>&1
+  after=$(cgr "$2" "$3")
+  [ "$before" != "$after" ] || { printf '    FAIL: %s: cached line did not change after the repo write [%s]\n' "$1" "$after" >&2; TEST_FAILED=1; }
+}
+inval_suite() {  # $1=kind(plain|wt|wtabs)
+  local WR ST D ABS cdf
+  WR=$(mktemp -d); ST=$(mktemp -d)
+  gi_mkrepo "$WR/main" main
+  D="$WR/main"
+  if [ "$1" != plain ]; then
+    git -C "$WR/main" worktree add -q "$WR/wt" -b wtb >/dev/null 2>&1; D="$WR/wt"
+    git -C "$D" config user.email t@t.t; git -C "$D" config user.name t
+    if [ "$1" = wtabs ]; then
+      ABS=$(phys "$WR/main/.git"); command -v cygpath >/dev/null 2>&1 && ABS=$(cygpath -m "$ABS")
+      for cdf in "$WR"/main/.git/worktrees/*/commondir; do printf '%s\n' "$ABS" > "$cdf"; done
+    fi
+  fi
+  printf 'one\ntwo\nthree\n' > "$D/g.txt"
+  inval_case "$1: git add" "$D" "$ST" 'git add g.txt'
+  echo more >> "$D/f.txt"
+  inval_case "$1: git commit" "$D" "$ST" 'git add -A; git commit -qm c'
+  echo more >> "$D/f.txt"; git -C "$D" add f.txt
+  inval_case "$1: commit with logAllRefUpdates=false" "$D" "$ST" 'git -c core.logAllRefUpdates=false commit -qm c2'
+  inval_case "$1: branch -m" "$D" "$ST" 'git branch -m renamedbr'
+  rm -rf "$WR" "$ST"
+}
+start_test "cache invalidation: add/commit/commit(no reflog)/branch -m show at once (plain repo)"
+inval_suite plain
+end_test
+start_test "cache invalidation: same four writes in a worktree"
+inval_suite wt
+end_test
+start_test "cache invalidation: same four writes in a worktree with an absolute commondir"
+inval_suite wtabs
+end_test
+
+start_test "cache invalidation: a git write DURING the miss makes the next render miss (stamp written first)"
+WR=$(mktemp -d); ST=$(mktemp -d); gi_mkrepo "$WR" main; echo x > "$WR/g.txt"
+inflight() {
+  ( cd "$WR" && OMC_STATE_DIR="$ST" GIT_CACHE_TTL=300 OMC_CONF=/dev/null bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "'"$STATUSLINE"'"
+      CNT="$OMC_STATE_DIR/.gitcnt"; [ -f "$CNT" ] || echo 0 > "$CNT"
+      git_info() { n=$(( $(cat "$CNT") + 1 )); echo $n > "$CNT"; [ "$n" = 1 ] && git add g.txt; printf "stub\t1\t2\t3\t4\t5"; }
+      cached_git_info' )
+}
+inflight >/dev/null; inflight >/dev/null
+assert_eq "2" "$(cat "$ST/.gitcnt")" "render after an in-flight git add must miss"
+inflight >/dev/null
+assert_eq "2" "$(cat "$ST/.gitcnt")" "and the one after that hits again"
+rm -rf "$WR" "$ST"
 end_test
 
 # --- Task C: cached_git_info() wired into the render path ---
-# run_workers cannot steer the git cwd (it hardcodes current_dir:/tmp but git
+# run_render cannot steer the git cwd (it hardcodes current_dir:/tmp but git
 # runs against $PWD) nor isolate the cache. This helper cd's into the target
 # repo and passes OMC_STATE_DIR (and optional GIT_CACHE_TTL) into the render.
-run_workers_in() {
+run_render_in() {
   # $1=dir(cd → git cwd + cache key)  $2=sid  $3=OMC_STATE_DIR
   # $4=GIT_CACHE_TTL(optional)  $5=cols(default 200)
   local d="$1" sid="$2" sd="$3" ttl="${4:-}" cols="${5:-200}"
@@ -567,15 +399,11 @@ run_workers_in() {
       | bash "$STATUSLINE" 2>/dev/null
   )
 }
-gi_mkrepo() {  # $1=dir $2=initial branch name
-  ( cd "$1" && git init -q . && git config user.email t@t.t && git config user.name t \
-      && echo a > f.txt && git add f.txt && git commit -qm i && git branch -m "$2" )
-}
 
 start_test "render: git repo output shows the branch AND a gitcache file is written"
 ST=$(mktemp -d); WD=$(mktemp -d)
 gi_mkrepo "$WD" omcbranch
-OUT=$(run_workers_in "$WD" "render-gc-1" "$ST" | strip_ansi)
+OUT=$(run_render_in "$WD" "render-gc-1" "$ST" | strip_ansi)
 echo "$OUT" | grep -qF 'omcbranch' \
   || { printf '    FAIL: branch not in render output\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 ls "$ST"/gitcache-* >/dev/null 2>&1 \
@@ -583,25 +411,41 @@ ls "$ST"/gitcache-* >/dev/null 2>&1 \
 rm -rf "$ST" "$WD"
 end_test
 
-start_test "render: second render within TTL serves STALE cached git state (cache wired in)"
+start_test "render: second render within TTL serves STALE working-tree counts (cache wired in)"
 ST=$(mktemp -d); WD=$(mktemp -d)
-gi_mkrepo "$WD" branchbefore
-run_workers_in "$WD" "render-gc-2" "$ST" 300 >/dev/null  # arg4=GIT_CACHE_TTL (300=large so 2nd render HITs); caches branchbefore
-( cd "$WD" && git branch -m branchafter )                # git state changes
-OUT=$(run_workers_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)  # arg4=GIT_CACHE_TTL=300
-echo "$OUT" | grep -qF 'branchbefore' \
-  || { printf '    FAIL: render bypassed cache (expected stale branchbefore)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-echo "$OUT" | grep -qF 'branchafter' \
-  && { printf '    FAIL: render showed fresh state (cache not consulted)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+gi_mkrepo "$WD" stalebr
+OUT1=$(run_render_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)  # arg4=GIT_CACHE_TTL (300=large so 2nd render HITs)
+echo more >> "$WD/f.txt"                                           # working-tree edit: no .git write
+OUT=$(run_render_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)
+echo "$OUT1" | grep -qF '~1' && { printf '    FAIL: clean repo already shows ~1\n' >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF 'stalebr' \
+  || { printf '    FAIL: branch missing from render\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF '~1' \
+  && { printf '    FAIL: render showed fresh edit (cache not consulted)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+OUT=$(run_render_in "$WD" "render-gc-2" "$ST" 0 | strip_ansi)      # TTL=0 proves the edit is visible to git
+echo "$OUT" | grep -qF '~1' \
+  || { printf '    FAIL: edit not visible with TTL=0\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "render: a cache line whose epoch is '09' (invalid octal) is a miss and the render still completes"
+ST=$(mktemp -d); WD=$(mktemp -d); gi_mkrepo "$WD" zerobr
+run_render_in "$WD" "render-gc-z" "$ST" 300 >/dev/null
+CF=$(ls "$ST"/gitcache-* | grep -v '\.stamp$' | head -1)
+printf '09\tmain\t0\t0\t0\t0\t0\n' > "$CF"
+OUT=$(run_render_in "$WD" "render-gc-z" "$ST" 300 | strip_ansi)
+printf '%s\n' "$OUT" | head -1 | grep -qF 'X' \
+  || { printf '    FAIL: render aborted / no model on line 1\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF 'zerobr' || { printf '    FAIL: branch missing (miss not recomputed)\n' >&2; TEST_FAILED=1; }
 rm -rf "$ST" "$WD"
 end_test
 
 start_test "render: GIT_CACHE_TTL=0 serves fresh git state and writes no cache file"
 ST=$(mktemp -d); WD=$(mktemp -d)
 gi_mkrepo "$WD" freshbefore
-run_workers_in "$WD" "render-gc-3" "$ST" 0 >/dev/null  # arg4=GIT_CACHE_TTL=0 (cache disabled)
+run_render_in "$WD" "render-gc-3" "$ST" 0 >/dev/null  # arg4=GIT_CACHE_TTL=0 (cache disabled)
 ( cd "$WD" && git branch -m freshafter )
-OUT=$(run_workers_in "$WD" "render-gc-3" "$ST" 0 | strip_ansi)  # arg4=GIT_CACHE_TTL=0
+OUT=$(run_render_in "$WD" "render-gc-3" "$ST" 0 | strip_ansi)  # arg4=GIT_CACHE_TTL=0
 echo "$OUT" | grep -qF 'freshafter' \
   || { printf '    FAIL: TTL=0 must show fresh state\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 ls "$ST"/gitcache-* >/dev/null 2>&1 \
@@ -636,12 +480,119 @@ ls "$ST"/gitcache- >/dev/null 2>&1 \
 rm -rf "$ST" "$RA" "$RB"
 end_test
 
+# --- P5 Task 5.1: oracle — git_info must equal the 23d7874 implementation ---
+# legacy_git_info is the 23d7874 git_info body, verbatim except for its name.
+legacy_git_info() {
+  local branch="" add=0 mod=0 del=0 ladd=0 ldel=0 toplevel
+  # `git status` opportunistically refreshes the index, taking .git/index.lock.
+  # Claude Code kills a statusline that overruns its budget; a git killed
+  # mid-refresh leaves a stale 0-byte index.lock that blocks the user's own
+  # `git add`/`commit`. GIT_OPTIONAL_LOCKS=0 skips that optional write. `local`
+  # + export scopes it to this function and the git children it spawns
+  # (including the nested ones under `submodule foreach`).
+  local GIT_OPTIONAL_LOCKS=0; export GIT_OPTIONAL_LOCKS
+  # `--show-toplevel` doubles as the in-a-worktree gate AND gives the path for
+  # the .gitmodules check below in a single git call (replacing the old bare
+  # `rev-parse --git-dir` gate; a bare repo with no worktree → treated as
+  # non-repo, which is correct for a working-tree status line).
+  if toplevel=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$toplevel" ]; then
+    branch=$(git branch --show-current 2>/dev/null)
+    local status sub_status all_status diff_stats has_sub=""
+    # §8.1: `git submodule foreach` pays a heavy per-call process/startup cost
+    # on MSYS (~7s observed) even with ZERO submodules, and git_info calls it
+    # twice (status + diff) ⇒ ~14s of pure waste ⇒ statusline exceeds Claude
+    # Code's render budget ⇒ blank. Only scan submodules if the repo actually
+    # tracks them (.gitmodules at the worktree toplevel).
+    [ -f "$toplevel/.gitmodules" ] && has_sub=1
+    status=$(git status --porcelain -uall 2>/dev/null)
+    if [ -n "$has_sub" ]; then
+      sub_status=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
+    else
+      sub_status=""
+    fi
+    all_status=$(printf '%s\n%s' "$status" "$sub_status")
+    add=$(echo "$all_status" | grep -c '^A\|^??')
+    mod=$(echo "$all_status" | grep -c '^ M\|^M\|^MM\|^AM')
+    del=$(echo "$all_status" | grep -c '^ D\|^D')
+    if [ -n "$has_sub" ]; then
+      diff_stats=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
+    else
+      diff_stats=$(git diff HEAD --numstat 2>/dev/null)
+    fi
+    ladd=$(echo "$diff_stats" | awk '{s+=$1} END {print s+0}')
+    ldel=$(echo "$diff_stats" | awk '{s+=$2} END {print s+0}')
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s' "$branch" "$add" "$mod" "$del" "$ladd" "$ldel"
+}
+
+cmp_gi() {  # $1=label $2=dir (cwd) ; asserts git_info == legacy_git_info there
+  local out
+  out=$( cd "$2" && OMC_CONF=/dev/null bash -c "$(declare -f legacy_git_info)"'
+      OMC_TEST_LIB_ONLY=1
+      source "$0"
+      a=$(git_info); b=$(legacy_git_info)
+      printf "%s|%s" "$a" "$b"' "$STATUSLINE" 2>/dev/null )
+  local a=${out%%|*} b=${out#*|}
+  [ -n "$out" ] || { printf '    FAIL: %s: no output\n' "$1" >&2; TEST_FAILED=1; return; }
+  assert_eq "$b" "$a" "$1: git_info == legacy"
+  GI_LAST=$a
+}
+gi_cfg() { git -C "$1" config user.email t@t.t; git -C "$1" config user.name t; }
+
+start_test "git_info oracle: single-repo states equal the 23d7874 implementation"
+OR=$(mktemp -d)
+gi_mkrepo "$OR/clean" main;                                     cmp_gi clean "$OR/clean"
+gi_mkrepo "$OR/mod" main;  echo more >> "$OR/mod/f.txt";        cmp_gi modified "$OR/mod"
+gi_mkrepo "$OR/stg" main;  echo more >> "$OR/stg/f.txt"; git -C "$OR/stg" add f.txt;  cmp_gi staged "$OR/stg"
+gi_mkrepo "$OR/am" main;   echo n > "$OR/am/n.txt"; git -C "$OR/am" add n.txt; echo m >> "$OR/am/n.txt"; cmp_gi AM "$OR/am"
+gi_mkrepo "$OR/mm" main;   echo x >> "$OR/mm/f.txt"; git -C "$OR/mm" add f.txt; echo y >> "$OR/mm/f.txt"; cmp_gi MM "$OR/mm"
+gi_mkrepo "$OR/sdel" main; git -C "$OR/sdel" rm -q f.txt;      cmp_gi staged-delete "$OR/sdel"
+gi_mkrepo "$OR/udel" main; rm "$OR/udel/f.txt";                 cmp_gi unstaged-delete "$OR/udel"
+gi_mkrepo "$OR/ren" main;  git -C "$OR/ren" mv f.txt g.txt;     cmp_gi rename "$OR/ren"
+gi_mkrepo "$OR/unt" main;  mkdir -p "$OR/unt/d/e"; printf 'a\nb\n' > "$OR/unt/d/e/u.txt"; cmp_gi untracked-subdir "$OR/unt"
+gi_mkrepo "$OR/bin" main;  printf 'a\0b\1' > "$OR/bin/b.bin"; git -C "$OR/bin" add b.bin; git -C "$OR/bin" commit -qm b; printf 'c\0d\2\3' > "$OR/bin/b.bin"; cmp_gi binary-change "$OR/bin"
+mkdir -p "$OR/unb"; git init -q "$OR/unb"; git -C "$OR/unb" symbolic-ref HEAD refs/heads/unb; printf u > "$OR/unb/u.txt"; cmp_gi unborn "$OR/unb"
+gi_mkrepo "$OR/det" main;  echo b > "$OR/det/f.txt"; git -C "$OR/det" commit -qam c2; git -C "$OR/det" checkout -q HEAD~1; cmp_gi detached "$OR/det"
+rm -rf "$OR"
+end_test
+
+start_test "git_info oracle: upstream/ahead, worktree, submodule"
+OR=$(mktemp -d)
+git init -q --bare "$OR/remote.git"
+gi_mkrepo "$OR/up" main; git -C "$OR/up" checkout -q -b feature/x; git -C "$OR/up" remote add origin "$OR/remote.git"
+git -C "$OR/up" push -q -u origin feature/x >/dev/null 2>&1; echo a >> "$OR/up/f.txt"; git -C "$OR/up" commit -qam ahead
+cmp_gi upstream-ahead "$OR/up"
+assert_eq "feature/x" "${GI_LAST%%$'\t'*}" "upstream case really reports the branch"
+gi_mkrepo "$OR/wtmain" main; git -C "$OR/wtmain" worktree add -q "$OR/wt" -b wtb >/dev/null 2>&1; echo w >> "$OR/wt/f.txt"
+cmp_gi worktree "$OR/wt"
+gi_mkrepo "$OR/subsrc" main; gi_mkrepo "$OR/sm" main
+git -C "$OR/sm" -c protocol.file.allow=always submodule add -q "$OR/subsrc" sub >/dev/null 2>&1
+git -C "$OR/sm" commit -qm addsub; echo d >> "$OR/sm/sub/f.txt"; echo e >> "$OR/sm/f.txt"
+[ -f "$OR/sm/.gitmodules" ] || { printf '    FAIL: submodule fixture failed\n' >&2; TEST_FAILED=1; }
+cmp_gi submodule-dirty "$OR/sm"
+rm -rf "$OR"
+end_test
+
+start_test "git_info oracle: edge cwd/layout cases (inside .git, symlink, bare, fake .git above a real repo, non-repo)"
+OR=$(mktemp -d)
+gi_mkrepo "$OR/r" main; echo m >> "$OR/r/f.txt"; mkdir -p "$OR/r/sub"
+cmp_gi inside-dot-git "$OR/r/.git"
+git clone -q --bare "$OR/r" "$OR/bare.git" 2>/dev/null; cmp_gi bare-repo "$OR/bare.git"
+mkdir -p "$OR/r/a/.git" "$OR/r/b/.git"; echo 'ref: refs/heads/x' > "$OR/r/b/.git/HEAD"
+cmp_gi dotgit-no-HEAD "$OR/r/a"
+cmp_gi dotgit-HEAD-no-objects "$OR/r/b"
+mkdir -p "$OR/plain"; cmp_gi non-repo "$OR/plain"
+ln -s "$OR/r/sub" "$OR/link" 2>/dev/null
+if [ -L "$OR/link" ]; then cmp_gi symlink-cwd "$OR/link"; else printf '    SKIP: ln -s does not create symlinks here\n'; fi
+rm -rf "$OR"
+end_test
+
 # --- §8.1: git_info skips `git submodule foreach` when no .gitmodules ---
 # `git submodule foreach` pays a ~7s MSYS process-startup cost even with zero
 # submodules; git_info calls it twice (status+diff) ⇒ ~14s pure waste ⇒ blank
 # statusline under load. A PATH-shim git records each `submodule` invocation.
 gi_shim_setup() {  # $1 = workdir; installs fake git that logs submodule calls
-  mkdir -p "$1/bin"
+  mkdir -p "$1/bin" "$1/.git/objects"; echo "ref: refs/heads/x" > "$1/.git/HEAD"   # fake repo: the walk must find one
   cat > "$1/bin/git" <<EOS
 #!/bin/bash
 case "\$1 \$2" in
@@ -650,7 +601,8 @@ esac
 case "\$1" in
   rev-parse) echo "$1"; exit 0 ;;
   branch) echo shimbr; exit 0 ;;
-  status|diff) exit 0 ;;
+  status) echo "## shimbr"; exit 0 ;;
+  diff) exit 0 ;;
   submodule) echo called >> "$1/.gitsentinel"; exit 0 ;;
   *) exit 0 ;;
 esac
@@ -691,7 +643,7 @@ end_test
 # the nested ones inside `submodule foreach`, which inherit env) must see
 # GIT_OPTIONAL_LOCKS=0, and the setting must not leak out of git_info.
 gi_lockenv_setup() {  # $1 = workdir; fake git logging "<subcmd> <GIT_OPTIONAL_LOCKS>"
-  mkdir -p "$1/bin"
+  mkdir -p "$1/bin" "$1/.git/objects"; echo "ref: refs/heads/x" > "$1/.git/HEAD"   # fake repo: the walk must find one
   cat > "$1/bin/git" <<EOS
 #!/bin/bash
 echo "\$1 \${GIT_OPTIONAL_LOCKS-unset}" >> "$1/.gitenvlog"
@@ -700,18 +652,23 @@ case "\$1 \$2" in
 esac
 case "\$1" in
   branch) echo shimbr; exit 0 ;;
+  status) [ -n "\${SHIM_STATUS_FAIL-}" ] && exit 1; echo "## shimbr"; exit 0 ;;
   *) exit 0 ;;
 esac
 EOS
   chmod +x "$1/bin/git"
 }
 
-start_test "git_info: every git call runs with GIT_OPTIONAL_LOCKS=0 (incl. submodule path)"
+start_test "git_info: every git call runs with GIT_OPTIONAL_LOCKS=0 (normal path: status, diff, submodule only)"
 GW=$(mktemp -d); gi_lockenv_setup "$GW"; : > "$GW/.gitmodules"
 ( unset GIT_OPTIONAL_LOCKS; call_git_info_shimmed "$GW" >/dev/null )
-for sub in rev-parse branch status diff submodule; do
+for sub in status diff submodule; do
   grep -q "^$sub " "$GW/.gitenvlog" 2>/dev/null \
     || { printf '    FAIL: expected a git %s call\n' "$sub" >&2; TEST_FAILED=1; }
+done
+for sub in rev-parse branch; do
+  grep -q "^$sub " "$GW/.gitenvlog" 2>/dev/null \
+    && { printf '    FAIL: unexpected git %s call on the normal path\n' "$sub" >&2; TEST_FAILED=1; }
 done
 BAD=$(grep -v ' 0$' "$GW/.gitenvlog" 2>/dev/null)
 [ -z "$BAD" ] \
@@ -719,6 +676,25 @@ BAD=$(grep -v ' 0$' "$GW/.gitenvlog" 2>/dev/null)
 rm -rf "$GW"
 end_test
 
+start_test "git_info: when git status fails the old sequence runs (rev-parse, branch, status, diff, submodule), all with GIT_OPTIONAL_LOCKS=0"
+GW=$(mktemp -d); gi_lockenv_setup "$GW"; : > "$GW/.gitmodules"
+( unset GIT_OPTIONAL_LOCKS; SHIM_STATUS_FAIL=1 call_git_info_shimmed "$GW" >/dev/null )
+for sub in rev-parse branch status diff submodule; do
+  grep -q "^$sub " "$GW/.gitenvlog" 2>/dev/null \
+    || { printf '    FAIL: expected a git %s call (legacy path)\n' "$sub" >&2; TEST_FAILED=1; }
+done
+BAD=$(grep -v ' 0$' "$GW/.gitenvlog" 2>/dev/null)
+[ -z "$BAD" ] \
+  || { printf '    FAIL: git ran without GIT_OPTIONAL_LOCKS=0:\n%s\n' "$BAD" >&2; TEST_FAILED=1; }
+rm -rf "$GW"
+end_test
+
+start_test "git_info: a repo with a clean status makes exactly two git calls (status -b, diff)"
+GW=$(mktemp -d); gi_lockenv_setup "$GW"
+( unset GIT_OPTIONAL_LOCKS; call_git_info_shimmed "$GW" >/dev/null )
+assert_eq "2" "$(wc -l < "$GW/.gitenvlog" | tr -d ' ')" "git calls without .gitmodules"
+rm -rf "$GW"
+end_test
 start_test "git_info: GIT_OPTIONAL_LOCKS does not leak out of git_info"
 GW=$(mktemp -d); gi_lockenv_setup "$GW"
 LEAK=$( cd "$GW" && unset GIT_OPTIONAL_LOCKS && OMC_CONF=/dev/null PATH="$GW/bin:$PATH" bash -c '
@@ -869,14 +845,13 @@ end_test
 
 # Gate-level: jq failure (malformed input) and empty session_id both collapse
 # to an empty SESSION_ID → the render gate emits a single notice + exit 0,
-# BEFORE any state-*.tsv write. Old grep code instead renders normally.
+# BEFORE any git or cache work. Old grep code instead renders normally.
 start_test "render gate: malformed input → jq-required notice, exit 0, no state write"
 NOTICE='oh-my-claude: jq required (winget install jqlang.jq)'
-rm -f "$RENDER_STATE_DIR/state-.tsv"
 OUT=$(printf 'not valid json at all' | bash "$STATUSLINE" 2>/dev/null); RC=$?
 assert_eq "$NOTICE" "$OUT" "malformed JSON → exactly the jq-required notice"
 assert_eq "0" "$RC" "notice path exits 0"
-[ ! -e "$RENDER_STATE_DIR/state-.tsv" ] \
+[ ! -e "$OMC_STATE_DIR/state-.tsv" ] \
   || { printf '    FAIL: state-.tsv written on jq-failure path\n' >&2; TEST_FAILED=1; }
 end_test
 
@@ -887,95 +862,61 @@ assert_eq "$NOTICE" "$OUT" "empty session_id → notice (no broken statusline)"
 assert_eq "0" "$RC" "empty-session notice path exits 0"
 end_test
 
-# --- worker grouping (spec 2026-05-19) -----------------------------------
+# --- helpers ---------------------------------------------------------------
 # 1-based index of the first stripped output line containing $2 (literal),
 # or 0 if absent. Used to assert relative render order.
 line_index() {
   printf '%s\n' "$1" | grep -nF -- "$2" | head -1 | cut -d: -f1 | { read -r n; printf '%s' "${n:-0}"; }
 }
 
-start_test "WORKERS_MAX caps the rendered shell rows in launch order"
-SID="render-test-group-max"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 60 & LP1=$!
-sleep 60 & LP2=$!
-sleep 60 & LP3=$!
-{
-  printf 'shell\ttoolu_b1\tbash_1\tshell-one\tsleep 99\t%s\t%s\n'      "$((NOW - 25))" "$LP1"
-  printf 'shell\ttoolu_b2\tbash_2\tshell-two\tsleep 99\t%s\t%s\n'      "$((NOW - 15))" "$LP2"
-  printf 'shell\ttoolu_b3\tbash_3\tshell-three\tsleep 99\t%s\t%s\n'    "$((NOW - 5))"  "$LP3"
-} > "$SF"
-OUT="$(bash -c "
-  OMC_TEST_LIB_ONLY=1
-  source '$STATUSLINE'
-  WORKERS_STATE_FILE='$SF'
-  SESSION_ID='$SID'
-  WORKERS_MAX=2
-  WORKERS_SHELL_ICON='S'
-  emit_workers
-" | strip_ansi)"
-kill "$LP1" "$LP2" "$LP3" 2>/dev/null; wait "$LP1" "$LP2" "$LP3" 2>/dev/null
-echo "$OUT" | grep -qF 'shell-one' && echo "$OUT" | grep -qF 'shell-two' \
-  || { printf '    FAIL: cap=2 should keep the first two shells\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-echo "$OUT" | grep -qF 'shell-three' \
-  && { printf '    FAIL: third shell rendered despite cap=2\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "fancy layout order: git before meters, workers last"
+start_test "fancy layout order: model, git, meters"
 SID="render-test-fancy-order"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_fa\tbash_fa\tfancyagentX\tsleep 99\t%s\n' "$((NOW - 15))" > "$SF"
-FREPO="$RENDER_STATE_DIR/fancy-repo"
-rm -rf "$FREPO"; mkdir -p "$FREPO"
+FREPO=$(mktemp -d)
 git -C "$FREPO" init -q
 git -C "$FREPO" symbolic-ref HEAD refs/heads/fancybrZ
-FCONF="$RENDER_STATE_DIR/fancy.conf"
+FCONF="$OMC_STATE_DIR/fancy.conf"
 printf 'THEME="catppuccin"\nLAYOUT="fancy"\n' > "$FCONF"
 OUT="$(COLUMNS=200 OMC_CONF="$FCONF" bash -c "
-  cd '$FREPO' && echo '{\"session_id\":\"$SID\",\"model\":{\"display_name\":\"X\"},\"workspace\":{\"current_dir\":\"$FREPO\"}}' \
+  cd '$FREPO' && echo '{\"session_id\":\"$SID\",\"model\":{\"display_name\":\"FancyModelQ\"},\"workspace\":{\"current_dir\":\"$FREPO\"}}' \
     | bash '$STATUSLINE' 2>/dev/null
 " | strip_ansi)"
 rm -rf "$FREPO" "$FCONF"
-I_W=$(line_index "$OUT" 'fancyagentX')
 I_G=$(line_index "$OUT" 'fancybrZ')
 I_C=$(line_index "$OUT" 'ctx')
-[ "$I_W" -gt 0 ] && [ "$I_G" -gt 0 ] && [ "$I_C" -gt 0 ] \
-  || { printf '    FAIL: worker/git/ctx line missing (w=%s g=%s c=%s)\n      got: %q\n' "$I_W" "$I_G" "$I_C" "$OUT" >&2; TEST_FAILED=1; }
+[ "$I_G" -gt 0 ] && [ "$I_C" -gt 0 ] \
+  || { printf '    FAIL: git/ctx line missing (g=%s c=%s)\n      got: %q\n' "$I_G" "$I_C" "$OUT" >&2; TEST_FAILED=1; }
+printf '%s\n' "$OUT" | head -1 | grep -qF 'FancyModelQ' \
+  || { printf '    FAIL: line 1 is not the model line\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 [ "$I_G" -lt "$I_C" ] \
   || { printf '    FAIL: git not before meters (g=%s c=%s)\n      got: %q\n' "$I_G" "$I_C" "$OUT" >&2; TEST_FAILED=1; }
-[ "$I_C" -lt "$I_W" ] \
-  || { printf '    FAIL: workers not after meters (c=%s w=%s)\n      got: %q\n' "$I_C" "$I_W" "$OUT" >&2; TEST_FAILED=1; }
 end_test
 
 start_test "_omc_sweep_stale_tmp removes orphaned temp files older than 30s, keeps the rest"
 ST=$(mktemp -d)
 NOW=$(date +%s)
 # Crash-orphaned temp files (60s old) — must be swept.
-printf 'x' > "$ST/state-sess.tsv.prune.111"
 printf 'x' > "$ST/gitcache-somekey.tmp.222"
-touch -d "@$((NOW - 60))" "$ST/state-sess.tsv.prune.111" "$ST/gitcache-somekey.tmp.222"
-# Fresh temp file + real state/cache files — must all survive.
-printf 'x' > "$ST/state-sess.tsv.prune.333"
-printf 'x' > "$ST/state-sess.tsv"
+printf 'x' > "$ST/account-x.tmp.333"
+touch -d "@$((NOW - 60))" "$ST/gitcache-somekey.tmp.222" "$ST/account-x.tmp.333"
+# Fresh temp files + real cache files — must all survive.
+printf 'x' > "$ST/gitcache-somekey.tmp.444"
+printf 'x' > "$ST/account-x.tmp.555"
 printf 'x' > "$ST/gitcache-somekey"
+printf 'x' > "$ST/account-x"
 bash -c "
   OMC_STATE_DIR='$ST'
   OMC_TEST_LIB_ONLY=1
   source '$STATUSLINE'
   _omc_sweep_stale_tmp
 "
-[ ! -f "$ST/state-sess.tsv.prune.111" ] \
-  || { printf '    FAIL: stale .prune temp not swept\n' >&2; TEST_FAILED=1; }
 [ ! -f "$ST/gitcache-somekey.tmp.222" ] \
   || { printf '    FAIL: stale gitcache .tmp temp not swept\n' >&2; TEST_FAILED=1; }
-[ -f "$ST/state-sess.tsv.prune.333" ] \
+[ ! -f "$ST/account-x.tmp.333" ] \
+  || { printf '    FAIL: stale account .tmp temp not swept\n' >&2; TEST_FAILED=1; }
+[ -f "$ST/gitcache-somekey.tmp.444" ] && [ -f "$ST/account-x.tmp.555" ] \
   || { printf '    FAIL: fresh temp file wrongly swept\n' >&2; TEST_FAILED=1; }
-[ -f "$ST/state-sess.tsv" ] \
-  || { printf '    FAIL: real state file wrongly swept\n' >&2; TEST_FAILED=1; }
-[ -f "$ST/gitcache-somekey" ] \
-  || { printf '    FAIL: real gitcache file wrongly swept\n' >&2; TEST_FAILED=1; }
+[ -f "$ST/gitcache-somekey" ] && [ -f "$ST/account-x" ] \
+  || { printf '    FAIL: real cache file wrongly swept\n' >&2; TEST_FAILED=1; }
 rm -rf "$ST"
 end_test
 
@@ -987,59 +928,13 @@ start_test "a full render runs the stale-temp sweep (wiring, not just the unit)"
 # were dropped from the render path, the unit test above would still pass
 # but this assertion would catch the missing wiring.
 NOW=$(date +%s)
-ORPHAN="$OMC_STATE_DIR/state-sweepwire.tsv.prune.99999"
+ORPHAN="$OMC_STATE_DIR/gitcache-wire.tmp.99999"
 printf 'x' > "$ORPHAN"
 touch -d "@$((NOW - 60))" "$ORPHAN"
-run_workers "render-test-sweep-wiring" 120 >/dev/null
+run_render "render-test-sweep-wiring" 120 >/dev/null
 [ ! -f "$ORPHAN" ] \
   || { printf '    FAIL: full render did not sweep the orphaned temp file\n' >&2; TEST_FAILED=1; }
 rm -f "$ORPHAN"
-end_test
-
-# --- 1.2.0: agent tracking removed; prune keeps shell rows only ---
-start_test "prune keeps only shell rows: drops agent (5- and 6-col) and unknown kind"
-SID="render-test-t21"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-SHELL_LINE="$(printf 'shell\ttoolu_s1\t-\tkeepme\tsleep 99\t%s' "$NOW")"
-{
-  printf 'agent\ttoolu_a1\tgeneral-purpose\told five\t%s\n' "$NOW"
-  printf '%s\n' "$SHELL_LINE"
-  printf 'agent\ttoolu_a2\tExplore\told six\t%s\t-\n' "$NOW"
-  printf 'bogus\tx\ty\n'
-} > "$SF"
-run_workers "$SID" 200 >/dev/null
-assert_eq "$SHELL_LINE" "$(cat "$SF")" "state file must hold exactly the shell row"
-end_test
-
-start_test "WORKERS_SHOW_SHELLS=false: no worker lines and state file untouched (no prune)"
-SID="render-test-t22"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-DEAD_LINE="$(printf 'shell\ttoolu_dead\tbash_dead\tghost shell\tsleep 99\t%s\t99999999' "$((NOW - 9999))")"
-printf '%s\n' "$DEAD_LINE" > "$SF"
-OUT="$(WORKERS_SHOW_SHELLS=false run_workers "$SID" 200 | strip_ansi)"
-echo "$OUT" | grep -qF 'ghost shell' \
-  && { printf '    FAIL: worker line rendered with WORKERS_SHOW_SHELLS=false\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-assert_eq "$DEAD_LINE" "$(cat "$SF")" "dead row must survive (prune must not run)"
-end_test
-
-start_test "1.1.2 mixed state file upgrades to shell rows byte-identical"
-SID="render-test-t23"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 60 & LP=$!
-S6="$(printf 'shell\ttoolu_p\t-\tplaceholder\tsleep 99\t%s' "$NOW")"
-S7="$(printf 'shell\ttoolu_l\tbash_l\tlive one\tsleep 99\t%s\t%s' "$NOW" "$LP")"
-{
-  printf 'agent\ttoolu_a1\tgeneral-purpose\tfive col\t%s\n' "$NOW"
-  printf '%s\n' "$S6"
-  printf 'agent\ttoolu_a2\tExplore\tsix col\t%s\tagent_x\n' "$NOW"
-  printf '%s\n' "$S7"
-} > "$SF"
-run_workers "$SID" 200 >/dev/null
-kill "$LP" 2>/dev/null; wait "$LP" 2>/dev/null
-assert_eq "$(printf '%s\n%s' "$S6" "$S7")" "$(cat "$SF")" "exactly the 2 shell lines, byte-identical"
 end_test
 
 start_test "no workdir-raw variable left in tests or statusline"
@@ -1407,12 +1302,175 @@ for l in $RLL; do
   rl_check "$l" g '{"seven_day":{"used_percentage":90,"resets_at":1738857600}}' 2
   rl_has "$l" g '*8%*90%'
   case "$l" in
-    default|fancy|mygo) printf '%s' "$RL_LINE" | grep -Eq '\([0-9]{2}/[0-9]{2}\)' || { printf '    FAIL: %s no (MM/DD) [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1; };;
+    default|fancy|mygo) printf '%s' "$RL_LINE" | grep -Eq '\(([0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2})\)' || { printf '    FAIL: %s no (MM/DD HH:MM) [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1; };;
     *) case "$RL_LINE" in *"("*) printf '    FAIL: %s has ( [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1;; esac;;
   esac
 done
 end_test
 
+# --- spawn budgets (spec §0) ---
+# count_spawns (test-helpers.sh) runs the statusline with PATH=<shim dir> only and
+# counts forks + execs. Final targets, asserted for EVERY layout:
+#   R1 repo, git cache HIT, account cache HIT   <= 3  (jq = 2)
+#   R2 repo, git cache MISS, account cache HIT  <= 8  (jq 2 + git_info 1 + status 2 + diff 2)
+#   R3 non-repo cwd, account cache HIT          <= 3
+# History of the measured default-layout numbers (R1/R2/R3): P2 26/66/36,
+# P3 16/56/26, P4 5/46/12, P5 5/19/12.
+BT=$(mktemp -d)
+BUDGET_ACCT="$BT/acct.json"
+printf '{"oauthAccount":{"displayName":"w"}}' > "$BUDGET_ACCT"
+touch -d "@$(( $(date +%s) - 10 ))" "$BUDGET_ACCT"
+BUDGET_PAYLOAD='{"session_id":"budget","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"},"context_window":{"used_percentage":8}}'
+
+budget_env() {  # $1=state-dir $2=ttl $3=layout -> writes $1.conf / $1.in ; creates the state dir
+  printf 'LAYOUT=%s\nGIT_CACHE_TTL=%s\n' "${3:-default}" "$2" > "$1.conf"
+  printf '%s' "$BUDGET_PAYLOAD" > "$1.in"
+  mkdir -p "$1"
+}
+budget_prewarm() {  # $1=dir $2=state-dir : one normal render, same env as budget_case
+  ( cd "$1" && OMC_CONF="$2.conf" OMC_STATE_DIR="$2" OMC_ACCOUNT_FILE="$BUDGET_ACCT" COLUMNS=120 \
+      OMC_NOW_OVERRIDE=1793800000 bash "$STATUSLINE" < "$2.in" >/dev/null 2>&1 )
+}
+budget_case() {  # $1=label $2=dir $3=state-dir $4=ttl $5=layout
+  budget_env "$3" "$4" "$5"
+  ( cd "$2" && OMC_CONF="$3.conf" OMC_STATE_DIR="$3" OMC_ACCOUNT_FILE="$BUDGET_ACCT" COLUMNS=120 \
+      OMC_NOW_OVERRIDE=1793800000 count_spawns "$3.cnt" "$3.in" "$STATUSLINE"; \
+      printf '%s %s %s\n' "$SPAWNS" "$SPAWN_FORKS" "$SPAWN_EXECS" > "$3.res"; \
+      grep '^MISSING' "$SPAWN_LOG" > "$3.missing" || : )
+  read -r SPAWNS SPAWN_FORKS SPAWN_EXECS < "$3.res"
+  SPAWN_MISSING=$(wc -l < "$3.missing" | tr -d ' '); SPAWN_LOG="$3.cnt/log"
+  printf '    measured %s/%s: %s spawns (forks %s + execs %s)\n' "$1" "$5" "$SPAWNS" "$SPAWN_FORKS" "$SPAWN_EXECS"
+  [ -s "$3.cnt/stdout" ] || { printf '    FAIL: %s/%s: empty stdout\n' "$1" "$5" >&2; TEST_FAILED=1; }
+  head -1 "$3.cnt/stdout" | grep -qF 'M' || { printf '    FAIL: %s/%s: line 1 lacks the model\n' "$1" "$5" >&2; TEST_FAILED=1; }
+}
+
+BUDGET_R1=3; BUDGET_R2=8; BUDGET_R3=3
+
+BREPO=$(mktemp -d); gi_mkrepo "$BREPO" main
+BNOGIT=$(mktemp -d)
+BNOGIT_OK=1; git -C "$BNOGIT" rev-parse 2>/dev/null && BNOGIT_OK=0
+
+for BL in default fancy minimal mygo powerline pure; do
+  start_test "spawn budgets ($BL): R1 hit <=$BUDGET_R1, R2 miss <=$BUDGET_R2, R3 non-repo <=$BUDGET_R3"
+  # R1: prewarm in the repo (writes the git cache and the account cache), then measure.
+  BS="$BT/$BL-r1"; budget_env "$BS" 300 "$BL"; budget_prewarm "$BREPO" "$BS"
+  R1CF=$(ls "$BS"/gitcache-* 2>/dev/null | grep -v '\.stamp$' | head -1)
+  R1BEFORE=$(cat "$R1CF" 2>/dev/null; printf X)
+  case "$R1BEFORE" in 1793800000"$(printf '\t')"*) ;; *) printf '    FAIL: %s: prewarm did not write an epoch-1793800000 cache line\n' "$BL" >&2; TEST_FAILED=1 ;; esac
+  budget_case R1 "$BREPO" "$BS" 300 "$BL"
+  assert_spawns_le "$BUDGET_R1" "R1/$BL"
+  assert_eq "0" "$(grep -c '^EXEC git ' "$SPAWN_LOG" || true)" "R1/$BL cache HIT must not run git"
+  assert_eq "0" "$(grep -c '^EXEC cat ' "$SPAWN_LOG" || true)" "R1/$BL cache HIT must not run cat"
+  assert_eq "$R1BEFORE" "$(cat "$R1CF" 2>/dev/null; printf X)" "R1/$BL is a genuine HIT: the cache file was not rewritten"
+  # R2: the state dir and account cache are primed by a render in a NON-repo dir, so the
+  # repo's git cache is empty (miss) while the account cache hits.
+  BS="$BT/$BL-r2"; budget_env "$BS" 300 "$BL"; [ "$BNOGIT_OK" = 1 ] && budget_prewarm "$BNOGIT" "$BS"
+  budget_case R2 "$BREPO" "$BS" 300 "$BL"
+  assert_spawns_le "$BUDGET_R2" "R2/$BL"
+  # R3: non-repo cwd, state dir and account cache primed.
+  if [ "$BNOGIT_OK" = 1 ]; then
+    BS="$BT/$BL-r3"; budget_env "$BS" 300 "$BL"; budget_prewarm "$BNOGIT" "$BS"
+    budget_case R3 "$BNOGIT" "$BS" 300 "$BL"
+    assert_spawns_le "$BUDGET_R3" "R3/$BL"
+  else
+    printf '    SKIP: R3: temp dir is inside a git repo\n'
+  fi
+  end_test
+done
+rm -rf "$BREPO" "$BNOGIT" "$BT"
+
+# --- P3: render startup builtins (spec 2.4) ---
+P3=$(mktemp -d); mkdir -p "$P3/nogit" "$P3/st"
+printf '{}' > "$P3/none.json"
+git -C "$P3/nogit" rev-parse 2>/dev/null && { printf '    NOTE: temp dir is inside a git repo; P3 spawn tests are not meaningful\n'; }
+p3_count() {  # $1=payload $2=layout(default) ; runs the render under count_spawns, log in $P3/cnt/log
+  rm -rf "$P3/st"; mkdir -p "$P3/st"   # fresh state: a git-cache HIT would exec cat (until P4)
+  printf '%s' "$1" > "$P3/in"; printf 'LAYOUT=%s\n' "${2:-default}" > "$P3/conf"
+  ( cd "$P3/nogit" && OMC_CONF="$P3/conf" OMC_STATE_DIR="$P3/st" OMC_ACCOUNT_FILE="$P3/none.json" COLUMNS=120 \
+      count_spawns "$P3/cnt" "$P3/in" "$STATUSLINE" )
+  [ -s "$P3/cnt/stdout" ] || { printf '    FAIL: p3_count: empty stdout\n' >&2; TEST_FAILED=1; }
+  head -1 "$P3/cnt/stdout" | grep -qF 'M' || { printf '    FAIL: p3_count: line 1 lacks the model\n' >&2; TEST_FAILED=1; }
+}
+p3_execs() { grep -c "^EXEC $1 " "$P3/cnt/log" || true; }
+P3_PLAIN='{"session_id":"p3","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"},"context_window":{"used_percentage":8}}'
+
+start_test "P3.1 sourcing statusline.sh runs no dirname (SCRIPT_DIR from BASH_SOURCE)"
+printf 'OMC_TEST_LIB_ONLY=1; . "%s"\n' "$STATUSLINE" > "$P3/src.sh"
+count_spawns "$P3/csrc" /dev/null "$P3/src.sh"
+assert_eq "0" "$(grep -c '^EXEC dirname ' "$P3/csrc/log" || true)" "dirname execs when sourcing statusline.sh"
+printf 'OMC_TEST_LIB_ONLY=1; . "%s"\n' "$STATUSLINE.lib_test_loader.sh" > "$P3/src2.sh"
+count_spawns "$P3/csrc2" /dev/null "$P3/src2.sh"
+assert_eq "0" "$(grep -c '^EXEC dirname ' "$P3/csrc2/log" || true)" "dirname execs when sourcing the lib loader"
+end_test
+
+start_test "P3.1 statusline.sh invoked via a Windows (backslash) path still finds its themes/layouts"
+if command -v cygpath >/dev/null 2>&1; then
+  WINSL=$(cygpath -w "$STATUSLINE")
+  mkdir -p "$P3/nogit"
+  OUT=$(cd "$P3/nogit" && printf '%s' "$P3_PLAIN" | OMC_CONF=/dev/null OMC_STATE_DIR="$P3/st" OMC_ACCOUNT_FILE="$P3/none.json" bash "$WINSL" 2>/dev/null | strip_ansi)
+  printf '%s\n' "$OUT" | head -1 | grep -qF 'M' \
+    || { printf '    FAIL: no model on line 1 via %s\n      got: %q\n' "$WINSL" "$OUT" >&2; TEST_FAILED=1; }
+else
+  printf '    SKIP: no cygpath (not MSYS)\n'
+fi
+end_test
+
+start_test "P3.2 parse_status_json without argument reads the inherited stdin"
+OUT=$(printf '%s' "$DOCS_JSON" | timeout 20 bash -c 'OMC_TEST_LIB_ONLY=1; source "$0"; parse_status_json; printf "%s" "$SESSION_ID"' "$STATUSLINE")
+assert_eq "abc123..." "$OUT" "SESSION_ID from stdin"
+end_test
+
+start_test "P3.2 a normal render runs no cat"
+p3_count "$P3_PLAIN"
+assert_eq "0" "$(p3_execs cat)" "cat execs"
+end_test
+
+start_test "P3.3 a render without orphan temp files or a >80% rate runs no date"
+rm -rf "$P3/st"; mkdir -p "$P3/st"
+p3_count "$P3_PLAIN"
+assert_eq "0" "$(p3_execs date)" "date execs"
+end_test
+
+start_test "P3.3 rate suffix with an integer resets_at runs no date"
+p3_count '{"session_id":"p3","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":90,"resets_at":1738425600},"seven_day":{"used_percentage":90,"resets_at":1738857600}}}'
+assert_eq "0" "$(p3_execs date)" "date execs"
+end_test
+
+start_test "P3.3 resets_at suffix: integer, 'abc' and 1.5 match the old date chain"
+for ra in 1738425600 abc 1.5 0123; do
+  if [[ $ra =~ ^(0|[1-9][0-9]*)$ ]]; then jr=$ra; else jr="\"$ra\""; fi
+  [[ $ra == 1.5 ]] && jr=1.5
+  want=$(date -d "@$ra" '+%H:%M' 2>/dev/null || date -r "$ra" '+%H:%M' 2>/dev/null)
+  got=$(render_layout default '' strip "{\"session_id\":\"p3b\",\"model\":{\"display_name\":\"M\"},\"workspace\":{\"current_dir\":\"/tmp/d\"},\"context_window\":{\"used_percentage\":8},\"rate_limits\":{\"five_hour\":{\"used_percentage\":90,\"resets_at\":$jr}}}" | grep -o '([^)]*)' | head -1)
+  assert_eq "($want)" "$got" "5h suffix for resets_at=$ra"
+done
+end_test
+rm -rf "$P3"
+
+
+# --- P7 / spec D10: the 7d reset hint (shown above 80%) is "(MM/DD HH:MM)" ---
+d10_line() {  # $1=seven_day pct $2=resets_at JSON literal $3=five_hour pct (optional) ; prints the stripped default-layout line 2
+  local rl="\"seven_day\":{\"used_percentage\":$1,\"resets_at\":$2}"
+  [ -n "${3:-}" ] && rl="\"five_hour\":{\"used_percentage\":$3,\"resets_at\":1738425600},$rl"
+  render_layout default '' strip "{\"session_id\":\"d10\",\"model\":{\"display_name\":\"M\"},\"workspace\":{\"current_dir\":\"/tmp/d\"},\"context_window\":{\"used_percentage\":8},\"rate_limits\":{$rl}}" | grep -F '8%' | head -1
+}
+start_test "D10: 7d reset hint shows date and time above 80%, nothing at 80%"
+E7=1738857600
+printf -v WANT '%(%m/%d %H:%M)T' "$E7"
+assert_eq " ($WANT)" "$(d10_line 85 $E7 | grep -o ' ([^)]*)$')" "7d 85% suffix is ' (MM/DD HH:MM)'"
+case "$(d10_line 80 $E7)" in *"("*) printf '    FAIL: 7d at 80%% must show no suffix\n' >&2; TEST_FAILED=1 ;; esac
+printf -v WANT5 '%(%H:%M)T' 1738425600
+OUT=$(d10_line 85 $E7 90)
+case "$OUT" in *" ($WANT5)"*) ;; *) printf '    FAIL: 5h suffix (%s) missing/changed [%s]\n' "$WANT5" "$OUT" >&2; TEST_FAILED=1 ;; esac
+case "$OUT" in *" ($WANT)"*) ;; *) printf '    FAIL: 7d suffix (%s) missing [%s]\n' "$WANT" "$OUT" >&2; TEST_FAILED=1 ;; esac
+end_test
+
+start_test "D10: non-integer 7d resets_at keeps the old date-chain behaviour with the new format"
+for ra in abc 1.5 0123; do
+  case $ra in abc|0123) jr="\"$ra\"" ;; *) jr=$ra ;; esac
+  want=$(date -d "@$ra" '+%m/%d %H:%M' 2>/dev/null || date -r "$ra" '+%m/%d %H:%M' 2>/dev/null)
+  assert_eq " ($want)" "$(d10_line 90 "$jr" | grep -o ' ([^)]*)$')" "7d suffix for resets_at=$ra"
+done
+end_test
 rm -rf "$T4D"
-cleanup_render_state
 print_summary

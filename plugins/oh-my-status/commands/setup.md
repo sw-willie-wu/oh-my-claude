@@ -13,16 +13,18 @@ Steps:
    a) If there is NO "statusLine" entry:
       - If the AskUserQuestion tool is available in your tool list, use it with options [Yes, No] to ask: "No statusLine configured. Add oh-my-claude statusline to your settings?"
       - If AskUserQuestion is not available, ask in plain chat text instead.
-      - If yes, add this to their ~/.claude/settings.json:
+      - If yes, ask a second question about timer refresh. If the AskUserQuestion tool is available, use it with these two options (in this order); otherwise ask in plain chat text:
+        1. "No timer refresh (Recommended)"
+        2. "Refresh every 10 seconds" — keeps rate-limit and git info current while the main agent is idle, but costs CPU on Windows (each render is slow there).
+      - Then add this to their ~/.claude/settings.json (NO `refreshInterval` unless the user chose option 2):
         ```json
         "statusLine": {
           "type": "command",
           "command": "bash ~/.claude/oh-my-claude/statusline.sh",
-          "padding": 1,
-          "refreshInterval": 3
+          "padding": 1
         }
         ```
-        The `refreshInterval: 3` keeps background-shell elapsed time updating while the main agent is idle. (It is deliberately 3, not 1: on Windows a 1-second tick can outpace a render and cause overlapping statusline processes.) If the user prefers no extra timer-driven refreshes, omit it.
+        Only if the user chose "Refresh every 10 seconds", also add `"refreshInterval": 10` to that object. Tell the user they can remove that line at any time to turn timer refresh off.
 
    b) If "statusLine" already exists AND its command points to "oh-my-claude/statusline.sh":
       (Treat "statusLine" as the object at the top level of ~/.claude/settings.json.
@@ -30,29 +32,12 @@ Steps:
       or array — fall through to case (c) and offer to replace it. Match the command
       by plain substring on the value as written: do not expand `$HOME` or require a
       `bash ` prefix.)
-      - Look ONLY at the keys directly inside that "statusLine" object. If it
-        contains a key named "refreshInterval" (at any value, including
-        0/false/null — a user who opted out simply omits the key, so a present
-        key means already-configured or a deliberate value):
-        - Tell the user: "oh-my-claude is already configured. You're all set!"
-      - If that "statusLine" object has NO "refreshInterval" key:
-        - Show the user their current statusLine block.
-        - If the AskUserQuestion tool is available, use it with options [Yes, No]
-          to ask: "Your oh-my-claude statusLine is missing `refreshInterval`
-          (added in oh-my-claude 1.1.0 — keeps background-shell elapsed time
-          updating while the main agent is idle; optional).
-          Add it?"
-        - If AskUserQuestion is not available, ask in plain chat text instead.
-        - If yes: add ONLY the key `"refreshInterval": 3` into the EXISTING
-          statusLine object in ~/.claude/settings.json, preserving every other
-          key in that object and the rest of the file (a targeted one-key
-          insertion — do NOT rewrite or reformat settings.json). Confirm to the
-          user that you have added `"refreshInterval": 3` to their
-          ~/.claude/settings.json statusLine object, then tell them: the
-          `refreshInterval: 3` keeps background-shell elapsed time updating while the main agent
-          is idle; to disable the extra timer-driven refreshes,
-          remove the `refreshInterval` line.
-        - If no: leave ~/.claude/settings.json unchanged and continue.
+      - Do NOT modify the statusLine object, and do NOT offer to add `refreshInterval`.
+      - If it already contains a `refreshInterval` key, leave it exactly as is (never
+        silently change a user's value). You may mention that values below 10 are
+        discouraged on Windows (slow renders can pile up) and that deleting the
+        `refreshInterval` line turns timer refresh off.
+      - Tell the user: "oh-my-claude is already configured. You're all set!"
 
    c) If "statusLine" already exists but points to a DIFFERENT command:
       - Show the user the current statusLine config

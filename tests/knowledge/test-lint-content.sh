@@ -131,6 +131,41 @@ assert_eq "blue:0" "$(finding promote_candidate projects/a/page-a.md)" "blue"
 has "$(detail promote_candidate projects/a/page-a.md)" "b" "names linking project" || true
 end_test
 
+# npage <file> <slug> <top-level-extra> <metadata-extra> <body>: page with optional raw frontmatter lines (printf %b escapes)
+npage() { printf -- '---\nname: %s\ndescription: d\n%b' "$2" "$3" > "$1"; printf -- 'metadata:\n  type: reference\n  verified: 2026-10-20\n  evidence: tested\n%b---\n%s\n' "$4" "$5" >> "$1"; }
+# npkb <dir> <top-level-extra> <metadata-extra> <linking-projects...>: projects/a/page-a.md linked from the given projects
+npkb() {
+  local d="$1" top="$2" meta="$3" pr; shift 3
+  fresh "$d"; mkdir -p "$d/projects/c"
+  npage "$d/projects/a/page-a.md" page-a "$top" "$meta" body
+  for pr in "$@"; do page "$d/projects/$pr/x.md" x "[[k:projects/a/page-a]]"; done
+  runc "$d" "$T/none"
+}
+start_test "no_promote: suppresses promote_candidate while every linking project is listed"
+npkb "$T/np1" '' '  no_promote: b\n' b
+assert_eq none "$(finding promote_candidate projects/a/page-a.md)" "metadata.no_promote: b, linked from b"
+npkb "$T/np2" 'no_promote: b\n' '' b
+assert_eq none "$(finding promote_candidate projects/a/page-a.md)" "top-level no_promote: b"
+npkb "$T/np3" '' '  no_promote: b\n' b c
+assert_eq "blue:0" "$(finding promote_candidate projects/a/page-a.md)" "c not listed: finding back"
+has "$(detail promote_candidate projects/a/page-a.md)" "b, c" "names linking projects"
+has "$(detail promote_candidate projects/a/page-a.md)" "(no_promote: b)" "shows the marker"
+npkb "$T/np4a" '' '  no_promote: [b, c]\n' b c
+assert_eq none "$(finding promote_candidate projects/a/page-a.md)" "[b, c]"
+npkb "$T/np4b" '' '  no_promote: "b,c"\n' b c
+assert_eq none "$(finding promote_candidate projects/a/page-a.md)" "quoted b,c"
+npkb "$T/np4c" '' '  no_promote: b c\n' b c
+assert_eq none "$(finding promote_candidate projects/a/page-a.md)" "blank separated"
+npkb "$T/np5a" '' '  no_promote:\n' b
+assert_eq "blue:0" "$(finding promote_candidate projects/a/page-a.md)" "empty value does not suppress"
+npkb "$T/np5b" '' '  no_promote:\n    - b\n' b
+assert_eq "blue:0" "$(finding promote_candidate projects/a/page-a.md)" "block-list form is ignored"
+npkb "$T/np6" '' '  no_promote: b\n'
+assert_eq 0 "$(count_check promote_candidate)" "no links, no finding"
+assert_eq 0 "$(count_check missing_frontmatter)" "no_promote is not a missing_frontmatter issue"
+run "$KB" --checks content  # restore the fixture run for the following blocks
+end_test
+
 start_test "no structural checks or groups from --checks content; --checks structure has no content checks"
 assert_eq "[]" "$("$JQ" -c .groups "$T/out" | tr -d '\r')" "content-only: groups empty"
 assert_eq 0 "$(q '[.findings[] | select(.check == "orphan" or .check == "broken_link" or .check == "not_indexed")] | length')" "no structural finding"
@@ -318,6 +353,31 @@ AX="$(RES "$T/amx/p/memory")"
 assert_eq 1 "$(count_check ext_link_missing)" "only the really missing retired target"
 has "$(detail ext_link_missing "$AX/MEMORY.md")" "_retired/2026-10-30/nope" "names the missing one" || true
 assert_eq 0 "$(count_check progress_leak)" "no check runs on _retired/ or lint/"
+assert_eq 0 "$(count_check link_into_retired)" "auto-memory stub into _retired stays legal"
+end_test
+
+start_test "suspect_link_rewrite: stripped-bracket spans and unclosed [[ outside code"
+fresh "$T/sl"
+page "$T/sl/global/hit-a.md" hit-a '用 ``x`` 建的筆記'
+page "$T/sl/global/hit-b.md" hit-b 'see [[knotebook-wikilink-trigger and more'
+page "$T/sl/global/ok-1.md" ok-1 'a ``b`c`` d'
+page "$T/sl/global/ok-2.md" ok-2 'a `` x `` d'
+page "$T/sl/global/ok-3.md" ok-3 'a ``$[[ inputs.b ]]`` d'
+page "$T/sl/global/ok-4.md" ok-4 $'```\n``x``\n[[open\n```'
+page "$T/sl/global/ok-5.md" ok-5 'a `[[x` b'
+printf -- '---\nname: ok-6\ndescription: "``x`` and [[open"\nmetadata:\n  type: reference\n  verified: 2026-10-20\n  evidence: tested\n---\nbody\n' > "$T/sl/global/ok-6.md"
+page "$T/sl/global/ok-7.md" ok-7 'a <!-- ``x`` and [[open --> b'
+printf -- 'a ``x`` and [[open\n' > "$T/sl/log.md"
+printf -- 'a ``x`` and [[open\n' > "$T/sl/inbox.md"
+rm -rf "$T/slam"; mkdir -p "$T/slam/p/memory"
+printf -- '---\nname: m\ndescription: d\ntype: feedback\n---\nuse ``x`` and [[open\n' > "$T/slam/p/memory/m.md"
+runc "$T/sl" "$T/slam"
+assert_eq "global/hit-a.md global/hit-b.md" "$(files_of suspect_link_rewrite)" "only the two damaged pages"
+assert_eq "yellow:9" "$(finding suspect_link_rewrite global/hit-a.md)" "stripped span, line 9"
+assert_eq "yellow:9" "$(finding suspect_link_rewrite global/hit-b.md)" "unclosed [[, line 9"
+has "$(detail suspect_link_rewrite global/hit-a.md)" "brackets stripped" "detail (i)" || true
+has "$(detail suspect_link_rewrite global/hit-b.md)" "unclosed [[" "detail (ii)" || true
+run "$KB" --checks content  # restore the fixture run for the following blocks
 end_test
 
 start_test "stale words are whole words; a.b.c.d is not a version; versions and 3-part still are"

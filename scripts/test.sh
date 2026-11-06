@@ -4,12 +4,17 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 FAIL=0
-echo "=== track-workers tests ==="
-bash "$REPO_ROOT/tests/test-track-workers.sh" || FAIL=1
+echo "=== spawn harness self-test ==="
+bash "$REPO_ROOT/tests/test-spawn-harness.sh" || FAIL=1
 if [ -f "$REPO_ROOT/tests/test-statusline-render.sh" ]; then
   echo
   echo "=== statusline render tests ==="
   bash "$REPO_ROOT/tests/test-statusline-render.sh" || FAIL=1
+fi
+if [ -f "$REPO_ROOT/tests/test-render-equivalence.sh" ]; then
+  echo
+  echo "=== render equivalence tests ==="
+  bash "$REPO_ROOT/tests/test-render-equivalence.sh" || FAIL=1
 fi
 if [ -f "$REPO_ROOT/tests/test-conf-backfill.sh" ]; then
   echo
@@ -43,6 +48,12 @@ bash "$REPO_ROOT/tests/test-cross-plugin-contract.sh" || FAIL=1
 echo
 echo "=== knowledge lint (content) tests ==="
 bash "$REPO_ROOT/tests/knowledge/test-lint-content.sh" || FAIL=1
+echo
+echo "=== knowledge harvest-copy tests ==="
+bash "$REPO_ROOT/tests/knowledge/test-harvest-copy.sh" || FAIL=1
+echo
+echo "=== knowledge check-move tests ==="
+bash "$REPO_ROOT/tests/knowledge/test-check-move.sh" || FAIL=1
 echo
 echo "=== knowledge skills tests ==="
 bash "$REPO_ROOT/tests/knowledge/test-skills.sh" || FAIL=1

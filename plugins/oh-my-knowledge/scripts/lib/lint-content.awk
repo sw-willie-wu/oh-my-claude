@@ -26,6 +26,27 @@ function nocode(s,   o, n, st, rest, t, off, k) {
   }
   return o s
 }
+# stripped(s): content of the first 2-backtick span with no backtick, no [[ and no edge space ("" if none)
+function stripped(s,   n, st, rest, t, off, k, c) {
+  while (match(s, /`+/)) {
+    st = RSTART; n = RLENGTH; rest = substr(s, st + n)
+    t = rest; off = 0; k = 0
+    while (match(t, /`+/)) {
+      if (RLENGTH == n) { k = off + RSTART; break }
+      off += RSTART + RLENGTH - 1; t = substr(t, RSTART + RLENGTH)
+    }
+    if (!k) { s = rest; continue }
+    c = substr(rest, 1, k - 1)
+    if (n == 2 && c != "" && c !~ /`/ && !index(c, "[[") && c !~ /^ | $/) return c
+    s = substr(rest, k + n)
+  }
+  return ""
+}
+# unclosed(s): 1 when some [[ in s has no ]] after it
+function unclosed(s,   p) {
+  while ((p = index(s, "[["))) { s = substr(s, p + 2); if (!(p = index(s, "]]"))) return 1; s = substr(s, p + 2) }
+  return 0
+}
 function unq(s) {
   s = trim(s)
   if (s ~ /^".*"$/ || s ~ /^\x27.*\x27$/) s = substr(s, 2, length(s) - 2)
@@ -140,7 +161,7 @@ BEGINFILE {
   }
   skipf = 0
   ln = 0; fm = 0; hasfm = 0; fmclose = 0; body = 0; moved = 0; infence = ""; incm = 0; cur = ""
-  fname = ""; ftype = ""; mtype = ""; fver = ""; stl = 0; vm = 0
+  fname = ""; ftype = ""; mtype = ""; fver = ""; fnp = ""; stl = 0; vm = 0
   delete movp
 }
 
@@ -174,10 +195,12 @@ BEGINFILE {
       cur = m[1]; v = unq(vclean(m[2]))
       if (cur == "type") ftype = v
       else if (cur == "verified") fver = v
+      else if (cur == "no_promote") fnp = v
     } else if (cur == "metadata" && match(line, /^[ \t]+([A-Za-z_]+):[ \t]*(.*)$/, m)) {
       v = unq(vclean(m[2]))
       if (m[1] == "type") mtype = v
       else if (m[1] == "verified") fver = v
+      else if (m[1] == "no_promote") fnp = v
     }
     next
   }
@@ -210,6 +233,9 @@ BEGINFILE {
         else if (today - uv > flagd) add("unverified_overdue", "yellow", id, ln, "UNVERIFIED flag from " um[3] " is " (today - uv) " days old (limit " flagd ")")
       }
     }
+    sc = stripped(c0)
+    if (sc != "") add("suspect_link_rewrite", "yellow", id, ln, "``" sc "`` looks like `[[" sc "]]` with its brackets stripped")
+    if (unclosed(nocode(c0))) add("suspect_link_rewrite", "yellow", id, ln, "unclosed [[ outside code (truncated by a link rewrite, or a literal [[ that belongs in backticks)")
     rest = c0
     while (match(rest, /`~\/[^`]*`/)) {
       p = substr(rest, RSTART + 1, RLENGTH - 2)
@@ -246,7 +272,7 @@ ENDFILE {
     isstub = (body > 0 && moved == body)
     pstub[id] = isstub
     if (tag == "K") {
-      pidx[id] = kidx; pproj[id] = kproj
+      pidx[id] = kidx; pproj[id] = kproj; pnp[id] = fnp
       if (stl && vm) add("stale", "blue", id, vmline, "verified " fver (stlage < 0 ? " (not a valid date, treated as old)" : " (" stlage " days ago, limit " staled ")") "; body mentions '" vmtext "'")
     } else if (tag == "A") {
       if (isstub) { for (p in movp) harvp[adir SUBSEP p] = 1 }
@@ -302,7 +328,11 @@ END {
   for (r in prom) {
     n = split(prom[r], pa, SUBSEP); delete ps
     for (j = 2; j <= n; j++) ps[pa[j]] = 1
-    add("promote_candidate", "blue", r, 0, "linked from project(s): " joined(ps))
+    np0 = pnp[r]; delete nps; s = np0; gsub(/[]["\x27]/, " ", s)
+    m2 = split(s, na, /[ \t,]+/); for (j = 1; j <= m2; j++) if (na[j] != "") nps[na[j]] = 1
+    cov = (length(nps) > 0); for (p in ps) if (!(p in nps)) { cov = 0; break }
+    if (cov) continue
+    add("promote_candidate", "blue", r, 0, "linked from project(s): " joined(ps) (np0 != "" ? " (no_promote: " np0 ")" : ""))
   }
   # ---- per auto-memory directory
   for (d in adirs) {
