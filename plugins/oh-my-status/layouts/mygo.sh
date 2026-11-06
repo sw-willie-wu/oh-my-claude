@@ -10,7 +10,7 @@ bar() {
   local filled=$(( pct * width / 100 ))
   [ "$filled" -gt "$width" ] && filled=$width
   local empty=$(( width - filled ))
-  local color
+  local color i
   if [ "$pct" -le 30 ]; then color="$C_GREEN"
   elif [ "$pct" -le 80 ]; then color="$C_YELLOW"
   else color="$C_RED"
@@ -18,13 +18,13 @@ bar() {
   local bar_str=""
   for ((i=0; i<filled; i++)); do bar_str+="♩"; done
   for ((i=0; i<empty; i++)); do bar_str+="·"; done
-  printf "${color}%s${RESET} %d%%" "$bar_str" "$pct"
+  printf -v REPLY "${color}%s${RESET} %d%%" "$bar_str" "$pct"
 }
 
 render() {
   local STAR="★"
   local NOTE="♪"
-  local BRANCH_ICON=$(printf '\xee\x82\xa0')
+  local BRANCH_ICON=$'\xee\x82\xa0'
 
   # Line 1: ★ model ♪ dir | branch stats
   local LINE1="${C_PRIMARY}${STAR} ${MODEL}${RESET}"
@@ -47,9 +47,9 @@ render() {
   fi
 
   # Line 2: musical usage bars with individual colors
-  local LINE2="${C_SUBTEXT}ctx${RESET} $(bar "${CTX_PCT:-0}" 12)"
-  [ -n "${RATE5_PCT:-}" ] && LINE2+="  ${C_SUBTEXT}5h${RESET} $(bar "$RATE5_PCT" 12)${RATE5_SUFFIX}"
-  [ -n "${RATE7_PCT:-}" ] && LINE2+="  ${C_SUBTEXT}7d${RESET} $(bar "$RATE7_PCT" 12)${RATE7_SUFFIX}"
+  bar "${CTX_PCT:-0}" 12; local LINE2="${C_SUBTEXT}ctx${RESET} ${REPLY}"
+  if [ -n "${RATE5_PCT:-}" ]; then bar "$RATE5_PCT" 12; LINE2+="  ${C_SUBTEXT}5h${RESET} ${REPLY}${RATE5_SUFFIX}"; fi
+  if [ -n "${RATE7_PCT:-}" ]; then bar "$RATE7_PCT" 12; LINE2+="  ${C_SUBTEXT}7d${RESET} ${REPLY}${RATE7_SUFFIX}"; fi
 
   echo -e "$LINE1"
   echo -e "$LINE2"

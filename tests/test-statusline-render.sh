@@ -1310,67 +1310,74 @@ end_test
 
 # --- spawn budgets (spec §0) ---
 # count_spawns (test-helpers.sh) runs the statusline with PATH=<shim dir> only and
-# counts forks + execs. Ceilings = measured + 2 (Windows fork-count variance).
+# counts forks + execs. Final targets, asserted for EVERY layout:
+#   R1 repo, git cache HIT, account cache HIT   <= 3  (jq = 2)
+#   R2 repo, git cache MISS, account cache HIT  <= 8  (jq 2 + git_info 1 + status 2 + diff 2)
+#   R3 non-repo cwd, account cache HIT          <= 3
+# History of the measured default-layout numbers (R1/R2/R3): P2 26/66/36,
+# P3 16/56/26, P4 5/46/12, P5 5/19/12.
 BT=$(mktemp -d)
 BUDGET_ACCT="$BT/acct.json"
 printf '{"oauthAccount":{"displayName":"w"}}' > "$BUDGET_ACCT"
 touch -d "@$(( $(date +%s) - 10 ))" "$BUDGET_ACCT"
 BUDGET_PAYLOAD='{"session_id":"budget","model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/d"},"context_window":{"used_percentage":8}}'
 
-budget_env() {  # $1=state-dir $2=ttl -> writes $1.conf / $1.in
-  printf 'LAYOUT=default\nGIT_CACHE_TTL=%s\n' "$2" > "$1.conf"
+budget_env() {  # $1=state-dir $2=ttl $3=layout -> writes $1.conf / $1.in ; creates the state dir
+  printf 'LAYOUT=%s\nGIT_CACHE_TTL=%s\n' "${3:-default}" "$2" > "$1.conf"
   printf '%s' "$BUDGET_PAYLOAD" > "$1.in"
+  mkdir -p "$1"
 }
 budget_prewarm() {  # $1=dir $2=state-dir : one normal render, same env as budget_case
   ( cd "$1" && OMC_CONF="$2.conf" OMC_STATE_DIR="$2" OMC_ACCOUNT_FILE="$BUDGET_ACCT" COLUMNS=120 \
       OMC_NOW_OVERRIDE=1793800000 bash "$STATUSLINE" < "$2.in" >/dev/null 2>&1 )
 }
-budget_case() {  # $1=label $2=dir $3=state-dir $4=ttl
-  budget_env "$3" "$4"
+budget_case() {  # $1=label $2=dir $3=state-dir $4=ttl $5=layout
+  budget_env "$3" "$4" "$5"
   ( cd "$2" && OMC_CONF="$3.conf" OMC_STATE_DIR="$3" OMC_ACCOUNT_FILE="$BUDGET_ACCT" COLUMNS=120 \
       OMC_NOW_OVERRIDE=1793800000 count_spawns "$3.cnt" "$3.in" "$STATUSLINE"; \
       printf '%s %s %s\n' "$SPAWNS" "$SPAWN_FORKS" "$SPAWN_EXECS" > "$3.res"; \
       grep '^MISSING' "$SPAWN_LOG" > "$3.missing" || : )
   read -r SPAWNS SPAWN_FORKS SPAWN_EXECS < "$3.res"
   SPAWN_MISSING=$(wc -l < "$3.missing" | tr -d ' '); SPAWN_LOG="$3.cnt/log"
-  printf '    measured %s: %s spawns (forks %s + execs %s)\n' "$1" "$SPAWNS" "$SPAWN_FORKS" "$SPAWN_EXECS"
-  [ -s "$3.cnt/stdout" ] || { printf '    FAIL: %s: empty stdout\n' "$1" >&2; TEST_FAILED=1; }
-  head -1 "$3.cnt/stdout" | grep -qF 'M' || { printf '    FAIL: %s: line 1 lacks the model\n' "$1" >&2; TEST_FAILED=1; }
+  printf '    measured %s/%s: %s spawns (forks %s + execs %s)\n' "$1" "$5" "$SPAWNS" "$SPAWN_FORKS" "$SPAWN_EXECS"
+  [ -s "$3.cnt/stdout" ] || { printf '    FAIL: %s/%s: empty stdout\n' "$1" "$5" >&2; TEST_FAILED=1; }
+  head -1 "$3.cnt/stdout" | grep -qF 'M' || { printf '    FAIL: %s/%s: line 1 lacks the model\n' "$1" "$5" >&2; TEST_FAILED=1; }
 }
 
-# P2 measured: R1=26 R2=66 R3=36. P3 measured: R1=16 R2=56 R3=26. P4 measured: R1=5 R2=46 R3=12. P5 measured: R1=5 R2=19 R3=12. Final targets (P6): R1<=3 R2<=8 R3<=3.
-BUDGET_R1=7; BUDGET_R2=21; BUDGET_R3=14
+BUDGET_R1=3; BUDGET_R2=8; BUDGET_R3=3
 
 BREPO=$(mktemp -d); gi_mkrepo "$BREPO" main
-
-start_test "spawn budget R1: repo, git cache HIT, account cache HIT"
-BS="$BT/r1"; budget_env "$BS" 300; budget_prewarm "$BREPO" "$BS"
-R1CF=$(ls "$BS"/gitcache-* 2>/dev/null | grep -v '\.stamp$' | head -1)
-R1BEFORE=$(cat "$R1CF" 2>/dev/null; printf X)
-case "$R1BEFORE" in 1793800000"$(printf '\t')"*) ;; *) printf '    FAIL: prewarm did not write an epoch-1793800000 cache line\n' >&2; TEST_FAILED=1 ;; esac
-budget_case R1 "$BREPO" "$BS" 300
-assert_spawns_le "$BUDGET_R1" "R1"
-assert_eq "0" "$(grep -c '^EXEC git ' "$SPAWN_LOG" || true)" "R1 cache HIT must not run git"
-assert_eq "0" "$(grep -c '^EXEC cat ' "$SPAWN_LOG" || true)" "R1 cache HIT must not run cat"
-assert_eq "$R1BEFORE" "$(cat "$R1CF" 2>/dev/null; printf X)" "R1 is a genuine HIT: the cache file was not rewritten"
-end_test
-
-start_test "spawn budget R2: repo, git cache MISS"
-BS="$BT/r2"; budget_case R2 "$BREPO" "$BS" 300
-assert_spawns_le "$BUDGET_R2" "R2"
-end_test
-
-start_test "spawn budget R3: non-repo cwd"
 BNOGIT=$(mktemp -d)
-if git -C "$BNOGIT" rev-parse 2>/dev/null; then
-  printf '    SKIP: temp dir is inside a git repo\n'
-else
-  BS="$BT/r3"; budget_case R3 "$BNOGIT" "$BS" 300
-  assert_spawns_le "$BUDGET_R3" "R3"
-fi
-rm -rf "$BNOGIT"
-end_test
-rm -rf "$BREPO" "$BT"
+BNOGIT_OK=1; git -C "$BNOGIT" rev-parse 2>/dev/null && BNOGIT_OK=0
+
+for BL in default fancy minimal mygo powerline pure; do
+  start_test "spawn budgets ($BL): R1 hit <=$BUDGET_R1, R2 miss <=$BUDGET_R2, R3 non-repo <=$BUDGET_R3"
+  # R1: prewarm in the repo (writes the git cache and the account cache), then measure.
+  BS="$BT/$BL-r1"; budget_env "$BS" 300 "$BL"; budget_prewarm "$BREPO" "$BS"
+  R1CF=$(ls "$BS"/gitcache-* 2>/dev/null | grep -v '\.stamp$' | head -1)
+  R1BEFORE=$(cat "$R1CF" 2>/dev/null; printf X)
+  case "$R1BEFORE" in 1793800000"$(printf '\t')"*) ;; *) printf '    FAIL: %s: prewarm did not write an epoch-1793800000 cache line\n' "$BL" >&2; TEST_FAILED=1 ;; esac
+  budget_case R1 "$BREPO" "$BS" 300 "$BL"
+  assert_spawns_le "$BUDGET_R1" "R1/$BL"
+  assert_eq "0" "$(grep -c '^EXEC git ' "$SPAWN_LOG" || true)" "R1/$BL cache HIT must not run git"
+  assert_eq "0" "$(grep -c '^EXEC cat ' "$SPAWN_LOG" || true)" "R1/$BL cache HIT must not run cat"
+  assert_eq "$R1BEFORE" "$(cat "$R1CF" 2>/dev/null; printf X)" "R1/$BL is a genuine HIT: the cache file was not rewritten"
+  # R2: the state dir and account cache are primed by a render in a NON-repo dir, so the
+  # repo's git cache is empty (miss) while the account cache hits.
+  BS="$BT/$BL-r2"; budget_env "$BS" 300 "$BL"; [ "$BNOGIT_OK" = 1 ] && budget_prewarm "$BNOGIT" "$BS"
+  budget_case R2 "$BREPO" "$BS" 300 "$BL"
+  assert_spawns_le "$BUDGET_R2" "R2/$BL"
+  # R3: non-repo cwd, state dir and account cache primed.
+  if [ "$BNOGIT_OK" = 1 ]; then
+    BS="$BT/$BL-r3"; budget_env "$BS" 300 "$BL"; budget_prewarm "$BNOGIT" "$BS"
+    budget_case R3 "$BNOGIT" "$BS" 300 "$BL"
+    assert_spawns_le "$BUDGET_R3" "R3/$BL"
+  else
+    printf '    SKIP: R3: temp dir is inside a git repo\n'
+  fi
+  end_test
+done
+rm -rf "$BREPO" "$BNOGIT" "$BT"
 
 # --- P3: render startup builtins (spec 2.4) ---
 P3=$(mktemp -d); mkdir -p "$P3/nogit" "$P3/st"

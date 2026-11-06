@@ -108,8 +108,11 @@ git_info() {
   # Not inside any repo (and no GIT_* env): same answer git would give, no process.
   _omc_git_walk
   [ "$_OMC_GIT_FOUND" = none ] && { printf '\t0\t0\t0\t0\t0'; return; }
+  # `$(exec 2>/dev/null; git ...)` instead of `$(git ... 2>/dev/null)`: bash only
+  # execs the last command of a command substitution in place (no extra fork)
+  # when that command has no redirections of its own.
   local st h sub_status="" diff_stats has_sub="" l a d
-  if ! st=$(git status --porcelain -b -uall --no-ahead-behind 2>/dev/null); then
+  if ! st=$(exec 2>/dev/null; git status --porcelain -b -uall --no-ahead-behind); then
     _omc_git_info_legacy; return
   fi
   # Toplevel (for the .gitmodules check): the walk's root; git decides when the
@@ -129,7 +132,7 @@ git_info() {
     sub_status=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
     diff_stats=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
   else
-    diff_stats=$(git diff HEAD --numstat 2>/dev/null)
+    diff_stats=$(exec 2>/dev/null; git diff HEAD --numstat)
   fi
   # Same predicates as the former grep -c: add ^A|^??, mod ^ M|^M|^AM, del ^ D|^D
   # (AM counts in both add and mod). The header and blank lines match nothing.

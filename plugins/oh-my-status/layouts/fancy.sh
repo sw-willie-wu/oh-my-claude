@@ -10,7 +10,7 @@ meter() {
   local filled=$(( pct * width / 100 ))
   [ "$filled" -gt "$width" ] && filled=$width
   local empty=$(( width - filled ))
-  local color
+  local color i
   if [ "$pct" -le 30 ]; then color="$C_GREEN"
   elif [ "$pct" -le 80 ]; then color="$C_YELLOW"
   else color="$C_RED"
@@ -18,12 +18,12 @@ meter() {
   local bar_str=""
   for ((i=0; i<filled; i++)); do bar_str+="━"; done
   for ((i=0; i<empty; i++)); do bar_str+="╌"; done
-  printf "${C_SUBTEXT}%s ${color}%s${RESET} %d%%" "$label" "$bar_str" "$pct"
+  printf -v REPLY "${C_SUBTEXT}%s ${color}%s${RESET} %d%%" "$label" "$bar_str" "$pct"
 }
 
 render() {
-  local FOLDER_ICON=$(printf '\xef\x81\xbb')
-  local BRANCH_ICON=$(printf '\xee\x82\xa0')
+  local FOLDER_ICON=$'\xef\x81\xbb'
+  local BRANCH_ICON=$'\xee\x82\xa0'
   local DOT="·"
 
   # Line 1: model + dir
@@ -49,9 +49,9 @@ render() {
   fi
 
   # Line 3: usage meters
-  local LINE3="$(meter "${CTX_PCT:-0}" "ctx" 12)"
-  [ -n "${RATE5_PCT:-}" ] && LINE3+="  $(meter "$RATE5_PCT" " 5h" 12)${RATE5_SUFFIX}"
-  [ -n "${RATE7_PCT:-}" ] && LINE3+="  $(meter "$RATE7_PCT" " 7d" 12)${RATE7_SUFFIX}"
+  meter "${CTX_PCT:-0}" "ctx" 12; local LINE3=$REPLY
+  if [ -n "${RATE5_PCT:-}" ]; then meter "$RATE5_PCT" " 5h" 12; LINE3+="  ${REPLY}${RATE5_SUFFIX}"; fi
+  if [ -n "${RATE7_PCT:-}" ]; then meter "$RATE7_PCT" " 7d" 12; LINE3+="  ${REPLY}${RATE7_SUFFIX}"; fi
 
   echo -e "$LINE1"
   [ -n "$LINE2" ] && echo -e "$LINE2"

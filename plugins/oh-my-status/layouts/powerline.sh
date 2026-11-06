@@ -4,18 +4,18 @@
 RESET='\033[0m'
 
 # Powerline arrow (requires Nerd Font)
-ARROW=$(printf '\xee\x82\xb0')
+ARROW=$'\xee\x82\xb0'
 
 pct_color() {
   local pct=${1:-0}
-  if [ "$pct" -le 30 ]; then echo -n "$C_GREEN"
-  elif [ "$pct" -le 80 ]; then echo -n "$C_YELLOW"
-  else echo -n "$C_RED"
+  if [ "$pct" -le 30 ]; then REPLY=$C_GREEN
+  elif [ "$pct" -le 80 ]; then REPLY=$C_YELLOW
+  else REPLY=$C_RED
   fi
 }
 
 render() {
-  local BRANCH_ICON=$(printf '\xee\x82\xa0')
+  local BRANCH_ICON=$'\xee\x82\xa0'
 
   # Segment 1: Model
   local LINE="${C_PRIMARY} ${MODEL} ${RESET}"
@@ -41,7 +41,7 @@ render() {
   STATS+="ctx:${CTX_PCT:-0}%"
   [ -n "${RATE5_PCT:-}" ] && STATS+=" 5h:${RATE5_PCT}%"
   [ -n "${RATE7_PCT:-}" ] && STATS+=" 7d:${RATE7_PCT}%"
-  LINE+="$(pct_color "${CTX_PCT:-0}") ${STATS} ${RESET}"
+  pct_color "${CTX_PCT:-0}"; LINE+="${REPLY} ${STATS} ${RESET}"
 
   echo -e "$LINE"
 }

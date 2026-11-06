@@ -30,6 +30,9 @@
 - A git cache miss runs 2 git commands instead of 4 plus ~10 helper
   processes (`git status -b` gives the branch; counting is done in bash).
 - On git older than 2.22 the branch name is now shown (it was empty).
+- Layouts no longer start subshells for icons and bars. A typical render now
+  starts 2 processes (jq) instead of about 35; on Windows this makes renders
+  sub-second instead of several seconds.
 
 ### Migration (3.0.0)
 - Restart every Claude Code session after updating. Until then an old 2.x

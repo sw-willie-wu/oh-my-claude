@@ -5,12 +5,12 @@ RESET='\033[0m'
 
 pct_indicator() {
   local pct=${1:-0} label=$2
-  local color
+  local color i
   if [ "$pct" -le 30 ]; then color="$C_GREEN"
   elif [ "$pct" -le 80 ]; then color="$C_YELLOW"
   else color="$C_RED"
   fi
-  printf "${color}%s:%d%%${RESET}" "$label" "$pct"
+  printf -v REPLY "${color}%s:%d%%${RESET}" "$label" "$pct"
 }
 
 render() {
@@ -28,9 +28,9 @@ render() {
     [ -n "$CHANGES" ] && LINE+=" ${CHANGES}"
   fi
 
-  LINE+="  $(pct_indicator "${CTX_PCT:-0}" ctx)"
-  [ -n "${RATE5_PCT:-}" ] && LINE+="  $(pct_indicator "$RATE5_PCT" 5h)"
-  [ -n "${RATE7_PCT:-}" ] && LINE+="  $(pct_indicator "$RATE7_PCT" 7d)"
+  pct_indicator "${CTX_PCT:-0}" ctx; LINE+="  ${REPLY}"
+  if [ -n "${RATE5_PCT:-}" ]; then pct_indicator "$RATE5_PCT" 5h; LINE+="  ${REPLY}"; fi
+  if [ -n "${RATE7_PCT:-}" ]; then pct_indicator "$RATE7_PCT" 7d; LINE+="  ${REPLY}"; fi
 
   echo -e "$LINE"
 }
