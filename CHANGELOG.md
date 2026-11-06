@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Removed (breaking)
+- The Workers section (background-shell rows) and everything behind it: the
+  PreToolUse/PostToolUse hooks (`hooks/track-workers.sh`), `lib/state-lock.sh`,
+  the per-session `state-<sid>.tsv` files and the `WORKERS_*` conf keys. A
+  `WORKERS_*` line left in `~/.claude/oh-my-claude.conf` is ignored. Use
+  `/tasks` to see background shells. Bash tool calls no longer start any
+  oh-my-status hook process.
+
 ### Added
 - oh-my-knowledge: `metadata.no_promote: <projects>` records a "keep in this
   project" decision; lint stops listing the page as `promote_candidate` until
@@ -21,6 +29,24 @@
   across sessions and loaded the whole machine. The setup upgrade prompt that
   offered to add `refreshInterval` to an existing statusLine is removed, and an
   existing `refreshInterval` value is never touched.
+- The statusline starts without helper processes: no `cat`/`dirname`/`date`
+  on a normal render (stdin goes straight to jq; bash builtins for the
+  clock and time formatting).
+- Git info cache: a cache hit starts no process, and a directory that is not
+  a git repository never runs git. The cache is dropped as soon as HEAD, the
+  index or the branch ref changes, so a branch switch, commit or stage shows
+  at the next render; edited files show within `GIT_CACHE_TTL`.
+- `GIT_CACHE_TTL` now defaults to 10 (was 3); an unset or invalid value also
+  means 10. An existing value in your conf is kept.
+- A git cache miss runs 2 git commands instead of 4 plus ~10 helper
+  processes (`git status -b` gives the branch; counting is done in bash).
+- On git older than 2.22 the branch name is now shown (it was empty).
+- Layouts no longer start subshells for icons and bars. A typical render now
+  starts 2 processes (jq) instead of about 35; on Windows this makes renders
+  sub-second instead of several seconds.
+- The 7-day rate-limit reset hint (shown above 80 %) now includes the time:
+  `(11/08 15:30)` instead of `(11/08)`.
+- `preview.sh` no longer prints `emit_workers: command not found` to stderr.
 - oh-my-knowledge: lint dispatches its judgement batches in waves of at most
   20 subagents (the session limit) and resends a refused batch; before, runs
   with more than 20 batches lost the rest. The retire steps moved to
@@ -44,6 +70,18 @@
   and `scripts/check-move.sh` makes it re-read any code span or fenced line
   holding `[[` that is missing from the knowledge-base page after a move (a
   2026-11-02 migration had stripped or truncated them in 10 pages).
+
+### Migration (2.1.0)
+- Restart every Claude Code session after updating. Until then an old 2.0
+  session can run its SessionStart again on resume, `/clear` or `/compact`
+  and copy the 2.0 statusline back; the next 2.1 SessionStart replaces it.
+- The first 2.1 SessionStart deletes the 2.0 leftovers: `state-*.tsv`,
+  `state.lock`, `track-workers.log` under `~/.claude/oh-my-claude/state/`, and
+  `hooks/track-workers.sh`, `lib/state-lock.sh`, `lib/conf-keys.sh` under
+  `~/.claude/oh-my-claude/` (the two folders are removed only when empty).
+- The stale-file sweep (`ctx-*`, `handoff-*`, `gitcache-*`, `account-*` older
+  than 24 h) now runs in `setup.sh`; standalone installs run it when
+  `install.sh` runs.
 
 ## 2.0.0 (2026-11-04)
 

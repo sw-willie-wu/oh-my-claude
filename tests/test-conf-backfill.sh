@@ -128,7 +128,7 @@ HOME="$sbox/home" \
   OMC_CONF_TEMPLATE="$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" \
   bash "$SETUP_SH" >/dev/null 2>&1
 [ -f "$custom_conf" ] || { printf '    FAIL: conf not written to OMC_CONF override path\n' >&2; TEST_FAILED=1; }
-assert_file_contains "$custom_conf" "WORKERS_MAX" "template copied to override conf path"
+assert_file_contains "$custom_conf" "GIT_CACHE_TTL" "template copied to override conf path"
 [ -d "$sbox/omc" ] || { printf '    FAIL: runtime not written to OMC_DIR override path\n' >&2; TEST_FAILED=1; }
 end_test
 
@@ -188,8 +188,13 @@ end_test
 # ============================================================
 
 start_test "T5.1 template leaves icon keys unset"
-out=$(env -u ACCOUNT_ICON -u WORKERS_SHELL_ICON bash -c '. "$1"; printf "%s|%s" "${ACCOUNT_ICON-unset}" "${WORKERS_SHELL_ICON-unset}"' _ "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
-assert_eq "unset|unset" "$out" "icon lines must be commented examples"
+out=$(env -u ACCOUNT_ICON bash -c '. "$1"; printf "%s" "${ACCOUNT_ICON-unset}"' _ "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
+assert_eq "unset" "$out" "icon lines must be commented examples"
+end_test
+
+start_test "T5.4 template sets GIT_CACHE_TTL to 10"
+out=$(env -u GIT_CACHE_TTL bash -c '. "$1"; printf "%s" "${GIT_CACHE_TTL-unset}"' _ "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
+assert_eq "10" "$out" "GIT_CACHE_TTL default in template"
 end_test
 
 start_test "T5.2 template defines account keys, no removed keys"
@@ -197,8 +202,8 @@ out=$(env -u ACCOUNT_SHOW -u ACCOUNT_FORMAT bash -c '. "$1"; printf "%s|%s" "${A
 assert_eq "true|name" "$out" "account defaults in template"
 out=$(env -u MODEL_CTX_TAG bash -c '. "$1"; printf "%s" "${MODEL_CTX_TAG-unset}"' _ "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
 assert_eq "true" "$out" "MODEL_CTX_TAG default in template"
-rm_hits=$(grep -c -E 'WORKERS_SHOW_AGENTS|WORKERS_SHOW_TYPE|WORKERS_AGENT_' "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
-assert_eq "0" "$rm_hits" "no removed agent keys in template"
+rm_hits=$(grep -c 'WORKERS_' "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
+assert_eq "0" "$rm_hits" "no WORKERS_ keys in template"
 end_test
 
 start_test "T5.3 empty user conf: missing lists account keys, not icons"

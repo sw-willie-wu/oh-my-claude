@@ -9,7 +9,7 @@ bar() {
   local filled=$(( pct * width / 100 ))
   [ "$filled" -gt "$width" ] && filled=$width
   local empty=$(( width - filled ))
-  local color
+  local color i
   if [ "$pct" -le 30 ]; then color="$C_GREEN"
   elif [ "$pct" -le 80 ]; then color="$C_YELLOW"
   else color="$C_RED"
@@ -17,12 +17,12 @@ bar() {
   local bar_str=""
   for ((i=0; i<filled; i++)); do bar_str+="█"; done
   for ((i=0; i<empty; i++)); do bar_str+="░"; done
-  printf "${color}${bar_str}${RESET} %d%%" "$pct"
+  printf -v REPLY "${color}${bar_str}${RESET} %d%%" "$pct"
 }
 
 render() {
-  local FOLDER_ICON=$(printf '\xef\x81\xbb')
-  local BRANCH_ICON=$(printf '\xee\x82\xa0')
+  local FOLDER_ICON=$'\xef\x81\xbb'
+  local BRANCH_ICON=$'\xee\x82\xa0'
 
   local LINE1="${C_PRIMARY}${MODEL}${RESET}"
   [ -n "$ACCOUNT" ] && LINE1+=" ${C_SUBTEXT}${ACCOUNT_ICON:+$ACCOUNT_ICON }${ACCOUNT}${RESET}"
@@ -43,11 +43,10 @@ render() {
     [ -n "$LINE_INFO" ] && LINE1="${LINE1}| ${LINE_INFO}"
   fi
 
-  local LINE2="$(bar "${CTX_PCT:-0}" 15)"
-  [ -n "${RATE5_PCT:-}" ] && LINE2+="  $(bar "$RATE5_PCT" 15)${RATE5_SUFFIX}"
-  [ -n "${RATE7_PCT:-}" ] && LINE2+="  $(bar "$RATE7_PCT" 15)${RATE7_SUFFIX}"
+  bar "${CTX_PCT:-0}" 15; local LINE2=$REPLY
+  if [ -n "${RATE5_PCT:-}" ]; then bar "$RATE5_PCT" 15; LINE2+="  ${REPLY}${RATE5_SUFFIX}"; fi
+  if [ -n "${RATE7_PCT:-}" ]; then bar "$RATE7_PCT" 15; LINE2+="  ${REPLY}${RATE7_SUFFIX}"; fi
 
-  emit_workers
   echo -e "$LINE1"
   echo -e "$LINE2"
 }

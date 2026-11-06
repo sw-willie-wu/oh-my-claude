@@ -15,7 +15,7 @@ Steps:
       - If AskUserQuestion is not available, ask in plain chat text instead.
       - If yes, ask a second question about timer refresh. If the AskUserQuestion tool is available, use it with these two options (in this order); otherwise ask in plain chat text:
         1. "No timer refresh (Recommended)"
-        2. "Refresh every 10 seconds" — keeps background-shell elapsed time updating while the main agent is idle, but costs CPU on Windows (each render is slow there).
+        2. "Refresh every 10 seconds" — keeps rate-limit and git info current while the main agent is idle, but costs CPU on Windows (each render is slow there).
       - Then add this to their ~/.claude/settings.json (NO `refreshInterval` unless the user chose option 2):
         ```json
         "statusLine": {

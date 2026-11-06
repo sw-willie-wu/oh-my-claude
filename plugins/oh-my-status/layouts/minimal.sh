@@ -5,9 +5,9 @@ RESET='\033[0m'
 
 pct_color() {
   local pct=${1:-0}
-  if [ "$pct" -le 30 ]; then echo -n "$C_GREEN"
-  elif [ "$pct" -le 80 ]; then echo -n "$C_YELLOW"
-  else echo -n "$C_RED"
+  if [ "$pct" -le 30 ]; then REPLY=$C_GREEN
+  elif [ "$pct" -le 80 ]; then REPLY=$C_YELLOW
+  else REPLY=$C_RED
   fi
 }
 
@@ -27,10 +27,9 @@ render() {
   fi
 
   LINE+=" ${C_SUBTEXT}|${RESET}"
-  LINE+=" $(pct_color "${CTX_PCT:-0}")${CTX_PCT:-0}%${RESET}"
-  [ -n "${RATE5_PCT:-}" ] && LINE+=" $(pct_color "$RATE5_PCT")${RATE5_PCT}%${RESET}"
-  [ -n "${RATE7_PCT:-}" ] && LINE+=" $(pct_color "$RATE7_PCT")${RATE7_PCT}%${RESET}"
+  pct_color "${CTX_PCT:-0}"; LINE+=" ${REPLY}${CTX_PCT:-0}%${RESET}"
+  if [ -n "${RATE5_PCT:-}" ]; then pct_color "$RATE5_PCT"; LINE+=" ${REPLY}${RATE5_PCT}%${RESET}"; fi
+  if [ -n "${RATE7_PCT:-}" ]; then pct_color "$RATE7_PCT"; LINE+=" ${REPLY}${RATE7_PCT}%${RESET}"; fi
 
-  emit_workers
   echo -e "$LINE"
 }
