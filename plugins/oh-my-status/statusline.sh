@@ -18,8 +18,8 @@ LAYOUT="default"
 # git_info() result cache TTL (seconds). Makes a statusLine
 # refreshInterval (opt-in; if used, 10 or more) affordable by not running
 # git every tick. 0 = disable caching (always
-# recompute = exact legacy behavior). Non-numeric/negative → 3.
-: "${GIT_CACHE_TTL:=3}"
+# recompute = exact legacy behavior). Non-numeric/negative → 10.
+: "${GIT_CACHE_TTL:=10}"
 # Account segment (spec §3.1). ACCOUNT_ICON is dash form: explicit "" disables it.
 : "${ACCOUNT_SHOW:=true}"
 : "${ACCOUNT_FORMAT:=name}"
@@ -101,6 +101,9 @@ git_info() {
   # + export scopes it to this function and the git children it spawns
   # (including the nested ones under `submodule foreach`).
   local GIT_OPTIONAL_LOCKS=0; export GIT_OPTIONAL_LOCKS
+  # Not inside any repo (and no GIT_* env): same answer git would give, no process.
+  _omc_git_walk
+  [ "$_OMC_GIT_FOUND" = none ] && { printf '\t0\t0\t0\t0\t0'; return; }
   # `--show-toplevel` doubles as the in-a-worktree gate AND gives the path for
   # the .gitmodules check below in a single git call (replacing the old bare
   # `rev-parse --git-dir` gate; a bare repo with no worktree → treated as
@@ -135,62 +138,93 @@ git_info() {
   printf '%s\t%s\t%s\t%s\t%s\t%s' "$branch" "$add" "$mod" "$del" "$ladd" "$ldel"
 }
 
-# Short-TTL on-disk cache around git_info(), keyed by $PWD (the dir git runs
-# in — NOT current_dir (display-only), which differs from
-# $PWD under MSYS). Makes an opt-in statusLine refreshInterval affordable. OMC_STATE_DIR
-# is set at the top of this file. Stale-write
-# safety: per-cwd file + atomic tmp+mv (no lock;
-# worst case is N concurrent dupes, self-healing).
-cached_git_info() {
-  local ttl="$GIT_CACHE_TTL"
-  # empty / negative / decimal / non-integer → 3; "0" (disabled) preserved.
-  case "$ttl" in ''|*[!0-9]*) ttl=3 ;; esac
-  if [ "$ttl" = "0" ]; then
-    git_info
-    return
+# Locate the enclosing git repo with builtins only (no git process). Sets
+# _OMC_GIT_FOUND = repo | none | env | skip, plus _OMC_GIT_ROOT / _OMC_GIT_DIR /
+# _OMC_GIT_COMMON (repo only) and _OMC_GIT_WD (the $PWD the result belongs to).
+#   none = no repo above the cwd (and no GIT_* env): safe to skip git entirely.
+#   env  = GIT_DIR/GIT_WORK_TREE/GIT_COMMON_DIR set: git decides, no shortcut.
+#   skip = bash < 5 or the cwd is gone: no shortcut, no invalidation.
+# Walks the PHYSICAL cwd (what git uses): bash on Linux/macOS keeps an
+# inherited logical $PWD that may go through symlinks. The result is memoized
+# per $PWD.
+_omc_git_walk() {
+  if (( BASH_VERSINFO[0] < 5 )) || ! cd -P -e . 2>/dev/null; then
+    _OMC_GIT_FOUND=skip _OMC_GIT_WD= _OMC_GIT_ROOT= _OMC_GIT_DIR= _OMC_GIT_COMMON=; return 0
   fi
-  local wd key file content now mtime age out
-  # Key off the ACTUAL cwd (getcwd via `pwd -P`), not the $PWD variable:
-  # Claude Code can invoke the statusLine command with $PWD empty, which
-  # collapsed key="" so every repo shared one "gitcache-" file and got
-  # served another repo's git info. If even getcwd is unavailable (cwd
-  # deleted), bypass the cache entirely — compute fresh, write nothing —
-  # so a missing cwd can never poison a shared key.
-  wd=$(pwd -P 2>/dev/null)
-  if [ -z "$wd" ]; then
-    git_info
-    return
+  [ "${_OMC_GIT_WD-}" = "$PWD" ] && [ -n "${_OMC_GIT_FOUND-}" ] && return 0
+  _OMC_GIT_WD=$PWD _OMC_GIT_ROOT= _OMC_GIT_DIR= _OMC_GIT_COMMON=
+  if [ -n "${GIT_DIR-}${GIT_WORK_TREE-}${GIT_COMMON_DIR-}" ]; then _OMC_GIT_FOUND=env; return 0; fi
+  case $PWD in /*) ;; *) _OMC_GIT_FOUND=skip; return 0 ;; esac   # defensive; cd -P yields an absolute path
+  local d=$PWD l c
+  while :; do
+    if [ -d "$d/.git" ]; then
+      # git skips a .git dir that is not a repo and keeps walking; so do we.
+      if [ -f "$d/.git/HEAD" ] && [ -d "$d/.git/objects" ]; then _OMC_GIT_DIR=$d/.git; break; fi
+    elif [ -f "$d/.git" ]; then
+      l=; IFS= read -r l < "$d/.git" || [ -n "$l" ] || :
+      case $l in "gitdir: "*) l=${l#gitdir: } ;; *) l= ;; esac
+      case $l in /*|[A-Za-z]:*) ;; ?*) l=$d/$l ;; esac
+      _OMC_GIT_DIR=$l; break                      # any gitfile = found; git decides
+    fi
+    [ -z "$d" ] && { _OMC_GIT_FOUND=none; return 0; }
+    d=${d%/*}
+  done
+  _OMC_GIT_ROOT=${d:-/}; _OMC_GIT_FOUND=repo; _OMC_GIT_COMMON=$_OMC_GIT_DIR
+  if [ -n "$_OMC_GIT_DIR" ] && [ -f "$_OMC_GIT_DIR/commondir" ]; then
+    c=; IFS= read -r c < "$_OMC_GIT_DIR/commondir" || [ -n "$c" ] || :
+    case $c in /*|[A-Za-z]:*) _OMC_GIT_COMMON=$c ;; ?*) _OMC_GIT_COMMON=$_OMC_GIT_DIR/$c ;; esac
   fi
-  key=$(printf '%s' "$wd" | sed 's/[^A-Za-z0-9]/-/g')
-  file="$OMC_STATE_DIR/gitcache-${key}"
-  if [ -f "$file" ]; then
-    # OMC_NOW_OVERRIDE: test-only clock seam so the TTL-boundary tests are
-    # deterministic instead of racing wall-clock on a slow box. Unset in
-    # production → identical behaviour (date +%s).
-    _omc_now; now=$REPLY
-    mtime=$(stat -c %Y "$file" 2>/dev/null)
-    [ -z "$mtime" ] && mtime=$(date -r "$file" +%s 2>/dev/null)
-    if [ -n "$mtime" ]; then
-      age=$((now - mtime))
-      if [ "$age" -le "$ttl" ]; then
-        content=$(cat "$file")          # $() strips trailing \n (none written)
-        local TAB; TAB=$'\t'
-        # Well-formed = exactly one line, 6 fields, fields 2–6 integers. The
-        # anchored bash regex (no /m) also enforces single-line: a 0-byte,
-        # truncated, or multi-line file fails. $re MUST stay unquoted.
-        local re="^[^${TAB}]*${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+${TAB}[0-9]+$"
-        if [[ "$content" =~ $re ]]; then
-          printf '%s' "$content"
-          return
-        fi
-      fi
+}
+
+# Git-info cache (sets the global GI_LINE = 6 TAB fields). Keyed by the
+# physical cwd. File gitcache-<key> holds "<epoch>\t<6 fields>\n"; the empty
+# file gitcache-<key>.stamp is created BEFORE git runs, so any repo write during
+# git_info is newer than the stamp and the next render misses.
+# A hit needs: a complete line (read rc 0; a missing trailing newline = torn
+# write = miss), the 7-field guard, age <= TTL, and the stamp strictly newer
+# than HEAD, index, logs/HEAD, the branch ref, packed-refs and reftable's
+# tables.list. So a branch switch / commit / stage shows at the next render,
+# while edits to working-tree files show within the TTL. No git, no cat, no
+# subshell on a hit. Non-repo dirs never run git.
+_omc_cached_git_info() {
+  local ttl="$GIT_CACHE_TTL" wd key file stamp line epoch age out T=$'\t' re
+  case "$ttl" in ''|*[!0-9]*) ttl=10 ;; esac
+  _omc_git_walk
+  if [ "$_OMC_GIT_FOUND" = none ]; then GI_LINE=$'\t0\t0\t0\t0\t0'; return; fi
+  if [ "$ttl" = 0 ]; then GI_LINE=$(git_info); return; fi
+  if [ "$_OMC_GIT_FOUND" = skip ]; then wd=$(pwd -P 2>/dev/null)   # bash < 5 or cd failed: old key path
+  else wd=$PWD; fi                                                # the walk already did `cd -P -e .`
+  # cwd gone (getcwd fails): compute fresh and write nothing, so a missing cwd
+  # can never poison a shared key.
+  [ -n "$wd" ] || { GI_LINE=$(git_info); return; }
+  key=${wd//[^A-Za-z0-9]/-}; file="$OMC_STATE_DIR/gitcache-$key"; stamp="$file.stamp"
+  if [ -f "$file" ] && [ -f "$stamp" ] && IFS= read -r line < "$file"; then
+    re="^(0|[1-9][0-9]{0,17})${T}[^${T}]*${T}[0-9]+${T}[0-9]+${T}[0-9]+${T}[0-9]+${T}[0-9]+$"
+    if [[ $line =~ $re ]]; then
+      _omc_now; epoch=${line%%"$T"*}; age=$((REPLY - epoch))
+      if [ "$age" -le "$ttl" ] && _omc_git_fresh "$stamp"; then GI_LINE=${line#*"$T"}; return; fi
     fi
   fi
-  out=$(git_info)                                                  # MISS
-  mkdir -p "$OMC_STATE_DIR" 2>/dev/null
-  { printf '%s' "$out" > "$file.tmp.$$" && mv "$file.tmp.$$" "$file"; } 2>/dev/null  # atomic
-  printf '%s' "$out"
+  [ -d "$OMC_STATE_DIR" ] || mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+  { : > "$stamp"; } 2>/dev/null; _omc_now; epoch=$REPLY
+  out=$(git_info)
+  { printf '%s\t%s\n' "$epoch" "$out" > "$file"; } 2>/dev/null
+  GI_LINE=$out
 }
+# 0 iff the stamp ($1) is strictly newer than every existing invalidation file.
+_omc_git_fresh() {
+  [ "$_OMC_GIT_FOUND" = repo ] || return 0
+  local gd=$_OMC_GIT_DIR cdir=$_OMC_GIT_COMMON h= f ref=
+  IFS= read -r h < "$gd/HEAD" 2>/dev/null || [ -n "$h" ] || :
+  case $h in "ref: "*) ref="$cdir/${h#ref: }" ;; esac
+  for f in "$gd/HEAD" "$gd/index" "$gd/logs/HEAD" "$cdir/packed-refs" "$cdir/reftable/tables.list" ${ref:+"$ref"}; do
+    [ -e "$f" ] || continue
+    [[ $1 -nt $f ]] || return 1
+  done
+  return 0
+}
+# Printing wrapper kept for the tests (and as the old public name).
+cached_git_info() { _omc_cached_git_info; printf '%s' "$GI_LINE"; }
 
 # The 9 NUL-delimited reads of parse_status_json (stdin = jq output).
 _omc_read_status_fields() {
@@ -339,7 +373,7 @@ fi
 apply_model_ctx_tag
 # Reap any crash-orphaned temp files before this render writes its own.
 _omc_sweep_stale_tmp
-GI_LINE=$(cached_git_info)
+_omc_cached_git_info
 split_gi_line "$GI_LINE"
 cached_account_fields; resolve_account
 

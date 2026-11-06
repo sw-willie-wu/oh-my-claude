@@ -192,6 +192,11 @@ out=$(env -u ACCOUNT_ICON bash -c '. "$1"; printf "%s" "${ACCOUNT_ICON-unset}"' 
 assert_eq "unset" "$out" "icon lines must be commented examples"
 end_test
 
+start_test "T5.4 template sets GIT_CACHE_TTL to 10"
+out=$(env -u GIT_CACHE_TTL bash -c '. "$1"; printf "%s" "${GIT_CACHE_TTL-unset}"' _ "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
+assert_eq "10" "$out" "GIT_CACHE_TTL default in template"
+end_test
+
 start_test "T5.2 template defines account keys, no removed keys"
 out=$(env -u ACCOUNT_SHOW -u ACCOUNT_FORMAT bash -c '. "$1"; printf "%s|%s" "${ACCOUNT_SHOW-unset}" "${ACCOUNT_FORMAT-unset}"' _ "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
 assert_eq "true|name" "$out" "account defaults in template"

@@ -21,6 +21,12 @@
 - The statusline starts without helper processes: no `cat`/`dirname`/`date`
   on a normal render (stdin goes straight to jq; bash builtins for the
   clock and time formatting).
+- Git info cache: a cache hit starts no process, and a directory that is not
+  a git repository never runs git. The cache is dropped as soon as HEAD, the
+  index or the branch ref changes, so a branch switch, commit or stage shows
+  at the next render; edited files show within `GIT_CACHE_TTL`.
+- `GIT_CACHE_TTL` now defaults to 10 (was 3); an unset or invalid value also
+  means 10. An existing value in your conf is kept.
 
 ### Migration (3.0.0)
 - Restart every Claude Code session after updating. Until then an old 2.x

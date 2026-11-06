@@ -33,7 +33,7 @@ This marketplace (`oh-my-claude`) ships two plugins: **oh-my-status** (a themeab
 
 - The statusline needs `jq` 1.7 or newer.
 - Timer refresh is opt-in. By default the statusline re-renders only on Claude Code events, so rate-limit and git info can go stale while the main agent is idle. To keep them current, add `"refreshInterval": 10` to your `statusLine` settings (`/oh-my-status:setup` asks about this; it is never added by default). Avoid values below 10: on Windows a render can take several seconds, so a short timer stacks overlapping statusline processes across sessions and burns CPU.
-- `GIT_CACHE_TTL` (conf key, default 3): git info is cached for this many seconds instead of running git on every render. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
+- `GIT_CACHE_TTL` (conf key, default 10): git runs at most once per this many seconds. A branch switch, commit or stage shows at the next render anyway, because the cache is dropped as soon as `.git` (HEAD, index, the branch ref) changes; edits to working-tree files show within `GIT_CACHE_TTL` seconds. Directories that are not git repositories never run git. Set `GIT_CACHE_TTL=0` to disable the cache and always run git.
 
 ## Account
 

@@ -85,12 +85,110 @@ assert_eq "6" "$GI_NF" "detached HEAD still emits 6 fields"
 rm -rf "$GI_DET"
 end_test
 
+# --- P4 Task 4.1: _omc_git_walk (builtin repo discovery) ---
+# Every row runs in its own process: the walk memoizes on $PWD, and GIT_* env
+# changes inside one process would see a stale result.
+gi_mkrepo() {  # $1=dir $2=initial branch name
+  mkdir -p "$1"
+  ( cd "$1" && git init -q . && git config user.email t@t.t && git config user.name t \
+      && echo a > f.txt && git add f.txt && git commit -qm i && git branch -m "$2" )
+}
+walk_in() {  # $1=dir ; extra env via prefix ; prints FOUND|ROOT|DIR|COMMON
+  ( cd "$1" && OMC_CONF=/dev/null bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "$0"
+      _omc_git_walk
+      printf "%s|%s|%s|%s" "$_OMC_GIT_FOUND" "$_OMC_GIT_ROOT" "$_OMC_GIT_DIR" "$_OMC_GIT_COMMON"' "$STATUSLINE" )
+}
+phys() { ( cd "$1" && pwd -P ); }   # normalized physical path (resolves .. and symlinks)
+
+start_test "walk: plain repo, cwd in a subdir"
+WR=$(mktemp -d); gi_mkrepo "$WR" main; mkdir -p "$WR/sub/deep"; P=$(phys "$WR")
+IFS='|' read -r f r d c <<<"$(walk_in "$WR/sub/deep")"
+assert_eq "repo" "$f" "found"; assert_eq "$P" "$r" "root"
+assert_eq "$P/.git" "$d" "dir"; assert_eq "$P/.git" "$c" "common"
+rm -rf "$WR"
+end_test
+
+start_test "walk: worktree resolves the relative commondir"
+WR=$(mktemp -d); gi_mkrepo "$WR/main" main; git -C "$WR/main" worktree add -q "$WR/wt" -b wtb >/dev/null 2>&1
+P=$(phys "$WR")
+IFS='|' read -r f r d c <<<"$(walk_in "$WR/wt")"
+assert_eq "repo" "$f" "found"; assert_eq "$P/wt" "$r" "root"
+case "$(phys "$d")" in "$P/main/.git/worktrees/"*) ;; *) printf '    FAIL: dir %s not under main/.git/worktrees/\n' "$d" >&2; TEST_FAILED=1 ;; esac
+assert_eq "$P/main/.git" "$(phys "$c")" "common (relative commondir resolved)"
+rm -rf "$WR"
+end_test
+
+start_test "walk: worktree with an absolute commondir"
+WR=$(mktemp -d); gi_mkrepo "$WR/main" main; git -C "$WR/main" worktree add -q "$WR/wt" -b wtb >/dev/null 2>&1
+ABS=$(phys "$WR/main/.git"); command -v cygpath >/dev/null 2>&1 && ABS=$(cygpath -m "$ABS")
+for cdf in "$WR"/main/.git/worktrees/*/commondir; do printf '%s\n' "$ABS" > "$cdf"; done
+IFS='|' read -r f r d c <<<"$(walk_in "$WR/wt")"
+assert_eq "repo" "$f" "found"; assert_eq "$ABS" "$c" "common is the absolute path as written"
+rm -rf "$WR"
+end_test
+
+start_test "walk: a .git dir without HEAD, or without objects/, above a real repo is skipped"
+WR=$(mktemp -d); gi_mkrepo "$WR" main; P=$(phys "$WR")
+mkdir -p "$WR/a/.git" "$WR/b/.git"; echo 'ref: refs/heads/x' > "$WR/b/.git/HEAD"
+IFS='|' read -r f r d c <<<"$(walk_in "$WR/a")"
+assert_eq "repo" "$f" "no-HEAD: found"; assert_eq "$P" "$r" "no-HEAD: real repo root"
+IFS='|' read -r f r d c <<<"$(walk_in "$WR/b")"
+assert_eq "repo" "$f" "no-objects: found"; assert_eq "$P" "$r" "no-objects: real repo root"
+rm -rf "$WR"
+end_test
+
+start_test "walk: non-repo directory finds nothing"
+WR=$(mktemp -d)
+assert_eq "none|||" "$(walk_in "$WR")" "non-repo"
+rm -rf "$WR"
+end_test
+
+start_test "walk: GIT_DIR set -> env (no shortcut)"
+WR=$(mktemp -d)
+assert_eq "env" "$(GIT_DIR=x walk_in "$WR" | cut -d'|' -f1)" "GIT_DIR"
+assert_eq "env" "$(GIT_WORK_TREE=x walk_in "$WR" | cut -d'|' -f1)" "GIT_WORK_TREE"
+assert_eq "env" "$(GIT_COMMON_DIR=x walk_in "$WR" | cut -d'|' -f1)" "GIT_COMMON_DIR"
+rm -rf "$WR"
+end_test
+
+start_test "walk: empty \$PWD inside the script is restored by cd -P -e ."
+WR=$(mktemp -d); gi_mkrepo "$WR" main; mkdir -p "$WR/sub"; P=$(phys "$WR")
+OUT=$( cd "$WR/sub" && OMC_CONF=/dev/null bash -c '
+    OMC_TEST_LIB_ONLY=1
+    source "$0"
+    PWD=""
+    _omc_git_walk
+    printf "%s|%s" "$_OMC_GIT_FOUND" "$_OMC_GIT_ROOT"' "$STATUSLINE" )
+assert_eq "repo|$P" "$OUT" "found with empty PWD"
+rm -rf "$WR"
+end_test
+
+start_test "walk: cwd reached through a symlink resolves to the physical repo"
+WR=$(mktemp -d); WL=$(mktemp -d); gi_mkrepo "$WR" main; mkdir -p "$WR/sub"; ln -s "$WR/sub" "$WL/link" 2>/dev/null
+if [ -L "$WL/link" ]; then
+  P=$(phys "$WR")
+  OUT=$( cd "$WL/link" && OMC_CONF=/dev/null bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "$0"
+      _omc_git_walk
+      printf "%s|%s" "$_OMC_GIT_FOUND" "$_OMC_GIT_ROOT"' "$STATUSLINE" )
+  assert_eq "repo|$P" "$OUT" "found via symlink, physical root"
+else
+  printf '    SKIP: ln -s does not create symlinks here\n'
+fi
+rm -rf "$WR" "$WL"
+end_test
+
 # --- Task B: cached_git_info() + GIT_CACHE_TTL ---
 # Cache-layer tests stub git_info() by REDEFINING it after sourcing (function
 # resolution is dynamic, so cached_git_info calls the stub). This decouples
-# the cache logic from real git — git parsing is already covered by Task A's
-# git_info tests. The stub bumps a persistent counter file so HIT (no bump)
-# vs MISS (bump) is observable across separate processes.
+# the cache logic from real git. The stub bumps a persistent counter file so HIT
+# (no bump) vs MISS (bump) is observable across separate processes. Work dirs
+# get a minimal fake repo (.git/HEAD + .git/objects/) so the walk finds a
+# "repo" and the stub is still reached; its HEAD is old, so the stamp is
+# strictly newer. The clock is driven by OMC_NOW_OVERRIDE.
 # $1=workdir(cd target → $PWD = cache key) $2=OMC_STATE_DIR $3=GIT_CACHE_TTL
 # $4=stub output (default well-formed 6-field line)
 cgi() {
@@ -105,21 +203,28 @@ cgi() {
       cached_git_info
   ' )
 }
+cgi_wd() {  # a temp dir with a minimal fake repo whose files are old
+  local d; d=$(mktemp -d); mkdir -p "$d/.git/objects"; echo 'ref: refs/heads/x' > "$d/.git/HEAD"
+  touch -d @1000000000 "$d/.git/HEAD" "$d/.git/objects"; printf '%s' "$d"
+}
+cache_file() { ls "$1"/gitcache-* 2>/dev/null | grep -v '\.stamp$' | head -1; }
 STUB_LINE=$(printf 'stub\t1\t2\t3\t4\t5')
+E=1000000000
 
-start_test "cached_git_info: miss invokes git_info once and creates the cache file"
-ST=$(mktemp -d); WD=$(mktemp -d)
-OUT=$(cgi "$WD" "$ST" 3)
+start_test "cached_git_info: miss invokes git_info once; cache file is '<epoch>TAB<line>' + newline; stamp written"
+ST=$(mktemp -d); WD=$(cgi_wd)
+OUT=$(OMC_NOW_OVERRIDE=$E cgi "$WD" "$ST" 3)
 assert_eq "$STUB_LINE" "$OUT" "miss must return git_info output"
 assert_eq "1" "$(cat "$ST/.gitcnt")" "git_info called exactly once on miss"
-CF=$(ls "$ST"/gitcache-* 2>/dev/null)
+CF=$(cache_file "$ST")
 [ -n "$CF" ] || { printf '    FAIL: no cache file created\n' >&2; TEST_FAILED=1; }
-assert_eq "$STUB_LINE" "$(cat "$CF" 2>/dev/null)" "cache file content == git_info output"
+assert_eq "$(printf '%s\t%s\nX' "$E" "$STUB_LINE")" "$(cat "$CF" 2>/dev/null; printf X)" "cache file content incl. trailing newline"
+[ -f "$CF.stamp" ] || { printf '    FAIL: no .stamp file\n' >&2; TEST_FAILED=1; }
 rm -rf "$ST" "$WD"
 end_test
 
 start_test "cached_git_info: fresh cache is a HIT (git_info not re-invoked)"
-ST=$(mktemp -d); WD=$(mktemp -d)
+ST=$(mktemp -d); WD=$(cgi_wd)
 OUT1=$(cgi "$WD" "$ST" 300); OUT2=$(cgi "$WD" "$ST" 300)
 assert_eq "1" "$(cat "$ST/.gitcnt")" "second call must be a cache HIT (counter stays 1)"
 assert_eq "$STUB_LINE" "$OUT2" "HIT returns cached content"
@@ -127,34 +232,17 @@ rm -rf "$ST" "$WD"
 end_test
 
 start_test "cached_git_info: TTL boundary is <= (age==TTL HIT, age==TTL+1 MISS)"
-# Deterministic: pin the cache mtime to a fixed epoch E and drive cached_git_info's
-# clock via OMC_NOW_OVERRIDE, so age = NOW-E is exact regardless of how slow the
-# box is. (The old form raced wall-clock between `touch` and the 2nd call's own
-# date+%s; on a loaded MSYS box age slipped to TTL+1 → false MISS → flaky.)
-ST=$(mktemp -d); WD=$(mktemp -d)
-E=1000000000
-cgi "$WD" "$ST" 3 >/dev/null               # miss → counter=1, cache written
-CF=$(ls "$ST"/gitcache-*)
-touch -d "@$E" "$CF"                        # mtime = E (fixed)
-OMC_NOW_OVERRIDE=$((E + 3)) cgi "$WD" "$ST" 3 >/dev/null   # age == TTL(3)
+ST=$(mktemp -d); WD=$(cgi_wd)
+OMC_NOW_OVERRIDE=$E cgi "$WD" "$ST" 3 >/dev/null               # miss → counter=1
+OMC_NOW_OVERRIDE=$((E + 3)) cgi "$WD" "$ST" 3 >/dev/null       # age == TTL(3)
 assert_eq "1" "$(cat "$ST/.gitcnt")" "age == TTL must be a HIT (<= boundary, not <)"
-OMC_NOW_OVERRIDE=$((E + 4)) cgi "$WD" "$ST" 3 >/dev/null   # age == TTL+1
+OMC_NOW_OVERRIDE=$((E + 4)) cgi "$WD" "$ST" 3 >/dev/null       # age == TTL+1
 assert_eq "2" "$(cat "$ST/.gitcnt")" "age == TTL+1 must MISS (boundary excludes above)"
 rm -rf "$ST" "$WD"
 end_test
 
-start_test "cached_git_info: age beyond TTL is a MISS (cache rewritten)"
-ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" 3 >/dev/null
-CF=$(ls "$ST"/gitcache-*)
-touch -d "@$(( $(date +%s) - 4 ))" "$CF"   # TTL+1 old
-cgi "$WD" "$ST" 3 >/dev/null
-assert_eq "2" "$(cat "$ST/.gitcnt")" "expired cache must recompute"
-rm -rf "$ST" "$WD"
-end_test
-
 start_test "cached_git_info: GIT_CACHE_TTL=0 disables caching (no file, every call computes)"
-ST=$(mktemp -d); WD=$(mktemp -d)
+ST=$(mktemp -d); WD=$(cgi_wd)
 cgi "$WD" "$ST" 0 >/dev/null; cgi "$WD" "$ST" 0 >/dev/null
 assert_eq "2" "$(cat "$ST/.gitcnt")" "TTL=0 must compute every call"
 ls "$ST"/gitcache-* >/dev/null 2>&1 \
@@ -163,35 +251,36 @@ rm -rf "$ST" "$WD"
 end_test
 
 start_test "cached_git_info: distinct \$PWD yields distinct cache files"
-ST=$(mktemp -d); WD1=$(mktemp -d); WD2=$(mktemp -d)
+ST=$(mktemp -d); WD1=$(cgi_wd); WD2=$(cgi_wd)
 cgi "$WD1" "$ST" 3 >/dev/null; cgi "$WD2" "$ST" 3 >/dev/null
-N=$(ls "$ST"/gitcache-* 2>/dev/null | wc -l | tr -d ' ')
+N=$(ls "$ST"/gitcache-* 2>/dev/null | grep -vc '\.stamp$')
 assert_eq "2" "$N" "two different workdirs must key two different cache files"
 rm -rf "$ST" "$WD1" "$WD2"
 end_test
 
-start_test "cached_git_info: malformed (5-field) cache file fails the guard and recomputes"
-ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" 3 >/dev/null            # counter=1, valid cache
-CF=$(ls "$ST"/gitcache-*)
-printf 'bad\t1\t2\t3\t4' > "$CF"        # 5 fields, fresh mtime
-cgi "$WD" "$ST" 3 >/dev/null
-assert_eq "2" "$(cat "$ST/.gitcnt")" "5-field cache must fail guard → recompute"
-rm -rf "$ST" "$WD"
-end_test
-
-start_test "cached_git_info: empty (0-byte) cache file fails the guard and recomputes"
-ST=$(mktemp -d); WD=$(mktemp -d)
-cgi "$WD" "$ST" 3 >/dev/null
-CF=$(ls "$ST"/gitcache-*)
-: > "$CF"                               # 0-byte, fresh mtime
-cgi "$WD" "$ST" 3 >/dev/null
-assert_eq "2" "$(cat "$ST/.gitcnt")" "0-byte cache must fail guard → recompute"
-rm -rf "$ST" "$WD"
+# Guard tests: overwrite the cache with a damaged file after a normal miss at
+# epoch E, then render again at E (age 0, so only the guard can cause a miss).
+guard_case() {  # $1=label $2=printf format (one %s = E)
+  local ST WD CF
+  ST=$(mktemp -d); WD=$(cgi_wd)
+  OMC_NOW_OVERRIDE=$E cgi "$WD" "$ST" 300 >/dev/null            # counter=1, valid cache
+  CF=$(cache_file "$ST")
+  # shellcheck disable=SC2059
+  printf "$2" "$E" > "$CF"
+  OMC_NOW_OVERRIDE=$E cgi "$WD" "$ST" 300 >/dev/null
+  assert_eq "2" "$(cat "$ST/.gitcnt")" "$1 must fail the guard → recompute"
+  rm -rf "$ST" "$WD"
+}
+start_test "cached_git_info: malformed cache files fail the guard and recompute"
+guard_case "5-field line" '%s\tbad\t1\t2\t3\t4\n'
+guard_case "0-byte file" ''
+guard_case "line without trailing newline" '%s\tstub\t1\t2\t3\t4\t5'
+guard_case "old 6-field format" 'stub\t1\t2\t3\t4\t5\n'
+guard_case "epoch with a leading zero (09, invalid octal)" '09\tmain\t0\t0\t0\t0\t0\n'
 end_test
 
 start_test "cached_git_info: valid non-repo line passes the guard and HITs"
-ST=$(mktemp -d); WD=$(mktemp -d)
+ST=$(mktemp -d); WD=$(cgi_wd)
 NONREPO=$(printf '\t0\t0\t0\t0\t0')
 cgi "$WD" "$ST" 300 "$NONREPO" >/dev/null
 OUT2=$(cgi "$WD" "$ST" 300 "$NONREPO")
@@ -200,26 +289,98 @@ assert_eq "$NONREPO" "$OUT2" "HIT returns the cached non-repo line"
 rm -rf "$ST" "$WD"
 end_test
 
-start_test "cached_git_info: non-numeric GIT_CACHE_TTL falls back to default 3 (not 0/disabled)"
-ST=$(mktemp -d); WD=$(mktemp -d)
-NOWFIX=$(date +%s); OMC_NOW_OVERRIDE=$NOWFIX cgi "$WD" "$ST" abc >/dev/null; OMC_NOW_OVERRIDE=$NOWFIX cgi "$WD" "$ST" abc >/dev/null
-assert_eq "1" "$(cat "$ST/.gitcnt")" "abc→3: fresh second call must HIT (would be 2 if treated as 0)"
-rm -rf "$ST" "$WD"
+start_test "cached_git_info: non-numeric/negative/empty GIT_CACHE_TTL fall back to 10"
+for bad in abc -5 ''; do
+  ST=$(mktemp -d); WD=$(cgi_wd)
+  OMC_NOW_OVERRIDE=$E cgi "$WD" "$ST" "$bad" >/dev/null
+  OMC_NOW_OVERRIDE=$((E + 10)) cgi "$WD" "$ST" "$bad" >/dev/null
+  assert_eq "1" "$(cat "$ST/.gitcnt")" "'$bad' → 10: age 10 must HIT"
+  OMC_NOW_OVERRIDE=$((E + 11)) cgi "$WD" "$ST" "$bad" >/dev/null
+  assert_eq "2" "$(cat "$ST/.gitcnt")" "'$bad' → 10: age 11 must MISS"
+  rm -rf "$ST" "$WD"
+done
 end_test
 
-start_test "cached_git_info: negative GIT_CACHE_TTL falls back to default 3"
-ST=$(mktemp -d); WD=$(mktemp -d)
-NOWFIX=$(date +%s); OMC_NOW_OVERRIDE=$NOWFIX cgi "$WD" "$ST" -5 >/dev/null; OMC_NOW_OVERRIDE=$NOWFIX cgi "$WD" "$ST" -5 >/dev/null
-assert_eq "1" "$(cat "$ST/.gitcnt")" "-5→3: fresh second call must HIT"
-rm -rf "$ST" "$WD"
-end_test
-
-start_test "cached_git_info: no .tmp.* leftover after a normal miss (atomic write)"
-ST=$(mktemp -d); WD=$(mktemp -d)
+start_test "cached_git_info: no .tmp.* leftover after a normal miss (direct write)"
+ST=$(mktemp -d); WD=$(cgi_wd)
 cgi "$WD" "$ST" 3 >/dev/null
 ls "$ST"/gitcache-*.tmp.* >/dev/null 2>&1 \
-  && { printf '    FAIL: temp file left behind after atomic write\n' >&2; TEST_FAILED=1; }
+  && { printf '    FAIL: temp file left behind\n' >&2; TEST_FAILED=1; }
 rm -rf "$ST" "$WD"
+end_test
+
+start_test "cached_git_info: non-repo dir never calls git_info and writes no cache"
+ST=$(mktemp -d); WD=$(mktemp -d)
+OUT=$(cgi "$WD" "$ST" 300)
+assert_eq "$(printf '\t0\t0\t0\t0\t0')" "$OUT" "non-repo line"
+assert_eq "0" "$(cat "$ST/.gitcnt")" "git_info must not be called outside a repo"
+ls "$ST"/gitcache-* >/dev/null 2>&1 && { printf '    FAIL: cache file written for a non-repo\n' >&2; TEST_FAILED=1; }
+GIT_DIR=/nonexistent cgi "$WD" "$ST" 300 >/dev/null
+assert_eq "1" "$(cat "$ST/.gitcnt")" "GIT_DIR set → git is consulted (no shortcut)"
+rm -rf "$ST" "$WD"
+end_test
+
+# Invalidation: real repos, real git_info, TTL 300. A repo write must show at the next render.
+cgr() {  # $1=dir $2=state ; prints the 6-field line via the real git_info
+  ( cd "$1" && OMC_STATE_DIR="$2" GIT_CACHE_TTL=300 OMC_CONF=/dev/null bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "'"$STATUSLINE"'"
+      cached_git_info' )
+}
+inval_case() {  # $1=label $2=repo-dir(cwd) $3=state $4=mutation command (run in $2)
+  local before after
+  before=$(cgr "$2" "$3")
+  ( cd "$2" && eval "$4" ) >/dev/null 2>&1
+  after=$(cgr "$2" "$3")
+  [ "$before" != "$after" ] || { printf '    FAIL: %s: cached line did not change after the repo write [%s]\n' "$1" "$after" >&2; TEST_FAILED=1; }
+}
+inval_suite() {  # $1=kind(plain|wt|wtabs)
+  local WR ST D ABS cdf
+  WR=$(mktemp -d); ST=$(mktemp -d)
+  gi_mkrepo "$WR/main" main
+  D="$WR/main"
+  if [ "$1" != plain ]; then
+    git -C "$WR/main" worktree add -q "$WR/wt" -b wtb >/dev/null 2>&1; D="$WR/wt"
+    git -C "$D" config user.email t@t.t; git -C "$D" config user.name t
+    if [ "$1" = wtabs ]; then
+      ABS=$(phys "$WR/main/.git"); command -v cygpath >/dev/null 2>&1 && ABS=$(cygpath -m "$ABS")
+      for cdf in "$WR"/main/.git/worktrees/*/commondir; do printf '%s\n' "$ABS" > "$cdf"; done
+    fi
+  fi
+  printf 'one\ntwo\nthree\n' > "$D/g.txt"
+  inval_case "$1: git add" "$D" "$ST" 'git add g.txt'
+  echo more >> "$D/f.txt"
+  inval_case "$1: git commit" "$D" "$ST" 'git add -A; git commit -qm c'
+  echo more >> "$D/f.txt"; git -C "$D" add f.txt
+  inval_case "$1: commit with logAllRefUpdates=false" "$D" "$ST" 'git -c core.logAllRefUpdates=false commit -qm c2'
+  inval_case "$1: branch -m" "$D" "$ST" 'git branch -m renamedbr'
+  rm -rf "$WR" "$ST"
+}
+start_test "cache invalidation: add/commit/commit(no reflog)/branch -m show at once (plain repo)"
+inval_suite plain
+end_test
+start_test "cache invalidation: same four writes in a worktree"
+inval_suite wt
+end_test
+start_test "cache invalidation: same four writes in a worktree with an absolute commondir"
+inval_suite wtabs
+end_test
+
+start_test "cache invalidation: a git write DURING the miss makes the next render miss (stamp written first)"
+WR=$(mktemp -d); ST=$(mktemp -d); gi_mkrepo "$WR" main; echo x > "$WR/g.txt"
+inflight() {
+  ( cd "$WR" && OMC_STATE_DIR="$ST" GIT_CACHE_TTL=300 OMC_CONF=/dev/null bash -c '
+      OMC_TEST_LIB_ONLY=1
+      source "'"$STATUSLINE"'"
+      CNT="$OMC_STATE_DIR/.gitcnt"; [ -f "$CNT" ] || echo 0 > "$CNT"
+      git_info() { n=$(( $(cat "$CNT") + 1 )); echo $n > "$CNT"; [ "$n" = 1 ] && git add g.txt; printf "stub\t1\t2\t3\t4\t5"; }
+      cached_git_info' )
+}
+inflight >/dev/null; inflight >/dev/null
+assert_eq "2" "$(cat "$ST/.gitcnt")" "render after an in-flight git add must miss"
+inflight >/dev/null
+assert_eq "2" "$(cat "$ST/.gitcnt")" "and the one after that hits again"
+rm -rf "$WR" "$ST"
 end_test
 
 # --- Task C: cached_git_info() wired into the render path ---
@@ -238,10 +399,6 @@ run_workers_in() {
       | bash "$STATUSLINE" 2>/dev/null
   )
 }
-gi_mkrepo() {  # $1=dir $2=initial branch name
-  ( cd "$1" && git init -q . && git config user.email t@t.t && git config user.name t \
-      && echo a > f.txt && git add f.txt && git commit -qm i && git branch -m "$2" )
-}
 
 start_test "render: git repo output shows the branch AND a gitcache file is written"
 ST=$(mktemp -d); WD=$(mktemp -d)
@@ -254,16 +411,32 @@ ls "$ST"/gitcache-* >/dev/null 2>&1 \
 rm -rf "$ST" "$WD"
 end_test
 
-start_test "render: second render within TTL serves STALE cached git state (cache wired in)"
+start_test "render: second render within TTL serves STALE working-tree counts (cache wired in)"
 ST=$(mktemp -d); WD=$(mktemp -d)
-gi_mkrepo "$WD" branchbefore
-run_workers_in "$WD" "render-gc-2" "$ST" 300 >/dev/null  # arg4=GIT_CACHE_TTL (300=large so 2nd render HITs); caches branchbefore
-( cd "$WD" && git branch -m branchafter )                # git state changes
-OUT=$(run_workers_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)  # arg4=GIT_CACHE_TTL=300
-echo "$OUT" | grep -qF 'branchbefore' \
-  || { printf '    FAIL: render bypassed cache (expected stale branchbefore)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-echo "$OUT" | grep -qF 'branchafter' \
-  && { printf '    FAIL: render showed fresh state (cache not consulted)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+gi_mkrepo "$WD" stalebr
+OUT1=$(run_workers_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)  # arg4=GIT_CACHE_TTL (300=large so 2nd render HITs)
+echo more >> "$WD/f.txt"                                           # working-tree edit: no .git write
+OUT=$(run_workers_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)
+echo "$OUT1" | grep -qF '~1' && { printf '    FAIL: clean repo already shows ~1\n' >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF 'stalebr' \
+  || { printf '    FAIL: branch missing from render\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF '~1' \
+  && { printf '    FAIL: render showed fresh edit (cache not consulted)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+OUT=$(run_workers_in "$WD" "render-gc-2" "$ST" 0 | strip_ansi)      # TTL=0 proves the edit is visible to git
+echo "$OUT" | grep -qF '~1' \
+  || { printf '    FAIL: edit not visible with TTL=0\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+rm -rf "$ST" "$WD"
+end_test
+
+start_test "render: a cache line whose epoch is '09' (invalid octal) is a miss and the render still completes"
+ST=$(mktemp -d); WD=$(mktemp -d); gi_mkrepo "$WD" zerobr
+run_workers_in "$WD" "render-gc-z" "$ST" 300 >/dev/null
+CF=$(ls "$ST"/gitcache-* | grep -v '\.stamp$' | head -1)
+printf '09\tmain\t0\t0\t0\t0\t0\n' > "$CF"
+OUT=$(run_workers_in "$WD" "render-gc-z" "$ST" 300 | strip_ansi)
+printf '%s\n' "$OUT" | head -1 | grep -qF 'X' \
+  || { printf '    FAIL: render aborted / no model on line 1\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
+echo "$OUT" | grep -qF 'zerobr' || { printf '    FAIL: branch missing (miss not recomputed)\n' >&2; TEST_FAILED=1; }
 rm -rf "$ST" "$WD"
 end_test
 
@@ -312,7 +485,7 @@ end_test
 # submodules; git_info calls it twice (status+diff) ⇒ ~14s pure waste ⇒ blank
 # statusline under load. A PATH-shim git records each `submodule` invocation.
 gi_shim_setup() {  # $1 = workdir; installs fake git that logs submodule calls
-  mkdir -p "$1/bin"
+  mkdir -p "$1/bin" "$1/.git/objects"; echo "ref: refs/heads/x" > "$1/.git/HEAD"   # fake repo: the walk must find one
   cat > "$1/bin/git" <<EOS
 #!/bin/bash
 case "\$1 \$2" in
@@ -362,7 +535,7 @@ end_test
 # the nested ones inside `submodule foreach`, which inherit env) must see
 # GIT_OPTIONAL_LOCKS=0, and the setting must not leak out of git_info.
 gi_lockenv_setup() {  # $1 = workdir; fake git logging "<subcmd> <GIT_OPTIONAL_LOCKS>"
-  mkdir -p "$1/bin"
+  mkdir -p "$1/bin" "$1/.git/objects"; echo "ref: refs/heads/x" > "$1/.git/HEAD"   # fake repo: the walk must find one
   cat > "$1/bin/git" <<EOS
 #!/bin/bash
 echo "\$1 \${GIT_OPTIONAL_LOCKS-unset}" >> "$1/.gitenvlog"
@@ -1033,16 +1206,21 @@ budget_case() {  # $1=label $2=dir $3=state-dir $4=ttl
   head -1 "$3.cnt/stdout" | grep -qF 'M' || { printf '    FAIL: %s: line 1 lacks the model\n' "$1" >&2; TEST_FAILED=1; }
 }
 
-# P2 measured: R1=26 R2=66 R3=36. P3 measured: R1=16 R2=56 R3=26. Final targets (P6): R1<=3 R2<=8 R3<=3.
-BUDGET_R1=18; BUDGET_R2=58; BUDGET_R3=28
+# P2 measured: R1=26 R2=66 R3=36. P3 measured: R1=16 R2=56 R3=26. P4 measured: R1=5 R2=46 R3=12. Final targets (P6): R1<=3 R2<=8 R3<=3.
+BUDGET_R1=7; BUDGET_R2=48; BUDGET_R3=14
 
 BREPO=$(mktemp -d); gi_mkrepo "$BREPO" main
 
 start_test "spawn budget R1: repo, git cache HIT, account cache HIT"
 BS="$BT/r1"; budget_env "$BS" 300; budget_prewarm "$BREPO" "$BS"
+R1CF=$(ls "$BS"/gitcache-* 2>/dev/null | grep -v '\.stamp$' | head -1)
+R1BEFORE=$(cat "$R1CF" 2>/dev/null; printf X)
+case "$R1BEFORE" in 1793800000"$(printf '\t')"*) ;; *) printf '    FAIL: prewarm did not write an epoch-1793800000 cache line\n' >&2; TEST_FAILED=1 ;; esac
 budget_case R1 "$BREPO" "$BS" 300
 assert_spawns_le "$BUDGET_R1" "R1"
 assert_eq "0" "$(grep -c '^EXEC git ' "$SPAWN_LOG" || true)" "R1 cache HIT must not run git"
+assert_eq "0" "$(grep -c '^EXEC cat ' "$SPAWN_LOG" || true)" "R1 cache HIT must not run cat"
+assert_eq "$R1BEFORE" "$(cat "$R1CF" 2>/dev/null; printf X)" "R1 is a genuine HIT: the cache file was not rewritten"
 end_test
 
 start_test "spawn budget R2: repo, git cache MISS"
