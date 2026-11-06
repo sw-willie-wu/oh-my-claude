@@ -16,7 +16,7 @@
 
 ---
 
-[English](README.md) | 繁體中文
+<p align="center"><a href="README.md">English</a> | 繁體中文</p>
 
 這個 marketplace 為 [Claude Code](https://claude.com/claude-code) 提供兩個外掛：**oh-my-status** 與 **oh-my-knowledge**，每次發版一起更新。
 
@@ -25,9 +25,7 @@
 Claude Code 的可換主題 statusline。
 
 <p align="center">
-  <img src="assets/statusline-default.svg" alt="oh-my-status statusline：模型、帳號、目錄、git 變更，以及 context、5 小時、7 天用量條（catppuccin 主題、default 版型）">
-  <br>
-  <img src="assets/statusline-fancy.svg" alt="oh-my-status statusline，fancy 版型搭 tokyonight 主題">
+  <img src="assets/statusline-fancy.svg" alt="oh-my-status statusline（fancy 版型、tokyonight 主題）：模型、帳號、目錄、分支與 git 變更，以及 context、5 小時、7 天用量條">
 </p>
 
 - 9 種主題 × 6 種版型，隨時切換。

@@ -147,4 +147,4 @@ See existing layouts in `plugins/oh-my-status/layouts/` for examples.
 
 ## Regenerating the README screenshots
 
-`assets/statusline-*.svg` are drawn from a real render. To regenerate them, run `bash scripts/render-statusline-svg.sh` (dev tool; needs `bash`, `git`, `jq` and `uv`; it uses a throwaway HOME and never touches `~/.claude`).
+`assets/statusline-fancy.svg` is drawn from a real render. To regenerate it, run `bash scripts/render-statusline-svg.sh` (dev tool; needs `bash`, `git`, `jq` and `uv`; it uses a throwaway HOME and never touches `~/.claude`). `scripts/ansi-to-svg.py` takes `--width N` to set the canvas width (default: fit the content); the script renders the README image 800 px wide.
