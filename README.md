@@ -2,6 +2,26 @@
 
 This marketplace (`oh-my-claude`) ships two plugins: **oh-my-status** (a themeable statusline) and **oh-my-knowledge** (a local, git-versioned knowledge base, see [its README](plugins/oh-my-knowledge/README.md)). All plugins in this marketplace update together on each release.
 
+## oh-my-knowledge
+
+A local, git-versioned knowledge base for Claude Code. Durable knowledge (decisions and their reasons, pitfalls, conventions, root causes) lives in one folder you own (default `~/knowledge`), instead of being scattered across per-project auto memory. Project progress stays in each project's auto memory.
+
+- **lookup**: before answering a problem-style question, Claude searches the knowledge base and the project's auto memory.
+- **distill**: writes what the session learned into knowledge pages and moves knowledge out of auto memory.
+- **handoff**: at the end of a session, rewrites the project's progress section, then runs distill. It can be triggered automatically when context usage gets high (needs oh-my-status).
+- **lint**: health check for broken links, stale or contradictory pages, oversize pages and leftovers.
+
+```
+/plugin marketplace add sw-willie-wu/oh-my-claude
+/plugin install oh-my-knowledge@oh-my-claude
+/reload-plugins
+/oh-my-knowledge:setup
+```
+
+Restart the session after setup. Full documentation: [plugins/oh-my-knowledge/README.md](plugins/oh-my-knowledge/README.md).
+
+## oh-my-status
+
 `oh-my-status` is a themeable statusline plugin for [Claude Code](https://claude.com/claude-code). Mix and match **9 color themes** with **6 layouts**.
 
 ## Themes
