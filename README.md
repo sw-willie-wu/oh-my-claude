@@ -25,9 +25,7 @@ This marketplace ships two plugins for [Claude Code](https://claude.com/claude-c
 A themeable statusline for Claude Code.
 
 <p align="center">
-  <img src="assets/statusline-default.svg" alt="oh-my-status statusline: model, account, directory, git changes, and context, 5h and 7d usage bars (catppuccin theme, default layout)">
-  <br>
-  <img src="assets/statusline-fancy.svg" alt="oh-my-status statusline with the fancy layout and tokyonight theme">
+  <img src="assets/statusline-fancy.svg" alt="oh-my-status statusline (fancy layout, tokyonight theme): model, account, directory, branch and git changes, and context, 5h and 7d usage bars">
 </p>
 
 - 9 themes × 6 layouts, switchable on the fly.
