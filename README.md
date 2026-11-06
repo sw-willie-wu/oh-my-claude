@@ -104,6 +104,14 @@ bash oh-my-claude/install.sh
 
 Restart Claude Code to see the statusline.
 
+### Upgrading to 2.1
+
+1. Update the marketplace: `/plugin marketplace update oh-my-claude`.
+2. Restart every running Claude Code session. Until you do, an old 2.0 session can copy the 2.0 statusline back on resume, `/clear` or `/compact`.
+3. The Workers section (background-shell rows) is gone, together with its tool hooks. Use Claude Code's `/tasks` to see background shells. `WORKERS_*` lines left in `~/.claude/oh-my-claude.conf` are ignored and can be deleted.
+4. The first 2.1 SessionStart removes the 2.0 leftovers under `~/.claude/oh-my-claude/`: the `state-*.tsv` files, `state.lock`, and the plugin's own files in `hooks/` and `lib/`. Files you added there yourself are kept.
+5. Optional: to keep rate-limit and git info current while the agent is idle, add `"refreshInterval": 10` to your `statusLine` settings (see Notes).
+
 ### Upgrading from oh-my-claude
 
 The statusline plugin was renamed from `oh-my-claude` to `oh-my-status`, and the repository now holds its plugins under `plugins/`. The marketplace name stays `oh-my-claude`, and runtime paths (`~/.claude/oh-my-claude/`, `~/.claude/oh-my-claude.conf`) are unchanged, so your theme, layout and config carry over.
