@@ -1,8 +1,7 @@
-# Fancy layout - model header, then git, then usage meters, then workers
+# Fancy layout - model header, then git, then usage meters
 # Line 1: model and directory (always first)
 # Line 2: git details with line stats (only if in repo)
 # Line 3: usage meters with labels (ctx + 5h + 7d)
-# Line 4: worker (background shell) rows, if any
 
 RESET='\033[0m'
 
@@ -57,5 +56,4 @@ render() {
   echo -e "$LINE1"
   [ -n "$LINE2" ] && echo -e "$LINE2"
   echo -e "$LINE3"
-  emit_workers
 }

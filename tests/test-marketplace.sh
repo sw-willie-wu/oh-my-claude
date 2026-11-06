@@ -54,34 +54,113 @@ for p in "$STATUS_DIR/commands" "$STATUS_DIR/setup.sh" "$REPO_ROOT/install.sh" "
 done
 end_test
 
-start_test "session-start sweep removes 25h-old ctx-*/handoff-* and keeps fresh ones"
-TW="$STATUS_DIR/hooks/track-workers.sh"
-if [ ! -f "$TW" ]; then
-  printf '    FAIL: missing %s\n' "$TW" >&2; TEST_FAILED=1
-else
-  for k in ctx handoff; do
-    printf x > "$OMC_STATE_DIR/$k-old"; printf x > "$OMC_STATE_DIR/$k-fresh"
-  done
+# --- setup.sh: sweep relocation + Workers-leftover cleanup (spec 2.2) ----------
+run_setup() {  # $1=sandbox ; runs setup.sh fully sandboxed, returns its rc
+  mkdir -p "$1/home"
+  HOME="$1/home" OMC_DIR="$1/omc" OMC_CONF="$1/c.conf" OMC_STATE_DIR="$1/state" \
+    OMC_CONF_TEMPLATE="$STATUS_DIR/oh-my-claude.conf" \
+    bash "$STATUS_DIR/setup.sh" </dev/null >/dev/null 2>&1
+}
+old_ts() {  # echoes a touch -t timestamp 25 hours ago
   if date -d '25 hours ago' '+%Y%m%d%H%M.%S' >/dev/null 2>&1; then
-    TS=$(date -d '25 hours ago' '+%Y%m%d%H%M.%S')
+    date -d '25 hours ago' '+%Y%m%d%H%M.%S'
   else
-    TS=$(date -v-25H '+%Y%m%d%H%M.%S')
+    date -v-25H '+%Y%m%d%H%M.%S'
   fi
-  touch -t "$TS" "$OMC_STATE_DIR/ctx-old" "$OMC_STATE_DIR/handoff-old"
-  # old marker + fresh ctx (kept); old marker + no ctx (removed)
-  printf x > "$OMC_STATE_DIR/handoff-live"; printf x > "$OMC_STATE_DIR/ctx-live"
-  printf x > "$OMC_STATE_DIR/handoff-orphan"
-  touch -t "$TS" "$OMC_STATE_DIR/handoff-live" "$OMC_STATE_DIR/handoff-orphan"
-  echo '{"session_id":"mkt-sweep","hook_event_name":"SessionStart","source":"startup"}' \
-    | bash "$TW" session-start
-  for k in ctx handoff; do
-    [ ! -f "$OMC_STATE_DIR/$k-old" ] || { printf '    FAIL: stale %s-old not removed\n' "$k" >&2; TEST_FAILED=1; }
-    [ -f "$OMC_STATE_DIR/$k-fresh" ] || { printf '    FAIL: fresh %s-fresh removed\n' "$k" >&2; TEST_FAILED=1; }
-  done
-  [ -f "$OMC_STATE_DIR/handoff-live" ] || { printf '    FAIL: old marker with fresh ctx removed\n' >&2; TEST_FAILED=1; }
-  [ -f "$OMC_STATE_DIR/ctx-live" ] || { printf '    FAIL: fresh ctx removed\n' >&2; TEST_FAILED=1; }
-  [ ! -f "$OMC_STATE_DIR/handoff-orphan" ] || { printf '    FAIL: old marker without ctx not removed\n' >&2; TEST_FAILED=1; }
-fi
+}
+
+start_test "setup sweep removes 25h-old ctx-*/handoff-*/gitcache-*/account-* and keeps fresh ones"
+sbox=$(mktemp -d); mkdir -p "$sbox/state"; st="$sbox/state"
+for k in ctx handoff gitcache account; do
+  printf x > "$st/$k-old"; printf x > "$st/$k-fresh"
+done
+TS=$(old_ts)
+touch -t "$TS" "$st/ctx-old" "$st/handoff-old" "$st/gitcache-old" "$st/account-old"
+# old marker + fresh ctx (kept); old marker + no ctx (removed)
+printf x > "$st/handoff-live"; printf x > "$st/ctx-live"
+printf x > "$st/handoff-orphan"
+touch -t "$TS" "$st/handoff-live" "$st/handoff-orphan"
+run_setup "$sbox"; rc=$?
+assert_eq "0" "$rc" "setup.sh exit code"
+for k in ctx handoff gitcache account; do
+  [ ! -f "$st/$k-old" ] || { printf '    FAIL: stale %s-old not removed\n' "$k" >&2; TEST_FAILED=1; }
+  [ -f "$st/$k-fresh" ] || { printf '    FAIL: fresh %s-fresh removed\n' "$k" >&2; TEST_FAILED=1; }
+done
+[ -f "$st/handoff-live" ] || { printf '    FAIL: old marker with fresh ctx removed\n' >&2; TEST_FAILED=1; }
+[ -f "$st/ctx-live" ] || { printf '    FAIL: fresh ctx removed\n' >&2; TEST_FAILED=1; }
+[ ! -f "$st/handoff-orphan" ] || { printf '    FAIL: old marker without ctx not removed\n' >&2; TEST_FAILED=1; }
+rm -rf "$sbox"
+end_test
+
+start_test "setup exits 0 when the last marker the sweep loop handles is kept"
+sbox=$(mktemp -d); mkdir -p "$sbox/state"; st="$sbox/state"
+printf x > "$st/handoff-live"; printf x > "$st/ctx-live"
+touch -t "$(old_ts)" "$st/handoff-live"
+run_setup "$sbox"; rc=$?
+assert_eq "0" "$rc" "setup.sh exit code (R2-I2)"
+[ -f "$st/handoff-live" ] || { printf '    FAIL: handoff-live removed\n' >&2; TEST_FAILED=1; }
+[ -f "$st/ctx-live" ] || { printf '    FAIL: ctx-live removed\n' >&2; TEST_FAILED=1; }
+rm -rf "$sbox"
+end_test
+
+start_test "setup exits 0 when OMC_STATE_DIR is absent"
+sbox=$(mktemp -d)
+run_setup "$sbox"; rc=$?
+assert_eq "0" "$rc" "setup.sh exit code"
+rm -rf "$sbox"
+end_test
+
+start_test "setup cleanup removes Workers leftovers only"
+sbox=$(mktemp -d); st="$sbox/state"; od="$sbox/omc"
+mkdir -p "$st/state.lock" "$od/hooks" "$od/lib"
+printf x > "$st/state-a.tsv"; printf x > "$st/state-a.tsv.prune.1"
+printf 1 > "$st/state.lock/pid"; printf x > "$st/track-workers.log"
+printf x > "$od/hooks/track-workers.sh"; printf x > "$od/hooks/my-hook.sh"
+printf x > "$od/lib/state-lock.sh"; printf x > "$od/lib/conf-keys.sh"; printf x > "$od/lib/x.sh"
+printf x > "$od/statusline.sh.bak-x"
+printf x > "$st/ctx-s"; printf x > "$st/gitcache-k"; printf x > "$st/account-k"
+run_setup "$sbox"; rc=$?
+assert_eq "0" "$rc" "setup.sh exit code"
+for p in "$st/state-a.tsv" "$st/state-a.tsv.prune.1" "$st/state.lock" "$st/track-workers.log" \
+         "$od/hooks/track-workers.sh" "$od/lib/state-lock.sh" "$od/lib/conf-keys.sh"; do
+  [ ! -e "$p" ] || { printf '    FAIL: leftover not removed: %s\n' "$p" >&2; TEST_FAILED=1; }
+done
+for p in "$od/hooks/my-hook.sh" "$od/lib/x.sh" "$od/hooks" "$od/lib" "$od/statusline.sh.bak-x" \
+         "$st/ctx-s" "$st/gitcache-k" "$st/account-k"; do
+  [ -e "$p" ] || { printf '    FAIL: user/other file removed: %s\n' "$p" >&2; TEST_FAILED=1; }
+done
+rm -rf "$sbox"
+end_test
+
+start_test "setup cleanup rmdirs hooks/ and lib/ when only named files were there"
+sbox=$(mktemp -d); od="$sbox/omc"
+mkdir -p "$od/hooks" "$od/lib"
+printf x > "$od/hooks/track-workers.sh"
+printf x > "$od/lib/state-lock.sh"; printf x > "$od/lib/conf-keys.sh"
+run_setup "$sbox"; rc=$?
+assert_eq "0" "$rc" "setup.sh exit code"
+[ ! -e "$od/hooks" ] || { printf '    FAIL: empty hooks/ not removed\n' >&2; TEST_FAILED=1; }
+[ ! -e "$od/lib" ] || { printf '    FAIL: empty lib/ not removed\n' >&2; TEST_FAILED=1; }
+[ -f "$od/statusline.sh" ] || { printf '    FAIL: statusline.sh not installed\n' >&2; TEST_FAILED=1; }
+rm -rf "$sbox"
+end_test
+
+start_test "setup does not copy lib/ any more"
+sbox=$(mktemp -d)
+run_setup "$sbox"; rc=$?
+assert_eq "0" "$rc" "setup.sh exit code"
+[ ! -e "$sbox/omc/lib" ] || { printf '    FAIL: %s/omc/lib exists\n' "$sbox" >&2; TEST_FAILED=1; }
+rm -rf "$sbox"
+end_test
+
+start_test "hooks.json has exactly one hook: SessionStart -> setup.sh"
+HJ="$STATUS_DIR/hooks/hooks.json"
+assert_eq "SessionStart" "$(jq -r '.hooks | keys | join(",")' "$HJ" 2>/dev/null | tr -d '\r')" "hook events"
+assert_eq "1" "$(jq '[.hooks.SessionStart[].hooks[]] | length' "$HJ" 2>/dev/null | tr -d '\r')" "hook count"
+case "$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$HJ" 2>/dev/null | tr -d '\r')" in
+  */setup.sh) ;;
+  *) printf '    FAIL: hook command does not end in /setup.sh\n' >&2; TEST_FAILED=1 ;;
+esac
 end_test
 
 start_test "knowledge README documents settings, state files, markers, requirements, moving"

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Removed
+- The Workers section (background-shell rows) and everything behind it: the
+  PreToolUse/PostToolUse hooks (`hooks/track-workers.sh`), `lib/state-lock.sh`,
+  the per-session `state-<sid>.tsv` files and the `WORKERS_*` conf keys. A
+  `WORKERS_*` line left in `~/.claude/oh-my-claude.conf` is ignored. Use
+  `/tasks` to see background shells. Bash tool calls no longer start any
+  oh-my-status hook process.
+
 ### Changed
 - `statusLine.refreshInterval` is now opt-in. `/oh-my-status:setup` no longer
   adds `"refreshInterval": 3` by default; it asks whether to enable timer
@@ -10,6 +18,18 @@
   across sessions and loaded the whole machine. The setup upgrade prompt that
   offered to add `refreshInterval` to an existing statusLine is removed, and an
   existing `refreshInterval` value is never touched.
+
+### Migration (3.0.0)
+- Restart every Claude Code session after updating. Until then an old 2.x
+  session can run its SessionStart again on resume, `/clear` or `/compact`
+  and copy the 2.x statusline back; the next 3.0 SessionStart replaces it.
+- The first 3.0 SessionStart deletes the 2.x leftovers: `state-*.tsv`,
+  `state.lock`, `track-workers.log` under `~/.claude/oh-my-claude/state/`, and
+  `hooks/track-workers.sh`, `lib/state-lock.sh`, `lib/conf-keys.sh` under
+  `~/.claude/oh-my-claude/` (the two folders are removed only when empty).
+- The stale-file sweep (`ctx-*`, `handoff-*`, `gitcache-*`, `account-*` older
+  than 24 h) now runs in `setup.sh`; standalone installs run it when
+  `install.sh` runs.
 
 ## 2.0.0 (2026-11-04)
 

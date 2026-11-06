@@ -15,27 +15,6 @@ LAYOUT="default"
 # Load config
 [ -f "$OMC_CONF" ] && source "$OMC_CONF"
 
-# Worker defaults (overridden by user's conf if set).
-: "${WORKERS_ENABLED:=true}"
-: "${WORKERS_SHOW_SHELLS:=true}"
-: "${WORKERS_SHOW_ELAPSED:=true}"
-: "${WORKERS_MAX:=5}"
-# WORKERS_SHELL_ICON defaults in each theme;
-# user conf overrides (use empty string to disable the icon).
-: "${WORKERS_SHELL_MAX_AGE:=3600}"
-# When `ps` is entirely unusable (no output from any ps form — e.g.
-# Windows/MSYS where ps -efww/-ef/-Wef return nothing), is_shell_alive
-# cannot tell a live PID-less bg-shell from a dead one. Such rows are KEPT
-# (fail-safe) but reaped once older than this many seconds so a dead shell
-# cannot linger / grow the state file. Only affects the ps-unusable path;
-# ps-working hosts never hit it. Independent of WORKERS_SHELL_MAX_AGE.
-: "${WORKERS_SHELL_UNKNOWN_MAX_AGE:=60}"
-# Grace window for shell rows whose col7 (PID) hasn't been filled yet by
-# PostToolUse — covers both the placeholder gap (col3="-") and the brief
-# sub-window between the two `update_col` writes inside post (col3 set,
-# col7 still empty). Without it, a statusline tick inside either gap
-# false-prunes the row.
-: "${WORKERS_PLACEHOLDER_GRACE_SEC:=60}"
 # git_info() result cache TTL (seconds). Makes a statusLine
 # refreshInterval (opt-in; if used, 10 or more) affordable by not running
 # git every tick. 0 = disable caching (always
@@ -48,10 +27,7 @@ LAYOUT="default"
 : "${MODEL_CTX_TAG:=true}"
 ACCOUNT_ICON="${ACCOUNT_ICON-$'\xef\x80\x87'}"
 
-LIB_DIR="${OMC_DIR}/lib"
-[ -d "$LIB_DIR" ] || LIB_DIR="$SCRIPT_DIR/lib"
-# shellcheck source=lib/state-lock.sh
-. "$LIB_DIR/state-lock.sh"
+OMC_STATE_DIR="${OMC_STATE_DIR:-$HOME/.claude/oh-my-claude/state}"
 
 # Load theme and layout
 THEME_FILE="${OMC_DIR}/themes/${THEME}.sh"
@@ -72,239 +48,22 @@ source "$LAYOUT_FILE"
 # triggering JSON parsing or the render pipeline.
 # ---------------------------------------------------------------------------
 
-unescape_field() {
-  # Reverse of escape_field: \t → tab, \n → newline, \\ → backslash.
-  # Implemented in awk because sed replacement strings can't portably
-  # contain literal newlines.
-  awk 'BEGIN {
-    s = ARGV[1]
-    n = length(s)
-    out = ""
-    i = 1
-    while (i <= n) {
-      c = substr(s, i, 1)
-      if (c == "\\" && i < n) {
-        nc = substr(s, i + 1, 1)
-        if (nc == "t") { out = out "\t"; i += 2; continue }
-        if (nc == "n") { out = out "\n"; i += 2; continue }
-        if (nc == "\\") { out = out "\\"; i += 2; continue }
-      }
-      out = out c
-      i += 1
-    }
-    printf "%s", out
-    exit
-  }' "$1"
-}
-
-format_elapsed() {
-  local s="$1"
-  if [ "$s" -lt 60 ]; then
-    printf '%ds' "$s"
-  elif [ "$s" -lt 3600 ]; then
-    printf '%dm%ds' $((s / 60)) $((s % 60))
-  else
-    printf '%dh%dm' $((s / 3600)) $(((s % 3600) / 60))
-  fi
-}
-
-is_alive() {
-  local pid="$1"
-  [ -z "$pid" ] && return 1
-  case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*)
-      # MSYS bash's kill -0 doesn't recognize native Windows PIDs (the kind ps -W returns).
-      # ps -W col1 is the MSYS/cygwin PID, col4 is the native WINPID; match either.
-      ps -W 2>/dev/null | awk -v p="$pid" '$1==p || $4==p {f=1} END {exit !f}'
-      ;;
-    *)
-      command -v kill >/dev/null 2>&1 || return 0
-      kill -0 "$pid" 2>/dev/null
-      ;;
-  esac
-}
-
-# Liveness for bg-Bash shell rows. The Post-hook PID fingerprint is racy at
-# launch (the child often isn't in the process table yet), and bg-Bash has
-# no on-disk completion marker (the .output file is sticky), so PID=0 rows
-# can't be reaped via a file check. Instead, at render time (well past the
-# launch instant) fingerprint-match the stored command (col5) against ps:
-# present → alive, absent → done. Mirrors the hook's match logic (b3310c5):
-# the bare child (`sleep 50` → index==1) and the MSYS eval-wrapper
-# (`… eval 'sleep 50…` → needle hit) both count.
-# Returns: 0=alive (ps had output, fp matched); 1=dead (ps had output but
-# no match, or empty fp/cmd); 2=ps unusable (all ps forms empty) — caller
-# decides keep-vs-reap.
-is_shell_alive() {
-  local cmd fp out
-  cmd="$(unescape_field "$1")"
-  fp="${cmd:0:60}"
-  [ -z "$fp" ] && return 1
-  # cygwin -Wefww/-efww exit 1; -ef/-Wef carry full args. linux -efww does.
-  # Empty-output fallthrough, NOT || exit-code chaining (cygwin ps exit
-  # codes are unreliable — an args-stripped variant can win a || chain).
-  out=$(ps -efww 2>/dev/null); [ -z "$out" ] && out=$(ps -ef 2>/dev/null)
-  [ -z "$out" ] && out=$(ps -Wef 2>/dev/null)
-  [ -z "$out" ] && return 2        # ps unusable → unknown (NOT dead)
-  printf '%s\n' "$out" | awk -v fp="$fp" 'NR>1 {
-      c=""
-      for (i=6; i<=NF; i++) c = c (i>6 ? " " : "") $i
-      needle = "eval \047" fp
-      if (index(c, fp)==1 || index(c, needle)>0) { f=1; exit }
-    } END { exit !f }'
-}
-
 # Sweep crash-orphaned temp files (>30s old) from the state dir. A writer
 # SIGKILL'd between creating its temp file and the atomic rename leaves a
-# `*.prune.<pid>` (prune_state_and_emit) or a `gitcache-*.tmp.<pid>`
-# (cached_git_info) behind. A live writer renames its temp file within the
+# `gitcache-*.tmp.<pid>` (cached_git_info) or `account-*.tmp.<pid>` behind.
+# A live writer renames its temp file within the
 # same sub-second critical section, so 30s is far past any legitimate
 # lifetime — nothing in use is ever swept. Best-effort, never fatal.
-# SessionStart's 24h sweep is the coarse backstop; this keeps the dir tidy
+# The 24h sweep in setup.sh (SessionStart) is the coarse backstop; this keeps the dir tidy
 # within a long-lived session. An unmatched glob stays literal and is
 # filtered out by the `[ -f ]` test.
 _omc_sweep_stale_tmp() {
   local now mt f
   now=$(date +%s 2>/dev/null) || return 0
-  for f in "$OMC_STATE_DIR"/*.prune.* "$OMC_STATE_DIR"/gitcache-*.tmp.* "$OMC_STATE_DIR"/account-*.tmp.*; do
+  for f in "$OMC_STATE_DIR"/gitcache-*.tmp.* "$OMC_STATE_DIR"/account-*.tmp.*; do
     [ -f "$f" ] || continue
     mt=$(stat -c %Y "$f" 2>/dev/null) || continue
     [ $((now - mt)) -gt 30 ] && rm -f "$f" 2>/dev/null
-  done
-}
-
-prune_state_and_emit() {
-  local sf="$WORKERS_STATE_FILE"
-  [ -f "$sf" ] || return 0
-  local tmp="${sf}.prune.$$"
-  # A SIGKILL mid-prune can't be caught (the sweep above is the backstop
-  # for that), but any non-KILL early return must not leak the temp file.
-  # Self-clear the trap once fired so it can't outlive this function.
-  trap 'rm -f "$tmp" 2>/dev/null; trap - RETURN' RETURN
-  : > "$tmp"
-  while IFS=$'\t' read -r kind tool_use_id col3 desc col5 col6 col7 || [ -n "$kind" ]; do
-    [ -z "$kind" ] && continue
-    [ "$kind" = "shell" ] || continue   # 1.2.0: only shell rows are tracked; anything else is dropped
-    local keep=true
-    if [ "$kind" = "shell" ]; then
-      if [ -n "$col7" ] && [ "$col7" -gt 0 ] 2>/dev/null; then
-        is_alive "$col7" || keep=false
-      else
-        # col7 missing/0: row is either the PreToolUse placeholder, the
-        # gap between post's two update_col writes, a legacy 6-col row,
-        # or a row whose PID acquisition failed (PID=0).
-        # Within grace: always keep — covers the hook race window AND the
-        # brief post-launch window before the child is in the process table.
-        # Beyond grace: if col3 still "-", PostToolUse never ran → reap;
-        # otherwise fingerprint-match the stored command against ps
-        # (bg-Bash has no on-disk completion marker; the .output file is
-        # sticky so existence is useless).
-        local now_ts age within_grace=false
-        now_ts=$(date +%s)
-        if [ -n "$col6" ] && [ "$col6" -gt 0 ] 2>/dev/null; then
-          age=$((now_ts - col6))
-          [ "$age" -le "$WORKERS_PLACEHOLDER_GRACE_SEC" ] && within_grace=true
-        fi
-        if [ "$within_grace" = "true" ]; then
-          : # keep
-        elif [ "$col3" = "-" ]; then
-          keep=false
-        else
-          is_shell_alive "$col5"; local sa=$?
-          if [ "$sa" -eq 1 ]; then
-            keep=false                       # ps worked, process gone
-          elif [ "$sa" -eq 2 ]; then
-            # ps unusable: cannot disprove liveness → keep, but bound so a
-            # dead shell on a permanently-ps-blind box can't linger. age is
-            # already computed above when col6 (start_unix) is valid; if
-            # col6 is unusable the row is corrupt/unbounded → reap.
-            if [ -n "$col6" ] && [ "$col6" -gt 0 ] 2>/dev/null; then
-              [ "$age" -gt "$WORKERS_SHELL_UNKNOWN_MAX_AGE" ] && keep=false
-            else
-              keep=false
-            fi
-          fi
-          # sa == 0 → keep (alive)
-        fi
-      fi
-    fi
-    [ "$keep" = "true" ] || continue
-    printf '%s\t%s\t%s\t%s\t%s\t%s' "$kind" "$tool_use_id" "$col3" "$desc" "$col5" "$col6" >> "$tmp"
-    [ -n "$col7" ] && printf '\t%s' "$col7" >> "$tmp"
-    printf '\n' >> "$tmp"
-  done < "$sf"
-  mv "$tmp" "$sf"
-  cat "$sf"
-}
-
-emit_workers() {
-  [ "$WORKERS_ENABLED" != "true" ] && return 0
-  [ "$WORKERS_SHOW_SHELLS" != "true" ] && return 0
-  [ -z "$SESSION_ID" ] && return 0
-  [ -f "$WORKERS_STATE_FILE" ] || return 0
-
-  local rendered
-  rendered="$(omc_with_lock prune_state_and_emit)"
-  [ -z "$rendered" ] && return 0
-
-  local now count=0
-  now=$(date +%s)
-  local width="${COLUMNS:-120}"
-
-  printf '%s\n' "$rendered" | while IFS=$'\t' read -r kind tool_use_id col3 desc col5 col6 col7; do
-    [ -z "$kind" ] && continue
-    [ "$kind" = "shell" ] || continue
-    [ "$WORKERS_MAX" != "0" ] && [ "$count" -ge "$WORKERS_MAX" ] && break
-
-    local start icon detail elapsed_str body_plain tail_plain total_len
-    start="$col6"
-    local desc_u cmd_u
-    desc_u="$(unescape_field "$desc")"
-    cmd_u="$(unescape_field "$col5")"
-    if [ -n "$desc_u" ]; then
-      detail="${desc_u}: ${cmd_u}"
-    else
-      detail="$cmd_u"
-    fi
-    icon="$WORKERS_SHELL_ICON"
-    local color="$C_ACCENT"
-
-    if [ -z "$start" ] || ! [[ "$start" =~ ^[0-9]+$ ]]; then
-      continue
-    fi
-    local age=$((now - start))
-    if [ "$age" -gt "$WORKERS_SHELL_MAX_AGE" ]; then
-      color="$C_SUBTEXT"
-      detail="${detail} ?"
-    fi
-
-    if [ "$WORKERS_SHOW_ELAPSED" = "true" ]; then
-      elapsed_str=$(format_elapsed "$age")
-    else
-      elapsed_str=""
-    fi
-
-    body_plain="${icon} ${detail}"
-    if [ -n "$elapsed_str" ]; then
-      tail_plain="  ${elapsed_str}"
-    else
-      tail_plain=""
-    fi
-    total_len=$(( ${#body_plain} + ${#tail_plain} ))
-
-    if [ "$total_len" -gt $((width - 2)) ]; then
-      local keep=$(( width - 5 - ${#tail_plain} ))
-      [ "$keep" -lt 1 ] && keep=1
-      body_plain="${body_plain:0:$keep}..."
-    fi
-
-    if [ -n "$elapsed_str" ]; then
-      printf '%b%s%b  %b%s%b\n' "$color" "$body_plain" "$RESET" "$C_SUBTEXT" "$elapsed_str" "$RESET"
-    else
-      printf '%b%s%b\n' "$color" "$body_plain" "$RESET"
-    fi
-
-    count=$((count + 1))
   done
 }
 
@@ -361,8 +120,8 @@ git_info() {
 # Short-TTL on-disk cache around git_info(), keyed by $PWD (the dir git runs
 # in — NOT current_dir (display-only), which differs from
 # $PWD under MSYS). Makes an opt-in statusLine refreshInterval affordable. OMC_STATE_DIR
-# is already in scope (set by lib/state-lock.sh, sourced above). Stale-write
-# safety: per-cwd file + atomic tmp+mv (no lock — independent of worker state;
+# is set at the top of this file. Stale-write
+# safety: per-cwd file + atomic tmp+mv (no lock;
 # worst case is N concurrent dupes, self-healing).
 cached_git_info() {
   local ttl="$GIT_CACHE_TTL"
@@ -420,9 +179,8 @@ cached_git_info() {
 # pass replaces ~30 `echo|grep -o` forks (spec §4.1–§4.4). jq is a render-side
 # hard dep (already a hook-side one); on jq absent/too-old/malformed input the
 # 9 reads leave SESSION_ID empty and the render gate emits the §4.6 notice.
-# SANITIZED_SID/WORKERS_STATE_FILE are kept here as fork-free var assignments
-# (no I/O); the gate's empty-SESSION_ID guard exits before anything WRITES
-# state-*.tsv, preserving spec §4.6 (deviation noted in spec §10).
+# SANITIZED_SID is a fork-free var assignment (no I/O); the gate's
+# empty-SESSION_ID guard exits before anything is written (spec §4.6).
 parse_status_json() {
   local input="$1"
   local _jqfilter='
@@ -454,7 +212,6 @@ parse_status_json() {
   } < <(printf '%s' "$input" | jq --raw-output0 "$_jqfilter")
   MODEL="${MODEL%% (*}"                              # strip " (…)" suffix
   SANITIZED_SID="${SESSION_ID//[^A-Za-z0-9_-]/_}"    # tr -c equivalent, no fork
-  WORKERS_STATE_FILE="$HOME/.claude/oh-my-claude/state/state-${SANITIZED_SID}.tsv"
   # Windows path → ~/relative (display). Faithfully reproduces the old
   # `sed 's|\\|/|g; s|C:/Users/[^/]*/|~/|i'`: drive C only (case-insensitive),
   # Users case-insensitive, one segment; other drives unchanged.
@@ -544,7 +301,7 @@ parse_status_json "$input"
 # always-present, so an empty SESSION_ID unambiguously means jq is absent,
 # too old (`--raw-output0` unknown), or `$input` was malformed. One cheap
 # test, no extra fork — and it runs BEFORE cached_git_info/render so no
-# state-*.tsv is ever written on the failure path. Same effective outcome as
+# git or cache work happens on the failure path. Same effective outcome as
 # the old grep code (empty session → no useful statusline), but loud.
 if [ -z "$SESSION_ID" ]; then
   printf 'oh-my-claude: jq required (winget install jqlang.jq)\n'
@@ -572,8 +329,6 @@ if [ "${RATE7_PCT:-0}" -gt 80 ] && [ -n "$RATE7_RESET" ]; then
   RATE7_SUFFIX=" (${RATE7_DATE})"
 fi
 
-# Layouts own placement of worker rows — each render() decides where to call
-# emit_workers (top, middle, bottom, or skip).
 render
 
 fi # end OMC_TEST_LIB_ONLY gate

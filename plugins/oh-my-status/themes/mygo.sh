@@ -8,6 +8,3 @@ C_RED='\033[38;2;255;85;102m'          # Deep pink-red #FF5566
 C_TEXT='\033[38;2;224;224;238m'        # Light neutral #E0E0EE
 C_SUBTEXT='\033[38;2;119;119;170m'     # Taki muted purple #7777AA
 C_SURFACE='\033[38;2;61;61;92m'        # Dark purple #3D3D5C
-
-# Worker row icon (set to "" in oh-my-claude.conf to disable).
-WORKERS_SHELL_ICON=${WORKERS_SHELL_ICON-$'\xe2\x8f\xb3'}

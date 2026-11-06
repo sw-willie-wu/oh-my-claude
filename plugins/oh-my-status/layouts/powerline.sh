@@ -43,6 +43,5 @@ render() {
   [ -n "${RATE7_PCT:-}" ] && STATS+=" 7d:${RATE7_PCT}%"
   LINE+="$(pct_color "${CTX_PCT:-0}") ${STATS} ${RESET}"
 
-  emit_workers
   echo -e "$LINE"
 }

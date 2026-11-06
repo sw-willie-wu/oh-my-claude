@@ -29,46 +29,11 @@ This marketplace (`oh-my-claude`) ships two plugins: **oh-my-status** (a themeab
 | **fancy** | Three lines with detailed info and box drawing |
 | **mygo** | Band-inspired two-line with musical separators |
 
-## Workers
+## Notes
 
-When background shells (Bash with `run_in_background: true`) are running, they appear as dedicated lines at the top of the statusline:
-
-```
- run-dev-server: npm run dev                              4m32s
-◇ opus  ~/oh-my-claude  main +2 ~1
-████░░░ 23%   ██░░░░░ 15%   █░░░░░ 8%
-```
-
-Each line shows: icon (theme default ⏳), description, command, and elapsed time. Long lines are tail-truncated.
-
-Agents are not tracked here. Use the CLI's built-in agent panel below the prompt, or `/tasks`.
-
-### Configuration
-
-Add to `~/.claude/oh-my-claude.conf`:
-
-```bash
-WORKERS_ENABLED=true              # master toggle
-WORKERS_SHOW_SHELLS=true          # show background bash lines
-WORKERS_SHOW_ELAPSED=true         # show elapsed time
-WORKERS_MAX=5                     # 0 = unlimited
-# WORKERS_SHELL_ICON=$'\xe2\x8f\xb3'  # optional override; default comes from the theme; "" hides the icon
-WORKERS_SHELL_MAX_AGE=3600        # seconds; older shells are dimmed and marked '?'
-GIT_CACHE_TTL=3                   # git-info cache TTL (s); 0 = disable (always run git). See note below.
-```
-
-### Known limits
-
-- Two simultaneous bg commands sharing the first 60 chars of their command bind to a single PID. When one completes, both rows prune together.
-- PID reuse: a recycled PID for a long-dead bg row may falsely report "alive". Bounded by `WORKERS_SHELL_MAX_AGE` greying behavior.
-- bg-Bash liveness (when PID acquisition fails) is read at draw time by fingerprint inspection. A `ps` that doesn't list the process (or a non-MSYS `ps -ef` column layout) can false-prune a still-running worker; the grace window mitigates the common case. Primary target is git-bash/MSYS on Windows.
-
-### Limitations
-
-- Background shells that crash without being polled (`BashOutput`) may continue to show as running. After `WORKERS_SHELL_MAX_AGE` (default 1h) they are visually dimmed and marked with `?`. Use Claude Code's built-in `/tasks` command for the true running state.
-- The statusline itself needs `jq` 1.7 or newer. The hooks need it too: without it the hook silently no-ops and no worker lines appear.
-- Plugin-only. The Workers section relies on the plugin's tool hooks, so it works only when oh-my-status is installed as a plugin (marketplace or `--plugin-dir`). Standalone `install.sh` installs get the statusline but no worker rows.
-- Timer refresh is opt-in. By default the statusline re-renders only on Claude Code events, so background-shell elapsed time freezes while the main agent is idle. To keep it ticking, add `"refreshInterval": 10` to your `statusLine` settings (`/oh-my-status:setup` asks about this; it is never added by default). Avoid values below 10: on Windows a render can take several seconds, so a short timer stacks overlapping statusline processes across sessions, burns CPU and contends for the worker-state lock. If you do enable a timer, git info is cached for `GIT_CACHE_TTL` seconds (default 3) instead of running git on every tick. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
+- The statusline needs `jq` 1.7 or newer.
+- Timer refresh is opt-in. By default the statusline re-renders only on Claude Code events, so rate-limit and git info can go stale while the main agent is idle. To keep them current, add `"refreshInterval": 10` to your `statusLine` settings (`/oh-my-status:setup` asks about this; it is never added by default). Avoid values below 10: on Windows a render can take several seconds, so a short timer stacks overlapping statusline processes across sessions and burns CPU.
+- `GIT_CACHE_TTL` (conf key, default 3): git info is cached for this many seconds instead of running git on every render. Tradeoff: a branch switch / commit / stage in the same directory is reflected within `GIT_CACHE_TTL` seconds rather than instantly. Set `GIT_CACHE_TTL=0` to disable the cache and always run git (instant git accuracy, the pre-cache behavior).
 
 ## Account
 
@@ -137,10 +102,7 @@ git clone https://github.com/sw-willie-wu/oh-my-claude.git
 bash oh-my-claude/install.sh
 ```
 
-Restart Claude Code to see the statusline. Note: the standalone install
-provides the statusline only — the [Workers](#workers) section needs the
-plugin's tool hooks, so install via the marketplace or `--plugin-dir` if
-you want live background-shell rows.
+Restart Claude Code to see the statusline.
 
 ### Upgrading from oh-my-claude
 
@@ -197,7 +159,7 @@ LAYOUT="powerline"
 ## How it works
 
 - **Plugin install** registers slash commands (`setup`, `set-theme`, `list-themes`)
-- **SessionStart hook** syncs themes/layouts from the plugin to `~/.claude/oh-my-claude/` (auto-updates when plugin updates)
+- **SessionStart hook** syncs themes/layouts from the plugin to `~/.claude/oh-my-claude/` (auto-updates when plugin updates) and sweeps stale state files
 - **`/oh-my-status:setup`** adds the `statusLine` config to your `~/.claude/settings.json` (asks before overwriting existing config)
 - **Config file** (`~/.claude/oh-my-claude.conf`) stores your theme/layout choice and is preserved across updates
 

@@ -9,7 +9,6 @@ TESTS_FAILED=0
 
 # Override state dir during tests so we never touch real ~/.claude state.
 export OMC_STATE_DIR="${OMC_STATE_DIR:-$(mktemp -d -t omc-test-XXXXXX)}"
-export OMC_LOG_FILE="${OMC_LOG_FILE:-${OMC_STATE_DIR}/track-workers.log}"
 
 # Isolation: never read the real ~/.claude/oh-my-claude.conf or ~/.claude.json.
 # [ -f /dev/null ] is false, so conf defaults apply. Tests override as needed.

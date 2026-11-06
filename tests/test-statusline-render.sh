@@ -10,350 +10,21 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 STATUSLINE="$REPO_ROOT/plugins/oh-my-status/statusline.sh"
 
-# Each test sets up its own session_id and state file under ~/.claude/oh-my-claude/state/
-# (real path, since statusline.sh derives it from $HOME). Cleanup after each test.
-RENDER_STATE_DIR="$HOME/.claude/oh-my-claude/state"
-mkdir -p "$RENDER_STATE_DIR"
-
-cleanup_render_state() {
-  rm -f "$RENDER_STATE_DIR"/state-render-test-*.tsv
-  rm -f "$RENDER_STATE_DIR"/ctx-render-test-* "$RENDER_STATE_DIR"/handoff-render-test-*
-}
-
 # Strip ANSI escape sequences so we can measure visible width and assert on text.
 strip_ansi() {
   sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g'
 }
 
-# Run statusline with given session_id and capture stdout. emit_workers always
-# runs BEFORE the layout's render(), so the worker lines are guaranteed to be
-# the leading lines of the output — assertions that need only worker content
-# can use `head -1` or grep for worker-specific patterns. Layout output (model,
-# bars, etc.) follows but doesn't interfere with these tests.
-run_workers() {
-  local sid="$1" cols="${2:-120}"
-  # Isolate from user's oh-my-claude.conf so tests don't depend on
-  # whichever LAYOUT/THEME the developer happens to use locally.
-  COLUMNS="$cols" OMC_CONF=/dev/null bash -c "
-    echo '{\"session_id\":\"$sid\",\"model\":{\"display_name\":\"X\"},\"workspace\":{\"current_dir\":\"/tmp\"}}' \
-      | bash $STATUSLINE 2>/dev/null
-  "
+# Render with a given session_id from a non-repo cwd. State goes to
+# $OMC_STATE_DIR (set by test-helpers.sh to a private mktemp dir), never to
+# the real ~/.claude.
+run_render() {  # $1=sid $2=cols
+  local nogit; nogit=$(mktemp -d)
+  ( cd "$nogit" && COLUMNS="${2:-120}" OMC_CONF=/dev/null bash -c "printf '%s' '{\"session_id\":\"$1\",\"model\":{\"display_name\":\"X\"},\"workspace\":{\"current_dir\":\"/tmp\"}}' | bash '$STATUSLINE' 2>/dev/null" )
+  rm -rf "$nogit"
 }
 
-cleanup_render_state
 printf 'Running statusline render tests\n\n'
-
-start_test "long line truncates and elapsed appears exactly once"
-SID="render-test-002"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-LONG_DESC="a very long description that exceeds terminal width definitely and goes on and on"
-printf 'shell\ttoolu_a2\t-\t%s\tsleep 99\t%s\n' "$LONG_DESC" "$((NOW - 12))" > "$SF"
-OUT="$(run_workers "$SID" 60 | strip_ansi)"
-LEN=$(printf '%s' "$OUT" | head -1 | awk '{print length}')
-[ "$LEN" -le 58 ] || { printf '    FAIL: line len=%d exceeds 58 (cols=60-2)\n      got: %q\n' "$LEN" "$OUT" >&2; TEST_FAILED=1; }
-COUNT_NS=$(printf '%s' "$OUT" | head -1 | grep -oE '[0-9]+s' | wc -l | tr -d ' ')
-assert_eq "1" "$COUNT_NS" "elapsed (Ns) should appear exactly once on first line (truncation regression)"
-echo "$OUT" | grep -qF '...' \
-  || { printf '    FAIL: ... marker missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "description with escaped tab/newline is unescaped on render"
-SID="render-test-003"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_a3\t-\ta\\tb\\nc\tsleep 99\t%s\n' "$((NOW - 5))" > "$SF"
-OUT="$(run_workers "$SID" 120 | strip_ansi)"
-TAB_PATTERN=$'a\tb'
-echo "$OUT" | head -1 | grep -qF "$TAB_PATTERN" \
-  || { printf '    FAIL: tab not unescaped in output\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "WORKERS_ENABLED=false produces zero worker lines"
-SID="render-test-004"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_a4\t-\tshould not appear\tsleep 99\t%s\n' "$((NOW - 1))" > "$SF"
-OUT="$(WORKERS_ENABLED=false run_workers "$SID" 120 | strip_ansi)"
-echo "$OUT" | grep -qF 'should not appear' \
-  && { printf '    FAIL: worker line emitted despite WORKERS_ENABLED=false\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "corrupt row (missing start_unix) is skipped silently"
-SID="render-test-005"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-# Row missing the trailing start_unix column.
-printf 'shell\ttoolu_a5\t-\tcorrupt row no timestamp\tsleep 99\n' > "$SF"
-OUT="$(run_workers "$SID" 120 | strip_ansi)"
-echo "$OUT" | grep -qF 'corrupt row no timestamp' \
-  && { printf '    FAIL: corrupt row should not render\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "is_alive returns true for running PID, false for dead PID"
-SID="render-test-isalive"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 30 &
-LIVE_PID=$!
-DEAD_PID=99999999
-ALIVE_OUT=$(bash -c "
-  source '$STATUSLINE.lib_test_loader.sh' 2>/dev/null || true
-  is_alive $LIVE_PID && echo ALIVE || echo DEAD
-")
-DEAD_OUT=$(bash -c "
-  source '$STATUSLINE.lib_test_loader.sh' 2>/dev/null || true
-  is_alive $DEAD_PID && echo ALIVE || echo DEAD
-")
-kill "$LIVE_PID" 2>/dev/null
-wait "$LIVE_PID" 2>/dev/null
-assert_eq "ALIVE" "$ALIVE_OUT" "running PID should be alive"
-assert_eq "DEAD" "$DEAD_OUT" "nonexistent PID should be dead"
-end_test
-
-
-start_test "prune_state_and_emit drops dead shell row from file (unit)"
-SID="render-test-prune-unit"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-DEAD_PID=99999999
-printf 'shell\ttoolu_b\tbash_x\tdesc\tcmd\t%s\t%s\n' "$NOW" "$DEAD_PID" > "$SF"
-RESULT=$(bash -c "
-  OMC_TEST_LIB_ONLY=1
-  source '$STATUSLINE'
-  WORKERS_STATE_FILE='$SF'
-  SESSION_ID='$SID'
-  prune_state_and_emit
-")
-assert_line_count "$SF" 0 "dead row should be removed by prune"
-end_test
-
-start_test "prune drops shell row with dead PID, keeps alive shell"
-SID="render-test-prune-1"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 30 &
-LIVE_PID=$!
-DEAD_PID=99999999
-{
-  printf 'shell\ttoolu_b_dead\tbash_dead\tdead bash\tsleep 99\t%s\t%s\n' "$NOW" "$DEAD_PID"
-  printf 'shell\ttoolu_b_live\tbash_live\tlive bash\tsleep 99\t%s\t%s\n' "$NOW" "$LIVE_PID"
-} > "$SF"
-OUT=$(run_workers "$SID" 200 | strip_ansi)
-kill "$LIVE_PID" 2>/dev/null
-wait "$LIVE_PID" 2>/dev/null
-echo "$OUT" | grep -qF 'live bash' \
-  || { printf '    FAIL: alive shell missing\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-echo "$OUT" | grep -qvF 'dead bash' \
-  || { printf '    FAIL: dead shell still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'bash_dead' "$SF" \
-  && { printf '    FAIL: dead row not removed from state\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "row with valid col3 but col7 empty (post inter-update gap) is kept within grace"
-SID="render-test-prune-postgap"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-# Simulates the window between post's first update_col (col3=bg id) and the
-# second (col7=PID). No output file present; only grace should keep it.
-printf 'shell\ttoolu_postgap\tbash_realid\tinflight\tsleep 99\t%s\n' "$NOW" > "$SF"
-OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-echo "$OUT" | grep -qF 'inflight' \
-  || { printf '    FAIL: post-gap row pruned during grace\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'toolu_postgap' "$SF" \
-  || { printf '    FAIL: post-gap row removed from state file during grace\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "row with valid col3 but col7 empty beyond grace pruned when no live process"
-SID="render-test-prune-postgap-stale"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-# col7 empty, beyond grace, no process matches the command → is_shell_alive
-# false → row pruned.
-printf 'shell\ttoolu_postgap2\tbash_missing\tdead\tomc_no_proc_%s_%s\t%s\n' "$$" "$RANDOM" "$((NOW - 120))" > "$SF"
-OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-echo "$OUT" | grep -qvF 'dead' \
-  || { printf '    FAIL: stale row with no live process still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'toolu_postgap2' "$SF" \
-  && { printf '    FAIL: stale row not pruned from state file\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "placeholder shell row (col3=- col7 missing) survives prune within grace"
-SID="render-test-prune-placeholder-1"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_pre1\t-\tjust started\tsleep 999\t%s\n' "$NOW" > "$SF"
-OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-echo "$OUT" | grep -qF 'just started' \
-  || { printf '    FAIL: placeholder row pruned during grace window\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'toolu_pre1' "$SF" \
-  || { printf '    FAIL: placeholder row removed from state file during grace\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "stale placeholder row is reaped after grace window"
-SID="render-test-prune-placeholder-2"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_pre2\t-\torphaned\tsleep 999\t%s\n' "$((NOW - 120))" > "$SF"
-OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-echo "$OUT" | grep -qvF 'orphaned' \
-  || { printf '    FAIL: stale placeholder still rendered\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-grep -qF 'toolu_pre2' "$SF" \
-  && { printf '    FAIL: stale placeholder row not pruned from state file\n' >&2; TEST_FAILED=1; }
-end_test
-
-# --- bg-Bash render-side liveness: is_shell_alive helper ---
-call_is_shell_alive() {
-  # $1 = command string to fingerprint-check
-  bash -c "
-    OMC_TEST_LIB_ONLY=1
-    source '$STATUSLINE'
-    is_shell_alive \"\$1\" && echo YES || echo NO
-  " _ "$1"
-}
-
-start_test "is_shell_alive: YES for a live eval-wrapped bg process (needle path)"
-TAG="omcprobe_$$_$RANDOM"
-( /usr/bin/bash -c "eval 'sleep 8 && : $TAG' < /dev/null" ) &
-WRAP_PID=$!
-sleep 0.5
-RESULT=$(call_is_shell_alive "sleep 8 && : $TAG")
-kill "$WRAP_PID" 2>/dev/null; pkill -f "$TAG" 2>/dev/null; wait "$WRAP_PID" 2>/dev/null
-assert_eq "YES" "$RESULT" "running eval-wrapped process must be detected alive"
-end_test
-
-start_test "is_shell_alive: YES for a live bare process (index==1 path)"
-sleep 8 &
-BARE_PID=$!
-sleep 0.3
-RESULT=$(call_is_shell_alive "sleep 8")
-kill "$BARE_PID" 2>/dev/null; wait "$BARE_PID" 2>/dev/null
-assert_eq "YES" "$RESULT" "running bare process must be detected alive"
-end_test
-
-start_test "is_shell_alive: NO when no matching process exists"
-RESULT=$(call_is_shell_alive "omc_no_such_command_$$_$RANDOM xyzzy")
-assert_eq "NO" "$RESULT" "absent command must be reported dead"
-end_test
-
-start_test "is_shell_alive: NO for empty command"
-RESULT=$(call_is_shell_alive "")
-assert_eq "NO" "$RESULT" "empty command fingerprint must be dead"
-end_test
-
-# --- item-2: is_shell_alive 3-way (0 alive / 1 ps-worked-but-absent /
-# 2 ps-unusable) + rc-aware prune. Deterministic ps via injected ps()
-# function in the SAME bash -c as source (so it shadows the bare `ps`
-# calls); NOT run_workers (child bash can't see the function). ---
-call_isa_rc() {  # $1=command  $2=ps() definition → prints is_shell_alive rc
-  bash -c "
-    OMC_TEST_LIB_ONLY=1
-    source '$STATUSLINE'
-    $2
-    is_shell_alive \"\$1\"; echo \$?
-  " _ "$1"
-}
-
-start_test "is_shell_alive: rc=2 when ps is entirely unusable (ps-blind box)"
-RC=$(call_isa_rc "sleep 9 omc_t1" 'ps(){ :; }')
-assert_eq "2" "$RC" "all-empty ps → unknown(2), NOT dead(1)"
-end_test
-
-start_test "is_shell_alive: rc=0 when ps works and fingerprint matches"
-RC=$(call_isa_rc "omc_probe_t2" 'ps(){ printf "H H H H H H\nu p q r s omc_probe_t2\n"; }')
-assert_eq "0" "$RC" "ps output with matching cmd → alive(0)"
-end_test
-
-start_test "is_shell_alive: rc=1 when ps works but no match (still dead)"
-RC=$(call_isa_rc "omc_absent_t3" 'ps(){ printf "UID PID PPID C STIME TTY TIME CMD\nu 1 0 0 t ? 0 /sbin/init\n"; }')
-assert_eq "1" "$RC" "ps worked, no match → dead(1) — ps-working contract"
-end_test
-
-start_test "is_shell_alive: rc=1 for empty command even if ps unusable"
-RC=$(call_isa_rc "" 'ps(){ :; }')
-assert_eq "1" "$RC" "empty fp is dead(1), not a ps problem"
-end_test
-
-# prune: in-subshell source pattern (I1) so the injected ps() shadows
-# is_shell_alive's bare ps. Row: shell, col7 empty, col3 != "-", past
-# grace (grace=30). col6 drives age (race-free; no OMC_NOW_OVERRIDE seam).
-prune_with_ps() {  # $1=SF $2=SID $3=ps() def $4=WORKERS_SHELL_UNKNOWN_MAX_AGE(opt)
-  bash -c "
-    OMC_TEST_LIB_ONLY=1
-    source '$STATUSLINE'
-    $3
-    WORKERS_STATE_FILE='$1'; SESSION_ID='$2'
-    WORKERS_PLACEHOLDER_GRACE_SEC=30
-    ${4:+WORKERS_SHELL_UNKNOWN_MAX_AGE=$4}
-    prune_state_and_emit
-  " >/dev/null 2>&1
-}
-
-start_test "prune: ps-unusable, PID-less, past grace, age<=cap → row KEPT"
-SID="render-test-isa-keep"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-# age 45: past grace(30), within default cap(60). col7 absent, col3 != "-".
-printf 'shell\ttoolu_keep\tbash_x\tdesc\tomc_cmd_keep\t%s\n' "$((NOW - 45))" > "$SF"
-prune_with_ps "$SF" "$SID" 'ps(){ :; }'
-grep -qF 'toolu_keep' "$SF" \
-  || { printf '    FAIL: live-unknowable shell false-pruned on ps-blind box\n      SF: %q\n' "$(cat "$SF")" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "prune: ps-unusable, PID-less, past grace, age>cap → row reaped (bounded)"
-SID="render-test-isa-cap"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_cap\tbash_x\tdesc\tomc_cmd_cap\t%s\n' "$((NOW - 45))" > "$SF"
-prune_with_ps "$SF" "$SID" 'ps(){ :; }' 0   # cap=0 → age 45 > 0 → reap
-grep -qF 'toolu_cap' "$SF" \
-  && { printf '    FAIL: ps-unknown dead shell not bounded by UNKNOWN_MAX_AGE\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "prune: ps works but no match, PID-less past grace → reaped (rc1 unchanged)"
-SID="render-test-isa-nomatch"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_nm\tbash_x\tdesc\tomc_cmd_nm\t%s\n' "$((NOW - 45))" > "$SF"
-prune_with_ps "$SF" "$SID" 'ps(){ printf "UID PID CMD\nu 1 /sbin/init\n"; }'
-grep -qF 'toolu_nm' "$SF" \
-  && { printf '    FAIL: ps-working no-match shell not pruned (rc1 contract broken)\n' >&2; TEST_FAILED=1; }
-end_test
-
-start_test "prune: ps-unusable + corrupt col6 (0) → reaped (cannot bound)"
-SID="render-test-isa-corrupt"; SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-printf 'shell\ttoolu_cor\tbash_x\tdesc\tomc_cmd_cor\t0\n' > "$SF"
-prune_with_ps "$SF" "$SID" 'ps(){ :; }'
-grep -qF 'toolu_cor' "$SF" \
-  && { printf '    FAIL: corrupt-col6 ps-unknown row not reaped\n' >&2; TEST_FAILED=1; }
-end_test
-
-# --- Task 2: prune shell branch uses is_shell_alive (not sticky output file) ---
-start_test "prune drops stale shell row when process dead despite sticky .output file"
-SID="render-test-shell-sticky-dead"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-TMPROOT=$(mktemp -d)
-WD_ID='-tmp'
-mkdir -p "$TMPROOT/claude/$WD_ID/$SID/tasks"
-touch "$TMPROOT/claude/$WD_ID/$SID/tasks/bash_sticky.output"   # sticky file exists
-DEADCMD="omc_dead_cmd_$$_$RANDOM noproc"
-printf 'shell\ttoolu_sticky\tbash_sticky\tdesc\t%s\t%s\t0\n' "$DEADCMD" "$((NOW - 9999))" > "$SF"
-OUT=$(TEMP="$TMPROOT" WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-grep -qF 'toolu_sticky' "$SF" \
-  && { printf '    FAIL: dead shell kept because sticky .output still present (the bug)\n' >&2; TEST_FAILED=1; }
-rm -rf "$TMPROOT"
-end_test
-
-start_test "prune keeps shell row when matching process alive (col7=0, beyond grace)"
-SID="render-test-shell-live-noproc-pid"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 8 &
-LIVEPID=$!
-sleep 0.3
-printf 'shell\ttoolu_livecmd\tbash_live\tdesc\tsleep 8\t%s\t0\n' "$((NOW - 9999))" > "$SF"
-OUT=$(WORKERS_PLACEHOLDER_GRACE_SEC=30 run_workers "$SID" 200 | strip_ansi)
-kill "$LIVEPID" 2>/dev/null; wait "$LIVEPID" 2>/dev/null
-grep -qF 'toolu_livecmd' "$SF" \
-  || { printf '    FAIL: live-process shell row pruned (col7=0 fingerprint path)\n' >&2; TEST_FAILED=1; }
-end_test
 
 # --- Task A: git_info() extracted, pure, 6 TAB-joined fields ---
 call_git_info() {
@@ -552,7 +223,7 @@ rm -rf "$ST" "$WD"
 end_test
 
 # --- Task C: cached_git_info() wired into the render path ---
-# run_workers cannot steer the git cwd (it hardcodes current_dir:/tmp but git
+# run_render cannot steer the git cwd (it hardcodes current_dir:/tmp but git
 # runs against $PWD) nor isolate the cache. This helper cd's into the target
 # repo and passes OMC_STATE_DIR (and optional GIT_CACHE_TTL) into the render.
 run_workers_in() {
@@ -869,14 +540,13 @@ end_test
 
 # Gate-level: jq failure (malformed input) and empty session_id both collapse
 # to an empty SESSION_ID → the render gate emits a single notice + exit 0,
-# BEFORE any state-*.tsv write. Old grep code instead renders normally.
+# BEFORE any git or cache work. Old grep code instead renders normally.
 start_test "render gate: malformed input → jq-required notice, exit 0, no state write"
 NOTICE='oh-my-claude: jq required (winget install jqlang.jq)'
-rm -f "$RENDER_STATE_DIR/state-.tsv"
 OUT=$(printf 'not valid json at all' | bash "$STATUSLINE" 2>/dev/null); RC=$?
 assert_eq "$NOTICE" "$OUT" "malformed JSON → exactly the jq-required notice"
 assert_eq "0" "$RC" "notice path exits 0"
-[ ! -e "$RENDER_STATE_DIR/state-.tsv" ] \
+[ ! -e "$OMC_STATE_DIR/state-.tsv" ] \
   || { printf '    FAIL: state-.tsv written on jq-failure path\n' >&2; TEST_FAILED=1; }
 end_test
 
@@ -887,95 +557,61 @@ assert_eq "$NOTICE" "$OUT" "empty session_id → notice (no broken statusline)"
 assert_eq "0" "$RC" "empty-session notice path exits 0"
 end_test
 
-# --- worker grouping (spec 2026-05-19) -----------------------------------
+# --- helpers ---------------------------------------------------------------
 # 1-based index of the first stripped output line containing $2 (literal),
 # or 0 if absent. Used to assert relative render order.
 line_index() {
   printf '%s\n' "$1" | grep -nF -- "$2" | head -1 | cut -d: -f1 | { read -r n; printf '%s' "${n:-0}"; }
 }
 
-start_test "WORKERS_MAX caps the rendered shell rows in launch order"
-SID="render-test-group-max"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 60 & LP1=$!
-sleep 60 & LP2=$!
-sleep 60 & LP3=$!
-{
-  printf 'shell\ttoolu_b1\tbash_1\tshell-one\tsleep 99\t%s\t%s\n'      "$((NOW - 25))" "$LP1"
-  printf 'shell\ttoolu_b2\tbash_2\tshell-two\tsleep 99\t%s\t%s\n'      "$((NOW - 15))" "$LP2"
-  printf 'shell\ttoolu_b3\tbash_3\tshell-three\tsleep 99\t%s\t%s\n'    "$((NOW - 5))"  "$LP3"
-} > "$SF"
-OUT="$(bash -c "
-  OMC_TEST_LIB_ONLY=1
-  source '$STATUSLINE'
-  WORKERS_STATE_FILE='$SF'
-  SESSION_ID='$SID'
-  WORKERS_MAX=2
-  WORKERS_SHELL_ICON='S'
-  emit_workers
-" | strip_ansi)"
-kill "$LP1" "$LP2" "$LP3" 2>/dev/null; wait "$LP1" "$LP2" "$LP3" 2>/dev/null
-echo "$OUT" | grep -qF 'shell-one' && echo "$OUT" | grep -qF 'shell-two' \
-  || { printf '    FAIL: cap=2 should keep the first two shells\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-echo "$OUT" | grep -qF 'shell-three' \
-  && { printf '    FAIL: third shell rendered despite cap=2\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-end_test
-
-start_test "fancy layout order: git before meters, workers last"
+start_test "fancy layout order: model, git, meters"
 SID="render-test-fancy-order"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-printf 'shell\ttoolu_fa\tbash_fa\tfancyagentX\tsleep 99\t%s\n' "$((NOW - 15))" > "$SF"
-FREPO="$RENDER_STATE_DIR/fancy-repo"
-rm -rf "$FREPO"; mkdir -p "$FREPO"
+FREPO=$(mktemp -d)
 git -C "$FREPO" init -q
 git -C "$FREPO" symbolic-ref HEAD refs/heads/fancybrZ
-FCONF="$RENDER_STATE_DIR/fancy.conf"
+FCONF="$OMC_STATE_DIR/fancy.conf"
 printf 'THEME="catppuccin"\nLAYOUT="fancy"\n' > "$FCONF"
 OUT="$(COLUMNS=200 OMC_CONF="$FCONF" bash -c "
-  cd '$FREPO' && echo '{\"session_id\":\"$SID\",\"model\":{\"display_name\":\"X\"},\"workspace\":{\"current_dir\":\"$FREPO\"}}' \
+  cd '$FREPO' && echo '{\"session_id\":\"$SID\",\"model\":{\"display_name\":\"FancyModelQ\"},\"workspace\":{\"current_dir\":\"$FREPO\"}}' \
     | bash '$STATUSLINE' 2>/dev/null
 " | strip_ansi)"
 rm -rf "$FREPO" "$FCONF"
-I_W=$(line_index "$OUT" 'fancyagentX')
 I_G=$(line_index "$OUT" 'fancybrZ')
 I_C=$(line_index "$OUT" 'ctx')
-[ "$I_W" -gt 0 ] && [ "$I_G" -gt 0 ] && [ "$I_C" -gt 0 ] \
-  || { printf '    FAIL: worker/git/ctx line missing (w=%s g=%s c=%s)\n      got: %q\n' "$I_W" "$I_G" "$I_C" "$OUT" >&2; TEST_FAILED=1; }
+[ "$I_G" -gt 0 ] && [ "$I_C" -gt 0 ] \
+  || { printf '    FAIL: git/ctx line missing (g=%s c=%s)\n      got: %q\n' "$I_G" "$I_C" "$OUT" >&2; TEST_FAILED=1; }
+printf '%s\n' "$OUT" | head -1 | grep -qF 'FancyModelQ' \
+  || { printf '    FAIL: line 1 is not the model line\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 [ "$I_G" -lt "$I_C" ] \
   || { printf '    FAIL: git not before meters (g=%s c=%s)\n      got: %q\n' "$I_G" "$I_C" "$OUT" >&2; TEST_FAILED=1; }
-[ "$I_C" -lt "$I_W" ] \
-  || { printf '    FAIL: workers not after meters (c=%s w=%s)\n      got: %q\n' "$I_C" "$I_W" "$OUT" >&2; TEST_FAILED=1; }
 end_test
 
 start_test "_omc_sweep_stale_tmp removes orphaned temp files older than 30s, keeps the rest"
 ST=$(mktemp -d)
 NOW=$(date +%s)
 # Crash-orphaned temp files (60s old) — must be swept.
-printf 'x' > "$ST/state-sess.tsv.prune.111"
 printf 'x' > "$ST/gitcache-somekey.tmp.222"
-touch -d "@$((NOW - 60))" "$ST/state-sess.tsv.prune.111" "$ST/gitcache-somekey.tmp.222"
-# Fresh temp file + real state/cache files — must all survive.
-printf 'x' > "$ST/state-sess.tsv.prune.333"
-printf 'x' > "$ST/state-sess.tsv"
+printf 'x' > "$ST/account-x.tmp.333"
+touch -d "@$((NOW - 60))" "$ST/gitcache-somekey.tmp.222" "$ST/account-x.tmp.333"
+# Fresh temp files + real cache files — must all survive.
+printf 'x' > "$ST/gitcache-somekey.tmp.444"
+printf 'x' > "$ST/account-x.tmp.555"
 printf 'x' > "$ST/gitcache-somekey"
+printf 'x' > "$ST/account-x"
 bash -c "
   OMC_STATE_DIR='$ST'
   OMC_TEST_LIB_ONLY=1
   source '$STATUSLINE'
   _omc_sweep_stale_tmp
 "
-[ ! -f "$ST/state-sess.tsv.prune.111" ] \
-  || { printf '    FAIL: stale .prune temp not swept\n' >&2; TEST_FAILED=1; }
 [ ! -f "$ST/gitcache-somekey.tmp.222" ] \
   || { printf '    FAIL: stale gitcache .tmp temp not swept\n' >&2; TEST_FAILED=1; }
-[ -f "$ST/state-sess.tsv.prune.333" ] \
+[ ! -f "$ST/account-x.tmp.333" ] \
+  || { printf '    FAIL: stale account .tmp temp not swept\n' >&2; TEST_FAILED=1; }
+[ -f "$ST/gitcache-somekey.tmp.444" ] && [ -f "$ST/account-x.tmp.555" ] \
   || { printf '    FAIL: fresh temp file wrongly swept\n' >&2; TEST_FAILED=1; }
-[ -f "$ST/state-sess.tsv" ] \
-  || { printf '    FAIL: real state file wrongly swept\n' >&2; TEST_FAILED=1; }
-[ -f "$ST/gitcache-somekey" ] \
-  || { printf '    FAIL: real gitcache file wrongly swept\n' >&2; TEST_FAILED=1; }
+[ -f "$ST/gitcache-somekey" ] && [ -f "$ST/account-x" ] \
+  || { printf '    FAIL: real cache file wrongly swept\n' >&2; TEST_FAILED=1; }
 rm -rf "$ST"
 end_test
 
@@ -987,59 +623,13 @@ start_test "a full render runs the stale-temp sweep (wiring, not just the unit)"
 # were dropped from the render path, the unit test above would still pass
 # but this assertion would catch the missing wiring.
 NOW=$(date +%s)
-ORPHAN="$OMC_STATE_DIR/state-sweepwire.tsv.prune.99999"
+ORPHAN="$OMC_STATE_DIR/gitcache-wire.tmp.99999"
 printf 'x' > "$ORPHAN"
 touch -d "@$((NOW - 60))" "$ORPHAN"
-run_workers "render-test-sweep-wiring" 120 >/dev/null
+run_render "render-test-sweep-wiring" 120 >/dev/null
 [ ! -f "$ORPHAN" ] \
   || { printf '    FAIL: full render did not sweep the orphaned temp file\n' >&2; TEST_FAILED=1; }
 rm -f "$ORPHAN"
-end_test
-
-# --- 1.2.0: agent tracking removed; prune keeps shell rows only ---
-start_test "prune keeps only shell rows: drops agent (5- and 6-col) and unknown kind"
-SID="render-test-t21"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-SHELL_LINE="$(printf 'shell\ttoolu_s1\t-\tkeepme\tsleep 99\t%s' "$NOW")"
-{
-  printf 'agent\ttoolu_a1\tgeneral-purpose\told five\t%s\n' "$NOW"
-  printf '%s\n' "$SHELL_LINE"
-  printf 'agent\ttoolu_a2\tExplore\told six\t%s\t-\n' "$NOW"
-  printf 'bogus\tx\ty\n'
-} > "$SF"
-run_workers "$SID" 200 >/dev/null
-assert_eq "$SHELL_LINE" "$(cat "$SF")" "state file must hold exactly the shell row"
-end_test
-
-start_test "WORKERS_SHOW_SHELLS=false: no worker lines and state file untouched (no prune)"
-SID="render-test-t22"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-DEAD_LINE="$(printf 'shell\ttoolu_dead\tbash_dead\tghost shell\tsleep 99\t%s\t99999999' "$((NOW - 9999))")"
-printf '%s\n' "$DEAD_LINE" > "$SF"
-OUT="$(WORKERS_SHOW_SHELLS=false run_workers "$SID" 200 | strip_ansi)"
-echo "$OUT" | grep -qF 'ghost shell' \
-  && { printf '    FAIL: worker line rendered with WORKERS_SHOW_SHELLS=false\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-assert_eq "$DEAD_LINE" "$(cat "$SF")" "dead row must survive (prune must not run)"
-end_test
-
-start_test "1.1.2 mixed state file upgrades to shell rows byte-identical"
-SID="render-test-t23"
-SF="$RENDER_STATE_DIR/state-${SID}.tsv"
-NOW=$(date +%s)
-sleep 60 & LP=$!
-S6="$(printf 'shell\ttoolu_p\t-\tplaceholder\tsleep 99\t%s' "$NOW")"
-S7="$(printf 'shell\ttoolu_l\tbash_l\tlive one\tsleep 99\t%s\t%s' "$NOW" "$LP")"
-{
-  printf 'agent\ttoolu_a1\tgeneral-purpose\tfive col\t%s\n' "$NOW"
-  printf '%s\n' "$S6"
-  printf 'agent\ttoolu_a2\tExplore\tsix col\t%s\tagent_x\n' "$NOW"
-  printf '%s\n' "$S7"
-} > "$SF"
-run_workers "$SID" 200 >/dev/null
-kill "$LP" 2>/dev/null; wait "$LP" 2>/dev/null
-assert_eq "$(printf '%s\n%s' "$S6" "$S7")" "$(cat "$SF")" "exactly the 2 shell lines, byte-identical"
 end_test
 
 start_test "no workdir-raw variable left in tests or statusline"
@@ -1414,5 +1004,4 @@ done
 end_test
 
 rm -rf "$T4D"
-cleanup_render_state
 print_summary
