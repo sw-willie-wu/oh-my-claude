@@ -27,6 +27,9 @@
   at the next render; edited files show within `GIT_CACHE_TTL`.
 - `GIT_CACHE_TTL` now defaults to 10 (was 3); an unset or invalid value also
   means 10. An existing value in your conf is kept.
+- A git cache miss runs 2 git commands instead of 4 plus ~10 helper
+  processes (`git status -b` gives the branch; counting is done in bash).
+- On git older than 2.22 the branch name is now shown (it was empty).
 
 ### Migration (3.0.0)
 - Restart every Claude Code session after updating. Until then an old 2.x

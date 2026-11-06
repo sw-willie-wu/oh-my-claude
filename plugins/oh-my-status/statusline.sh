@@ -89,9 +89,13 @@ _omc_sweep_stale_tmp() {
 # globals. stdout = exactly one line, 6 TAB-joined fields (NO trailing newline):
 #   <BRANCH>\t<ADD>\t<MOD>\t<DEL>\t<LINES_ADD>\t<LINES_DEL>
 # not-a-repo and detached HEAD → field 1 empty; fields 2–6 are integers.
-# Values are byte-identical to the former inline block in repos with no
-# submodules (the common case); only the plumbing changed plus the §8.1
-# submodule guard below.
+# Two git calls on the normal path (status -b, diff --numstat); the branch
+# comes from the `status -b` header and the counting is done in bash with the
+# same predicates the old grep/awk used. If `git status` fails (dubious
+# ownership, corrupt index, bare repo, cwd inside .git, git without
+# --no-ahead-behind) the old command sequence runs, so every error edge keeps
+# its old answer. §8.1 submodule guard: submodules are scanned only when
+# .gitmodules exists at the toplevel.
 git_info() {
   local branch="" add=0 mod=0 del=0 ladd=0 ldel=0 toplevel
   # `git status` opportunistically refreshes the index, taking .git/index.lock.
@@ -104,18 +108,52 @@ git_info() {
   # Not inside any repo (and no GIT_* env): same answer git would give, no process.
   _omc_git_walk
   [ "$_OMC_GIT_FOUND" = none ] && { printf '\t0\t0\t0\t0\t0'; return; }
-  # `--show-toplevel` doubles as the in-a-worktree gate AND gives the path for
-  # the .gitmodules check below in a single git call (replacing the old bare
-  # `rev-parse --git-dir` gate; a bare repo with no worktree → treated as
-  # non-repo, which is correct for a working-tree status line).
+  local st h sub_status="" diff_stats has_sub="" l a d
+  if ! st=$(git status --porcelain -b -uall --no-ahead-behind 2>/dev/null); then
+    _omc_git_info_legacy; return
+  fi
+  # Toplevel (for the .gitmodules check): the walk's root; git decides when the
+  # walk could not (GIT_* env, bash < 5, cwd gone).
+  if [ "$_OMC_GIT_FOUND" = repo ]; then toplevel=$_OMC_GIT_ROOT
+  else toplevel=$(git rev-parse --show-toplevel 2>/dev/null); fi
+  [ -n "$toplevel" ] || { _omc_git_info_legacy; return; }
+  h=${st%%$'\n'*}
+  case $h in
+    '## HEAD (no branch)') branch= ;;
+    '## No commits yet on '*) branch=${h#'## No commits yet on '}; branch=${branch%%...*} ;;
+    '## Initial commit on '*) branch=${h#'## Initial commit on '}; branch=${branch%%...*} ;;
+    '## '*) branch=${h#'## '}; branch=${branch%%...*} ;;
+  esac
+  [ -f "$toplevel/.gitmodules" ] && has_sub=1
+  if [ -n "$has_sub" ]; then
+    sub_status=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
+    diff_stats=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
+  else
+    diff_stats=$(git diff HEAD --numstat 2>/dev/null)
+  fi
+  # Same predicates as the former grep -c: add ^A|^??, mod ^ M|^M|^AM, del ^ D|^D
+  # (AM counts in both add and mod). The header and blank lines match nothing.
+  while IFS= read -r l; do
+    case $l in A*|'??'*) add=$((add + 1)) ;; esac
+    case $l in ' M'*|M*|AM*) mod=$((mod + 1)) ;; esac
+    case $l in ' D'*|D*) del=$((del + 1)) ;; esac
+  done <<< "$st"$'\n'"$sub_status"
+  # numstat columns are TAB-separated (paths last); binary "-" counts as 0.
+  while IFS=$'\t' read -r a d _; do
+    [[ $a =~ ^[0-9]+$ ]] && ladd=$((ladd + 10#$a))
+    [[ $d =~ ^[0-9]+$ ]] && ldel=$((ldel + 10#$d))
+  done <<< "$diff_stats"
+  printf '%s\t%s\t%s\t%s\t%s\t%s' "$branch" "$add" "$mod" "$del" "$ladd" "$ldel"
+}
+
+# The pre-5.2 command sequence, kept verbatim as the fallback when
+# `git status -b --no-ahead-behind` fails. Runs under git_info's exported
+# GIT_OPTIONAL_LOCKS=0. Prints the 6-field line itself.
+_omc_git_info_legacy() {
+  local branch="" add=0 mod=0 del=0 ladd=0 ldel=0 toplevel
   if toplevel=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$toplevel" ]; then
     branch=$(git branch --show-current 2>/dev/null)
     local status sub_status all_status diff_stats has_sub=""
-    # §8.1: `git submodule foreach` pays a heavy per-call process/startup cost
-    # on MSYS (~7s observed) even with ZERO submodules, and git_info calls it
-    # twice (status + diff) ⇒ ~14s of pure waste ⇒ statusline exceeds Claude
-    # Code's render budget ⇒ blank. Only scan submodules if the repo actually
-    # tracks them (.gitmodules at the worktree toplevel).
     [ -f "$toplevel/.gitmodules" ] && has_sub=1
     status=$(git status --porcelain -uall 2>/dev/null)
     if [ -n "$has_sub" ]; then

@@ -480,6 +480,113 @@ ls "$ST"/gitcache- >/dev/null 2>&1 \
 rm -rf "$ST" "$RA" "$RB"
 end_test
 
+# --- P5 Task 5.1: oracle — git_info must equal the 23d7874 implementation ---
+# legacy_git_info is the 23d7874 git_info body, verbatim except for its name.
+legacy_git_info() {
+  local branch="" add=0 mod=0 del=0 ladd=0 ldel=0 toplevel
+  # `git status` opportunistically refreshes the index, taking .git/index.lock.
+  # Claude Code kills a statusline that overruns its budget; a git killed
+  # mid-refresh leaves a stale 0-byte index.lock that blocks the user's own
+  # `git add`/`commit`. GIT_OPTIONAL_LOCKS=0 skips that optional write. `local`
+  # + export scopes it to this function and the git children it spawns
+  # (including the nested ones under `submodule foreach`).
+  local GIT_OPTIONAL_LOCKS=0; export GIT_OPTIONAL_LOCKS
+  # `--show-toplevel` doubles as the in-a-worktree gate AND gives the path for
+  # the .gitmodules check below in a single git call (replacing the old bare
+  # `rev-parse --git-dir` gate; a bare repo with no worktree → treated as
+  # non-repo, which is correct for a working-tree status line).
+  if toplevel=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$toplevel" ]; then
+    branch=$(git branch --show-current 2>/dev/null)
+    local status sub_status all_status diff_stats has_sub=""
+    # §8.1: `git submodule foreach` pays a heavy per-call process/startup cost
+    # on MSYS (~7s observed) even with ZERO submodules, and git_info calls it
+    # twice (status + diff) ⇒ ~14s of pure waste ⇒ statusline exceeds Claude
+    # Code's render budget ⇒ blank. Only scan submodules if the repo actually
+    # tracks them (.gitmodules at the worktree toplevel).
+    [ -f "$toplevel/.gitmodules" ] && has_sub=1
+    status=$(git status --porcelain -uall 2>/dev/null)
+    if [ -n "$has_sub" ]; then
+      sub_status=$(git submodule foreach --quiet 'git status --porcelain -uall 2>/dev/null' 2>/dev/null)
+    else
+      sub_status=""
+    fi
+    all_status=$(printf '%s\n%s' "$status" "$sub_status")
+    add=$(echo "$all_status" | grep -c '^A\|^??')
+    mod=$(echo "$all_status" | grep -c '^ M\|^M\|^MM\|^AM')
+    del=$(echo "$all_status" | grep -c '^ D\|^D')
+    if [ -n "$has_sub" ]; then
+      diff_stats=$(git diff HEAD --numstat 2>/dev/null; git submodule foreach --quiet 'git diff HEAD --numstat 2>/dev/null' 2>/dev/null)
+    else
+      diff_stats=$(git diff HEAD --numstat 2>/dev/null)
+    fi
+    ladd=$(echo "$diff_stats" | awk '{s+=$1} END {print s+0}')
+    ldel=$(echo "$diff_stats" | awk '{s+=$2} END {print s+0}')
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s' "$branch" "$add" "$mod" "$del" "$ladd" "$ldel"
+}
+
+cmp_gi() {  # $1=label $2=dir (cwd) ; asserts git_info == legacy_git_info there
+  local out
+  out=$( cd "$2" && OMC_CONF=/dev/null bash -c "$(declare -f legacy_git_info)"'
+      OMC_TEST_LIB_ONLY=1
+      source "$0"
+      a=$(git_info); b=$(legacy_git_info)
+      printf "%s|%s" "$a" "$b"' "$STATUSLINE" 2>/dev/null )
+  local a=${out%%|*} b=${out#*|}
+  [ -n "$out" ] || { printf '    FAIL: %s: no output\n' "$1" >&2; TEST_FAILED=1; return; }
+  assert_eq "$b" "$a" "$1: git_info == legacy"
+  GI_LAST=$a
+}
+gi_cfg() { git -C "$1" config user.email t@t.t; git -C "$1" config user.name t; }
+
+start_test "git_info oracle: single-repo states equal the 23d7874 implementation"
+OR=$(mktemp -d)
+gi_mkrepo "$OR/clean" main;                                     cmp_gi clean "$OR/clean"
+gi_mkrepo "$OR/mod" main;  echo more >> "$OR/mod/f.txt";        cmp_gi modified "$OR/mod"
+gi_mkrepo "$OR/stg" main;  echo more >> "$OR/stg/f.txt"; git -C "$OR/stg" add f.txt;  cmp_gi staged "$OR/stg"
+gi_mkrepo "$OR/am" main;   echo n > "$OR/am/n.txt"; git -C "$OR/am" add n.txt; echo m >> "$OR/am/n.txt"; cmp_gi AM "$OR/am"
+gi_mkrepo "$OR/mm" main;   echo x >> "$OR/mm/f.txt"; git -C "$OR/mm" add f.txt; echo y >> "$OR/mm/f.txt"; cmp_gi MM "$OR/mm"
+gi_mkrepo "$OR/sdel" main; git -C "$OR/sdel" rm -q f.txt;      cmp_gi staged-delete "$OR/sdel"
+gi_mkrepo "$OR/udel" main; rm "$OR/udel/f.txt";                 cmp_gi unstaged-delete "$OR/udel"
+gi_mkrepo "$OR/ren" main;  git -C "$OR/ren" mv f.txt g.txt;     cmp_gi rename "$OR/ren"
+gi_mkrepo "$OR/unt" main;  mkdir -p "$OR/unt/d/e"; printf 'a\nb\n' > "$OR/unt/d/e/u.txt"; cmp_gi untracked-subdir "$OR/unt"
+gi_mkrepo "$OR/bin" main;  printf 'a\0b\1' > "$OR/bin/b.bin"; git -C "$OR/bin" add b.bin; git -C "$OR/bin" commit -qm b; printf 'c\0d\2\3' > "$OR/bin/b.bin"; cmp_gi binary-change "$OR/bin"
+mkdir -p "$OR/unb"; git init -q "$OR/unb"; git -C "$OR/unb" symbolic-ref HEAD refs/heads/unb; printf u > "$OR/unb/u.txt"; cmp_gi unborn "$OR/unb"
+gi_mkrepo "$OR/det" main;  echo b > "$OR/det/f.txt"; git -C "$OR/det" commit -qam c2; git -C "$OR/det" checkout -q HEAD~1; cmp_gi detached "$OR/det"
+rm -rf "$OR"
+end_test
+
+start_test "git_info oracle: upstream/ahead, worktree, submodule"
+OR=$(mktemp -d)
+git init -q --bare "$OR/remote.git"
+gi_mkrepo "$OR/up" main; git -C "$OR/up" checkout -q -b feature/x; git -C "$OR/up" remote add origin "$OR/remote.git"
+git -C "$OR/up" push -q -u origin feature/x >/dev/null 2>&1; echo a >> "$OR/up/f.txt"; git -C "$OR/up" commit -qam ahead
+cmp_gi upstream-ahead "$OR/up"
+assert_eq "feature/x" "${GI_LAST%%$'\t'*}" "upstream case really reports the branch"
+gi_mkrepo "$OR/wtmain" main; git -C "$OR/wtmain" worktree add -q "$OR/wt" -b wtb >/dev/null 2>&1; echo w >> "$OR/wt/f.txt"
+cmp_gi worktree "$OR/wt"
+gi_mkrepo "$OR/subsrc" main; gi_mkrepo "$OR/sm" main
+git -C "$OR/sm" -c protocol.file.allow=always submodule add -q "$OR/subsrc" sub >/dev/null 2>&1
+git -C "$OR/sm" commit -qm addsub; echo d >> "$OR/sm/sub/f.txt"; echo e >> "$OR/sm/f.txt"
+[ -f "$OR/sm/.gitmodules" ] || { printf '    FAIL: submodule fixture failed\n' >&2; TEST_FAILED=1; }
+cmp_gi submodule-dirty "$OR/sm"
+rm -rf "$OR"
+end_test
+
+start_test "git_info oracle: edge cwd/layout cases (inside .git, symlink, bare, fake .git above a real repo, non-repo)"
+OR=$(mktemp -d)
+gi_mkrepo "$OR/r" main; echo m >> "$OR/r/f.txt"; mkdir -p "$OR/r/sub"
+cmp_gi inside-dot-git "$OR/r/.git"
+git clone -q --bare "$OR/r" "$OR/bare.git" 2>/dev/null; cmp_gi bare-repo "$OR/bare.git"
+mkdir -p "$OR/r/a/.git" "$OR/r/b/.git"; echo 'ref: refs/heads/x' > "$OR/r/b/.git/HEAD"
+cmp_gi dotgit-no-HEAD "$OR/r/a"
+cmp_gi dotgit-HEAD-no-objects "$OR/r/b"
+mkdir -p "$OR/plain"; cmp_gi non-repo "$OR/plain"
+ln -s "$OR/r/sub" "$OR/link" 2>/dev/null
+if [ -L "$OR/link" ]; then cmp_gi symlink-cwd "$OR/link"; else printf '    SKIP: ln -s does not create symlinks here\n'; fi
+rm -rf "$OR"
+end_test
+
 # --- §8.1: git_info skips `git submodule foreach` when no .gitmodules ---
 # `git submodule foreach` pays a ~7s MSYS process-startup cost even with zero
 # submodules; git_info calls it twice (status+diff) ⇒ ~14s pure waste ⇒ blank
@@ -494,7 +601,8 @@ esac
 case "\$1" in
   rev-parse) echo "$1"; exit 0 ;;
   branch) echo shimbr; exit 0 ;;
-  status|diff) exit 0 ;;
+  status) echo "## shimbr"; exit 0 ;;
+  diff) exit 0 ;;
   submodule) echo called >> "$1/.gitsentinel"; exit 0 ;;
   *) exit 0 ;;
 esac
@@ -544,18 +652,23 @@ case "\$1 \$2" in
 esac
 case "\$1" in
   branch) echo shimbr; exit 0 ;;
+  status) [ -n "\${SHIM_STATUS_FAIL-}" ] && exit 1; echo "## shimbr"; exit 0 ;;
   *) exit 0 ;;
 esac
 EOS
   chmod +x "$1/bin/git"
 }
 
-start_test "git_info: every git call runs with GIT_OPTIONAL_LOCKS=0 (incl. submodule path)"
+start_test "git_info: every git call runs with GIT_OPTIONAL_LOCKS=0 (normal path: status, diff, submodule only)"
 GW=$(mktemp -d); gi_lockenv_setup "$GW"; : > "$GW/.gitmodules"
 ( unset GIT_OPTIONAL_LOCKS; call_git_info_shimmed "$GW" >/dev/null )
-for sub in rev-parse branch status diff submodule; do
+for sub in status diff submodule; do
   grep -q "^$sub " "$GW/.gitenvlog" 2>/dev/null \
     || { printf '    FAIL: expected a git %s call\n' "$sub" >&2; TEST_FAILED=1; }
+done
+for sub in rev-parse branch; do
+  grep -q "^$sub " "$GW/.gitenvlog" 2>/dev/null \
+    && { printf '    FAIL: unexpected git %s call on the normal path\n' "$sub" >&2; TEST_FAILED=1; }
 done
 BAD=$(grep -v ' 0$' "$GW/.gitenvlog" 2>/dev/null)
 [ -z "$BAD" ] \
@@ -563,6 +676,25 @@ BAD=$(grep -v ' 0$' "$GW/.gitenvlog" 2>/dev/null)
 rm -rf "$GW"
 end_test
 
+start_test "git_info: when git status fails the old sequence runs (rev-parse, branch, status, diff, submodule), all with GIT_OPTIONAL_LOCKS=0"
+GW=$(mktemp -d); gi_lockenv_setup "$GW"; : > "$GW/.gitmodules"
+( unset GIT_OPTIONAL_LOCKS; SHIM_STATUS_FAIL=1 call_git_info_shimmed "$GW" >/dev/null )
+for sub in rev-parse branch status diff submodule; do
+  grep -q "^$sub " "$GW/.gitenvlog" 2>/dev/null \
+    || { printf '    FAIL: expected a git %s call (legacy path)\n' "$sub" >&2; TEST_FAILED=1; }
+done
+BAD=$(grep -v ' 0$' "$GW/.gitenvlog" 2>/dev/null)
+[ -z "$BAD" ] \
+  || { printf '    FAIL: git ran without GIT_OPTIONAL_LOCKS=0:\n%s\n' "$BAD" >&2; TEST_FAILED=1; }
+rm -rf "$GW"
+end_test
+
+start_test "git_info: a repo with a clean status makes exactly two git calls (status -b, diff)"
+GW=$(mktemp -d); gi_lockenv_setup "$GW"
+( unset GIT_OPTIONAL_LOCKS; call_git_info_shimmed "$GW" >/dev/null )
+assert_eq "2" "$(wc -l < "$GW/.gitenvlog" | tr -d ' ')" "git calls without .gitmodules"
+rm -rf "$GW"
+end_test
 start_test "git_info: GIT_OPTIONAL_LOCKS does not leak out of git_info"
 GW=$(mktemp -d); gi_lockenv_setup "$GW"
 LEAK=$( cd "$GW" && unset GIT_OPTIONAL_LOCKS && OMC_CONF=/dev/null PATH="$GW/bin:$PATH" bash -c '
@@ -1206,8 +1338,8 @@ budget_case() {  # $1=label $2=dir $3=state-dir $4=ttl
   head -1 "$3.cnt/stdout" | grep -qF 'M' || { printf '    FAIL: %s: line 1 lacks the model\n' "$1" >&2; TEST_FAILED=1; }
 }
 
-# P2 measured: R1=26 R2=66 R3=36. P3 measured: R1=16 R2=56 R3=26. P4 measured: R1=5 R2=46 R3=12. Final targets (P6): R1<=3 R2<=8 R3<=3.
-BUDGET_R1=7; BUDGET_R2=48; BUDGET_R3=14
+# P2 measured: R1=26 R2=66 R3=36. P3 measured: R1=16 R2=56 R3=26. P4 measured: R1=5 R2=46 R3=12. P5 measured: R1=5 R2=19 R3=12. Final targets (P6): R1<=3 R2<=8 R3<=3.
+BUDGET_R1=7; BUDGET_R2=21; BUDGET_R3=14
 
 BREPO=$(mktemp -d); gi_mkrepo "$BREPO" main
 
