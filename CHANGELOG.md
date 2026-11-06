@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+- oh-my-knowledge: `metadata.no_promote: <projects>` records a "keep in this
+  project" decision; lint stops listing the page as `promote_candidate` until
+  a project outside the list links it.
+
 ### Changed
 - `statusLine.refreshInterval` is now opt-in. `/oh-my-status:setup` no longer
   adds `"refreshInterval": 3` by default; it asks whether to enable timer

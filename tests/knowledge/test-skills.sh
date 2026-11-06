@@ -256,6 +256,7 @@ end_test
 start_test "templates/SCHEMA.md and lint skill carry the always-on.md convention (spec G4)"
 S="$PLUGIN/templates/SCHEMA.md"; f="$SKILLS/lint/SKILL.md"
 need "$S" 'always-on.md' SCHEMA
+need "$S" 'no_promote' SCHEMA
 grep -F 'always-on.md' "$S" | grep -qF 'reserved' || fail "SCHEMA: always-on.md must be a reserved slug"
 grep -F 'always-on.md' "$S" | grep -qF 'session start' || fail "SCHEMA: always-on.md loaded at session start"
 need "$f" 'always-on.md' lint
@@ -274,6 +275,7 @@ need "$f" 'missing_path' lint
 need "$f" 'absolute native path' lint
 need "$f" 'batches' lint
 need "$f" 'lower recall' lint
+grep -F '`promote_candidate`' "$f" | grep -qF 'no_promote' || fail "lint: promote_candidate row must mention no_promote"
 need "$f" 'Concurrent subagent limit reached' lint
 need "$f" 'at most 20' lint
 need "$f" 'foreground' lint
@@ -387,10 +389,9 @@ same "$S" "SCHEMA status sentence" '## ⚡' 'distill reference'
 end_test
 
 start_test "supporting skill files carry no placeholders (substituted only in SKILL.md)"
-for f in "$SKILLS"/*/reference.md "$SKILLS"/*/modes.md; do
-  [ -f "$f" ] || continue
-  grep -qF '${CLAUDE_PLUGIN_ROOT}' "$f" && fail "${f#"$SKILLS"/} has \${CLAUDE_PLUGIN_ROOT}"
-  grep -qF '${user_config.' "$f" && fail "${f#"$SKILLS"/} has \${user_config."
+for f in "$SKILLS"/*/*.md; do
+  [ "${f##*/}" = SKILL.md ] && continue
+  grep -qE '\$\{(CLAUDE_(PLUGIN_[A-Z_]+|SKILL_DIR|SESSION_ID)|user_config\.)' "$f" && fail "${f#"$SKILLS"/} has a \${...} placeholder"
 done
 grep -F 'retire:' "$SKILLS/lint/SKILL.md" | grep -qF 'scripts/commit.sh' || fail "lint: the retire commit command must stay in SKILL.md"
 end_test

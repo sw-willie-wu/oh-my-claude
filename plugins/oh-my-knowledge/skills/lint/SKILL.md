@@ -31,7 +31,7 @@ Checks and who handles them (F = fix directly, P = propose a diff, A = ask the u
 | `stale`, `unverified_overdue` | A: re-verify (run `oh-my-knowledge:lookup` write-backs) |
 | `progress_leak` | A: where the progress belongs (the project auto memory) |
 | `stub_unreferenced` | A: retire candidate, except `projects/*/always-on.md`: never offer it for retirement |
-| `promote_candidate` | A: promote to `global/` (see distill promote timing) |
+| `promote_candidate` | A: promote to `global/` (see distill promote timing); "no" → F: add the detail's projects to `metadata.no_promote: a, b` |
 | `ext_link_missing`, `auto_memory_link_broken` | P only (they are outside the KB) |
 | `project_marker_invalid`, `project_marker_misplaced`, `project_marker_missing` | P only: propose the exact marker line `- Knowledge base project: [[k:projects/<p>/index]] (omk-project)` and its place (after the status section, within the first 200 lines). `project_marker_missing` means `(omk-harvested)` lines or `> Moved: [[k:projects/<p>/…]]` stubs exist without a valid marker. |
 | `unharvested_auto_memory` | report as the migration progress table; suggest distill ("migrate this project" / harvest) |

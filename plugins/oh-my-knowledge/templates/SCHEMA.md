@@ -60,10 +60,11 @@ metadata:
   type: reference | feedback | user | project
   verified: YYYY-MM-DD        # last confirmed still true
   evidence: tested | documented | inferred
+  no_promote: <p>, <p>       # optional: lint judged "keep in this project" while linked from these projects
 ---
 ```
 
-Read the type from `metadata.type`, else from a top-level `type:` (auto memory uses both). To change a type, edit the key that exists; never add a second. Meta files need no frontmatter: `SCHEMA.md`, `index.md`, `log.md`, `inbox.md`, every `index_*.md`, `rules/INDEX.md`, `_retired/**`, `lint/**`.
+Read the type from `metadata.type`, else from a top-level `type:` (auto memory uses both). To change a type, edit the key that exists; never add a second. `no_promote` is written by lint when you decline a promotion; lint lists the page again only when a project outside the list links it. Write it inline (`no_promote: a, b`). Meta files need no frontmatter: `SCHEMA.md`, `index.md`, `log.md`, `inbox.md`, every `index_*.md`, `rules/INDEX.md`, `_retired/**`, `lint/**`.
 
 ## Markers
 
