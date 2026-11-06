@@ -6,6 +6,10 @@
 - oh-my-knowledge: `metadata.no_promote: <projects>` records a "keep in this
   project" decision; lint stops listing the page as `promote_candidate` until
   a project outside the list links it.
+- oh-my-knowledge: lint check `suspect_link_rewrite` (yellow): ``x`` spans and
+  unclosed `[[` that look like a damaged link rewrite.
+- oh-my-knowledge: lint check `link_into_retired` (yellow): a page in
+  `rules/`, `global/`, `projects/` or `index.md` links into `_retired/`.
 
 ### Changed
 - `statusLine.refreshInterval` is now opt-in. `/oh-my-status:setup` no longer
@@ -19,6 +23,8 @@
   20 subagents (the session limit) and resends a refused batch; before, runs
   with more than 20 batches lost the rest. The retire steps moved to
   `skills/lint/reference.md`.
+- oh-my-knowledge: lint's retire step no longer leaves stubs pointing at the
+  retired copy.
 
 ## 2.0.0 (2026-11-04)
 

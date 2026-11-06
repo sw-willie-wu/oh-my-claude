@@ -36,6 +36,8 @@ Checks and who handles them (F = fix directly, P = propose a diff, A = ask the u
 | `project_marker_invalid`, `project_marker_misplaced`, `project_marker_missing` | P only: propose the exact marker line `- Knowledge base project: [[k:projects/<p>/index]] (omk-project)` and its place (after the status section, within the first 200 lines). `project_marker_missing` means `(omk-harvested)` lines or `> Moved: [[k:projects/<p>/…]]` stubs exist without a valid marker. |
 | `unharvested_auto_memory` | report as the migration progress table; suggest distill ("migrate this project" / harvest) |
 | `slug_shadows_global` | blue hint only |
+| `link_into_retired` | A: bring the needed fact into a current page (or un-retire it), else drop the link |
+| `suspect_link_rewrite` | P: restore from the `_retired/harvested/` original if one exists; else A |
 | (no script check) always-on counts | informational, not a finding: in the report, list per project the number of `- ` lines in `projects/<p>/always-on.md` outside frontmatter, fenced and `<!-- -->` blocks (read the files; skip projects without one); note a page whose directive lines exceed 4000 bytes (the session-start injection stops there) |
 | `missing_path` (blue: a `~/…` path in the text does not exist on this machine) | report only, no question (paths on other machines are normal) |
 

@@ -49,6 +49,7 @@ A repo belongs to a KB project through one marker line in that repo's auto memor
 - A slug is unique within its folder (`global/`, or one `projects/<p>/`). Inside the KB, `[[slug]]` resolves in the same folder first, then `global/`.
 - From outside the KB (auto memory, CLAUDE.md) and for cross-project links use only: `[[g:slug]]` = `<kb>/global/<slug>.md` and `[[k:<relpath>]]` = `<kb>/<relpath>.md` (for example `[[k:projects/p0001/deploy-prod]]`). Never an absolute path.
 - A project slug equal to a global slug is a hint, not an error.
+- Pages never link into `_retired/`; only auto-memory stubs and pointer lines may (lint reports `link_into_retired`).
 
 ## Frontmatter
 

@@ -257,6 +257,7 @@ start_test "templates/SCHEMA.md and lint skill carry the always-on.md convention
 S="$PLUGIN/templates/SCHEMA.md"; f="$SKILLS/lint/SKILL.md"
 need "$S" 'always-on.md' SCHEMA
 need "$S" 'no_promote' SCHEMA
+need "$S" 'never link into `_retired/`' SCHEMA
 grep -F 'always-on.md' "$S" | grep -qF 'reserved' || fail "SCHEMA: always-on.md must be a reserved slug"
 grep -F 'always-on.md' "$S" | grep -qF 'session start' || fail "SCHEMA: always-on.md loaded at session start"
 need "$f" 'always-on.md' lint
@@ -285,6 +286,9 @@ lr="$SKILLS/lint/reference.md"
 need "$lr" 'REPORT.md' lint/reference.md; need "$lr" '(`mv`)' lint/reference.md
 need "$f" '[reference.md](reference.md)' lint
 sz="$(wc -c < "$lr" 2>/dev/null | tr -d ' ')"; [ "${sz:-0}" -le 8192 ] || fail "lint/reference.md is $sz bytes (> 8192)"
+need "$f" 'link_into_retired' lint; need "$f" 'suspect_link_rewrite' lint
+need "$lr" 'never `_retired/`' lint/reference.md
+has "$lr" 'or the retired copy' && fail "lint/reference.md still offers a stub to the retired copy"
 grep -F '`missing_path`' "$f" | grep -qF 'report only' || fail "lint: missing_path row must be report only"
 grep -F '`broken_link`' "$f" | grep -qF 'backticks or a fence' || fail "lint: broken_link row must mention backticks or a fence"
 awk '/^## 3\. Mechanical fixes/{m=NR} /^## 4\. Report/{r=NR} END{exit !(m && r && m < r)}' "$f" || fail "lint: report must come after the mechanical fixes"

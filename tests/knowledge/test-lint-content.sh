@@ -353,6 +353,30 @@ AX="$(RES "$T/amx/p/memory")"
 assert_eq 1 "$(count_check ext_link_missing)" "only the really missing retired target"
 has "$(detail ext_link_missing "$AX/MEMORY.md")" "_retired/2026-10-30/nope" "names the missing one" || true
 assert_eq 0 "$(count_check progress_leak)" "no check runs on _retired/ or lint/"
+assert_eq 0 "$(count_check link_into_retired)" "auto-memory stub into _retired stays legal"
+end_test
+
+start_test "suspect_link_rewrite: stripped-bracket spans and unclosed [[ outside code"
+fresh "$T/sl"
+page "$T/sl/global/hit-a.md" hit-a '用 ``x`` 建的筆記'
+page "$T/sl/global/hit-b.md" hit-b 'see [[knotebook-wikilink-trigger and more'
+page "$T/sl/global/ok-1.md" ok-1 'a ``b`c`` d'
+page "$T/sl/global/ok-2.md" ok-2 'a `` x `` d'
+page "$T/sl/global/ok-3.md" ok-3 'a ``$[[ inputs.b ]]`` d'
+page "$T/sl/global/ok-4.md" ok-4 $'```\n``x``\n[[open\n```'
+page "$T/sl/global/ok-5.md" ok-5 'a `[[x` b'
+printf -- '---\nname: ok-6\ndescription: "``x`` and [[open"\nmetadata:\n  type: reference\n  verified: 2026-10-20\n  evidence: tested\n---\nbody\n' > "$T/sl/global/ok-6.md"
+printf -- 'a ``x`` and [[open\n' > "$T/sl/log.md"
+printf -- 'a ``x`` and [[open\n' > "$T/sl/inbox.md"
+rm -rf "$T/slam"; mkdir -p "$T/slam/p/memory"
+printf -- '---\nname: m\ndescription: d\ntype: feedback\n---\nuse ``x`` and [[open\n' > "$T/slam/p/memory/m.md"
+runc "$T/sl" "$T/slam"
+assert_eq "global/hit-a.md global/hit-b.md" "$(files_of suspect_link_rewrite)" "only the two damaged pages"
+assert_eq "yellow:9" "$(finding suspect_link_rewrite global/hit-a.md)" "stripped span, line 9"
+assert_eq "yellow:9" "$(finding suspect_link_rewrite global/hit-b.md)" "unclosed [[, line 9"
+has "$(detail suspect_link_rewrite global/hit-a.md)" "brackets stripped" "detail (i)" || true
+has "$(detail suspect_link_rewrite global/hit-b.md)" "unclosed [[" "detail (ii)" || true
+run "$KB" --checks content  # restore the fixture run for the following blocks
 end_test
 
 start_test "stale words are whole words; a.b.c.d is not a version; versions and 3-part still are"
