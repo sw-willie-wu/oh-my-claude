@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.1 (2026-11-07)
+
+### Changed
+- The README is now a short bilingual landing page (`README.md` in English,
+  `README.zh-TW.md` in Traditional Chinese) with a logo, statusline images
+  and install steps. Every detail moved into `docs/` (`statusline.md`,
+  `install.md`, `upgrading.md`, `knowledge.md`); the oh-my-knowledge README
+  now points to `docs/knowledge.md`.
+- oh-my-knowledge: the lock-error hint of `scripts/commit.sh` points to
+  `docs/knowledge.md` (Troubleshooting) instead of the README.
+
+### Added
+- `LICENSE` (MIT). The plugins were already declared MIT.
+
 ## 2.1.0 (2026-11-06)
 
 ### Removed (breaking)
