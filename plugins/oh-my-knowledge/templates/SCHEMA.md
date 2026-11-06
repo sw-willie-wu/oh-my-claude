@@ -49,6 +49,7 @@ A repo belongs to a KB project through one marker line in that repo's auto memor
 - A slug is unique within its folder (`global/`, or one `projects/<p>/`). Inside the KB, `[[slug]]` resolves in the same folder first, then `global/`.
 - From outside the KB (auto memory, CLAUDE.md) and for cross-project links use only: `[[g:slug]]` = `<kb>/global/<slug>.md` and `[[k:<relpath>]]` = `<kb>/<relpath>.md` (for example `[[k:projects/p0001/deploy-prod]]`). Never an absolute path.
 - A project slug equal to a global slug is a hint, not an error.
+- Pages never link into `_retired/`; only auto-memory stubs and pointer lines may (lint reports `link_into_retired`).
 
 ## Frontmatter
 
@@ -60,10 +61,11 @@ metadata:
   type: reference | feedback | user | project
   verified: YYYY-MM-DD        # last confirmed still true
   evidence: tested | documented | inferred
+  no_promote: <p>, <p>       # optional: lint judged "keep in this project" while linked from these projects
 ---
 ```
 
-Read the type from `metadata.type`, else from a top-level `type:` (auto memory uses both). To change a type, edit the key that exists; never add a second. Meta files need no frontmatter: `SCHEMA.md`, `index.md`, `log.md`, `inbox.md`, every `index_*.md`, `rules/INDEX.md`, `_retired/**`, `lint/**`.
+Read the type from `metadata.type`, else from a top-level `type:` (auto memory uses both). To change a type, edit the key that exists; never add a second. `no_promote` is written by lint when you decline a promotion; lint lists the page again only when a project outside the list links it. Write it inline (`no_promote: a, b`). Meta files need no frontmatter: `SCHEMA.md`, `index.md`, `log.md`, `inbox.md`, every `index_*.md`, `rules/INDEX.md`, `_retired/**`, `lint/**`.
 
 ## Markers
 

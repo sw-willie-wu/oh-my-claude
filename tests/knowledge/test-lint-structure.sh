@@ -37,6 +37,7 @@ finding() {
   n="$("$JQ" -r --arg c "$1" --arg f "$2" '[.findings[] | select(.check == $c and .file == $f)] | length' "$T/out" | tr -d '\r')"
   case "$n" in 0) echo none ;; 1) "$JQ" -r --arg c "$1" --arg f "$2" '.findings[] | select(.check == $c and .file == $f) | "\(.severity):\(.line)"' "$T/out" | tr -d '\r' ;; *) echo many ;; esac
 }
+files_of() { "$JQ" -r --arg c "$1" '[.findings[] | select(.check == $c) | .file] | sort | join(" ")' "$T/out" | tr -d '\r'; }
 detail() { "$JQ" -r --arg c "$1" --arg f "$2" '[.findings[] | select(.check == $c and .file == $f) | .detail] | join(" | ")' "$T/out" | tr -d '\r'; }
 count_check() { "$JQ" -r --arg c "$1" '[.findings[] | select(.check == $c)] | length' "$T/out" | tr -d '\r'; }
 nfind() { q '.findings | length'; }
@@ -284,7 +285,7 @@ end_test
 
 start_test "--checks structure|content|all"
 run "$KB" --checks structure; S1="$(q '.findings | length')"
-run "$KB" --checks all; S2="$(q '[.findings[] | select(.check | IN("progress_leak","stale","unverified_overdue","missing_path","project_marker_invalid","project_marker_missing","project_marker_misplaced","stub_unreferenced","ext_link_missing","unharvested_auto_memory","promote_candidate","auto_memory_link_broken") | not)] | length')"
+run "$KB" --checks all; S2="$(q '[.findings[] | select(.check | IN("progress_leak","stale","unverified_overdue","missing_path","project_marker_invalid","project_marker_missing","project_marker_misplaced","stub_unreferenced","ext_link_missing","unharvested_auto_memory","promote_candidate","auto_memory_link_broken","suspect_link_rewrite") | not)] | length')"
 assert_eq "$S1" "$S2" "all includes structure"
 run "$KB" --checks content; assert_eq 0 "$RC" "content exit"; assert_eq 0 "$(q '[.findings[] | select(.check == "orphan" or .check == "broken_link" or .check == "not_indexed" or .check == "missing_frontmatter")] | length')" "content-only: no structural findings"; assert_eq 0 "$(q '.groups | length')" "content-only: no groups"
 assert_eq 1 "$(q .version)" "content-only keeps shape"
@@ -425,6 +426,21 @@ run "$T/kb20" --checks structure
 assert_eq none "$(finding broken_link global/s.md)" "stub to _retired target resolves"
 assert_eq "red:9" "$(finding broken_link global/t.md)" "missing retired target still broken, existing lint/ target fine"
 assert_eq 0 "$(q '[.findings[] | select(.file | startswith("_retired/") or startswith("lint/"))] | length')" "no findings on _retired/ lint/"
+assert_eq "yellow:5" "$(finding link_into_retired global/s.md)" "stub into _retired flagged"
+assert_eq none "$(finding link_into_retired global/t.md)" "missing retired target: broken_link only"
+end_test
+
+start_test "link_into_retired: index.md and rules/ pages flagged; log.md, inbox.md and lint/ are not; absent from --checks content"
+fresh "$T/kb22"; mkdir -p "$T/kb22/_retired/2026-10-30/global"
+printf 'old\n' > "$T/kb22/_retired/2026-10-30/global/gone.md"
+printf -- '- [[k:_retired/2026-10-30/global/gone]] x\n' >> "$T/kb22/index.md"
+printf -- 'see [[k:_retired/2026-10-30/global/gone]]\n' > "$T/kb22/rules/r1.md"; printf -- '@r1.md\n' >> "$T/kb22/rules/INDEX.md"
+printf -- '[[k:_retired/2026-10-30/global/gone]]\n' > "$T/kb22/log.md"
+printf -- '[[k:_retired/2026-10-30/global/gone]]\n' > "$T/kb22/inbox.md"
+run "$T/kb22"
+assert_eq "index.md rules/r1.md" "$(files_of link_into_retired)" "only index.md and rules/r1.md"
+run "$T/kb22" --checks content
+assert_eq 0 "$(count_check link_into_retired)" "not a content check"
 end_test
 
 start_test "fences (structure): a 4-backtick block holds 3-backtick lines; an info-string fence does not close it"
