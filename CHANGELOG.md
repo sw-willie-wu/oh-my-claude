@@ -116,7 +116,7 @@ heading is the tag name without the `v`.
   hook, an automatic handoff hook (needs `oh-my-status`, which now writes
   `ctx-<sid>`), and scripts for init, commit, search and lint. Requires bash,
   gawk, GNU find (BSD date is fine), and jq. See
-  `plugins/oh-my-knowledge/README.md`.
+  `docs/knowledge.md`.
   The automatic handoff fires at the threshold and again once usage has grown
   by `auto_handoff_repeat` points (default 20, range 10-60) past the usage
   recorded in `handoff-<sid>` at the last handoff; `/compact` and `/clear`
