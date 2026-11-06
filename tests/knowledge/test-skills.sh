@@ -184,8 +184,14 @@ done
 grep -iE 'precondition' "$f" 2>/dev/null | grep -F 'migrate this project' | grep -qF 'full harvest' \
   || fail "distill: close-mode precondition (migrate if unmapped, full harvest if mapped) not on one line"
 grep -E 'exit 3' "$f" 2>/dev/null | grep -qiE 'success' || fail "distill: commit.sh exit 3 = success missing"
-r="$SKILLS/distill/reference.md"
-for p in 'cp -p' 'cmp' 'date -r' 'metadata.modified' 'inferred value'; do need "$f" "$p" distill; need "$r" "$p" distill/reference.md; done
+r="$T/distill-ref.md"; cat "$SKILLS/distill/reference.md" "$SKILLS/distill/modes.md" > "$r" 2>/dev/null
+for p in 'date -r' 'metadata.modified' 'inferred value'; do need "$f" "$p" distill; need "$r" "$p" distill/reference.md; done
+need "$f" 'scripts/harvest-copy.sh' distill; need "$r" 'harvest-copy.sh' distill/reference.md
+[ -f "$SKILLS/distill/modes.md" ] || fail "distill/modes.md missing"
+msz="$(wc -c < "$SKILLS/distill/modes.md" 2>/dev/null | tr -d ' ')"; [ "${msz:-0}" -le 8192 ] || fail "distill/modes.md is $msz bytes (> 8192)"
+need "$f" '[modes.md](modes.md)' distill
+need "$r" '<backup dir>' distill/reference.md
+need "$r" '<name>.2.md' distill/reference.md
 grep -F 'already exists' "$f" 2>/dev/null | grep -qF 'attach <p>' || fail "distill: migrate rule 'projects/<p>/ already exists -> attach <p>' missing"
 grep -F 'already exists' "$r" 2>/dev/null | grep -qF 'attach <p>' || fail "reference: migrate rule 'already exists -> attach <p>' missing"
 grep -F 'invalid marker' "$r" 2>/dev/null | grep -qF 'never add a second marker' || fail "reference: attach with invalid marker replaces it"
@@ -193,7 +199,7 @@ need "$r" 'demo-old' distill/reference.md
 end_test
 
 start_test "distill: always-on directive outcomes (spec C rule path, spec G project always-on)"
-f="$SKILLS/distill/SKILL.md"; r="$SKILLS/distill/reference.md"
+f="$SKILLS/distill/SKILL.md"; r="$T/distill-ref.md"; cat "$SKILLS/distill/reference.md" "$SKILLS/distill/modes.md" > "$r" 2>/dev/null
 need "$f" 'always-on directive' distill
 grep -F 'always-on directive' "$f" 2>/dev/null | grep -F 'duplicate' | grep -qF 'all knowledge' || fail "distill: always-on row must state precedence over duplicate/all knowledge"
 grep -F '<n> always-on' "$f" 2>/dev/null | grep -qF '<n> retired' || fail "distill: harvest log line lacks <n> always-on"
@@ -373,7 +379,7 @@ need "$r" 'distinct target' distill/reference.md
 same "$r" "reference contain arrow" 'contain' '→ [[k:'
 same "$r" "reference Glob Grep" 'Glob' 'Grep'
 need "$r" 're-judged' distill/reference.md
-for p in '600000' 'unique' 'Edit-only' 'shutil.copy2' 'filecmp'; do need "$r" "$p" distill/reference.md; done
+for p in '600000' 'unique' 'Edit-only' 'harvest-copy.sh' 'shell=True' 'OMK_KNOWLEDGE_DIR'; do need "$r" "$p" distill/reference.md; done
 same "$r" "reference coordinator commit" 'coordinator' 'commit'
 for p in 'Harvest never changes a status-section line' 'verbatim' 'The marker goes after the done block, or after the `## ⚡` block without one' '-newermt' 'at most 30' '(skip if present)' 'progress file or a mixed file' 'Grep `→ \[\[k:`'; do need "$r" "$p" distill/reference.md; done
 same "$r" "reference done heading" 'above the marker line' '已完成'

@@ -366,6 +366,7 @@ page "$T/sl/global/ok-3.md" ok-3 'a ``$[[ inputs.b ]]`` d'
 page "$T/sl/global/ok-4.md" ok-4 $'```\n``x``\n[[open\n```'
 page "$T/sl/global/ok-5.md" ok-5 'a `[[x` b'
 printf -- '---\nname: ok-6\ndescription: "``x`` and [[open"\nmetadata:\n  type: reference\n  verified: 2026-10-20\n  evidence: tested\n---\nbody\n' > "$T/sl/global/ok-6.md"
+page "$T/sl/global/ok-7.md" ok-7 'a <!-- ``x`` and [[open --> b'
 printf -- 'a ``x`` and [[open\n' > "$T/sl/log.md"
 printf -- 'a ``x`` and [[open\n' > "$T/sl/inbox.md"
 rm -rf "$T/slam"; mkdir -p "$T/slam/p/memory"

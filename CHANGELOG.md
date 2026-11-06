@@ -10,6 +10,8 @@
   unclosed `[[` that look like a damaged link rewrite.
 - oh-my-knowledge: lint check `link_into_retired` (yellow): a page in
   `rules/`, `global/`, `projects/` or `index.md` links into `_retired/`.
+- oh-my-knowledge: `scripts/harvest-copy.sh` copies and verifies harvest
+  backups (replaces the hand-typed `cp -p` + `cmp`).
 
 ### Changed
 - `statusLine.refreshInterval` is now opt-in. `/oh-my-status:setup` no longer
@@ -25,6 +27,17 @@
   `skills/lint/reference.md`.
 - oh-my-knowledge: lint's retire step no longer leaves stubs pointing at the
   retired copy.
+- oh-my-knowledge: distill's migrate / attach / close steps and the always-on
+  requests moved to `skills/distill/modes.md`.
+
+### Fixed
+- oh-my-knowledge: harvest backups use
+  `_retired/harvested/YYYY-MM-DD/<backup dir>/`; an auto-memory folder name
+  over 60 characters becomes its last 51 characters plus a hash, so `git add`
+  stays under the Windows 260-character limit. Existing backup folders are not
+  renamed; projects with long folder names get a second, short backup folder
+  from now on. A same-day re-harvest of a changed file keeps both backups
+  (`<name>.2.md`).
 
 ## 2.0.0 (2026-11-04)
 

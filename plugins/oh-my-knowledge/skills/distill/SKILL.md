@@ -5,7 +5,7 @@ description: Use to distill this session's durable knowledge (decisions and reas
 
 # Distill into the knowledge base
 
-`<knowledge_dir>/SCHEMA.md` is the authority for every writing rule. Read it first. `<knowledge_dir>` is the folder in the session-start note ("Knowledge base: …"). Pages via Read/Write/Edit; history only via `commit.sh`. Write new text in the user's language; moved text keeps its language. Detailed harvest and mode procedures: [reference.md](reference.md).
+`<knowledge_dir>/SCHEMA.md` is the authority for every writing rule. Read it first. `<knowledge_dir>` is the folder in the session-start note ("Knowledge base: …"). Pages via Read/Write/Edit; history only via `commit.sh`. Write new text in the user's language; moved text keeps its language. Harvest details: [reference.md](reference.md); modes: [modes.md](modes.md).
 
 ## 0. Current project
 
@@ -19,14 +19,14 @@ Exit 2 naming `knowledge_dir` or "knowledge base not found": tell the user to ru
 
 ## 1. Steps
 
-1. **Inventory** this session: decisions + reasons, pitfalls, conventions, bug root causes. Drop pure process and what the KB already has. Repo-documented details are not copied; decisions and reasons are.
+1. **Inventory** this session: decisions + reasons, pitfalls, conventions, bug root causes. Drop pure process, what the KB already has and repo-documented details (decisions and reasons stay).
 2. **Digest** `inbox.md` lines and `> ⚠ UNVERIFIED` lines: check each, then rewrite the page (auto memory unchanged: harvest lines carry no conclusion) or remove the flag; remove processed inbox lines.
 3. **Write by layer** (SCHEMA layering): tool/platform/environment knowledge → `global/` the first time; this project's architecture, deployment, domain rules, data quirks, repo conventions → `projects/<p>/`; unsure → `projects/<p>/`; reflex rules → `rules/<slug>.md` plus an `@<slug>.md` line in `rules/INDEX.md`. Before writing: search for the same subject, read the target index and related pages, add only the delta, update `description` and the index line. Rewrite machine-specific paths (repo-relative, `~/…`, `<user>`; see SCHEMA).
 4. **Promote timing**: design patterns and trade-offs stay in the project page until a second project needs them (or it closes); then extract a `global/` page under `global/index_architecture.md`; the project page keeps a one-line summary + link.
 5. **Harvest** the auto memory — only when the project is migrated (section 2).
 6. **Log, commit, remind, report** (section 4).
 
-Not migrated → skip harvest; the report says: "This project is not migrated yet. If the knowledge base already has it (new machine, another repo of the same project), say 'attach <p>'." and lists the existing `projects/*` folders.
+Not migrated → skip harvest; the report says the project is not migrated yet, lists the `projects/*` folders and says: if one is this project (new machine, another repo), say 'attach <p>'.
 
 ## 2. Harvest (migrated projects only)
 
@@ -42,21 +42,25 @@ Each candidate gets exactly one outcome (step-by-step in reference.md — follow
 | all knowledge | progress-free (reference.md) into the page that covers it, new or existing, in `projects/<p>/` or `global/` | `> Moved: [[k:<that page>]]` | `- <trigger> → [[k:…]] (omk-harvested)` — trigger only, no conclusion |
 | progress + knowledge | write the knowledge part | keep the progress; a non-leading line `→ [[k:…]]`; frontmatter type → `project` | stays a progress line, no `(omk-harvested)` |
 | duplicate | — | `> Moved: [[k:<existing page>]]` or `> Moved: [[g:<slug>]]` | like "all knowledge" |
-| obsolete / not worth keeping | `cp -p` + `cmp` into `_retired/harvested/` | `> Moved: [[k:_retired/harvested/YYYY-MM-DD/<encoded dir>/<name>]]` | `- <trigger> → [[k:_retired/harvested/…]] (omk-harvested)` (or ask the user) |
+| obsolete / not worth keeping | the backup only | `> Moved: [[k:<backup path without .md>]]` | `- <trigger> → [[k:<backup path without .md>]] (omk-harvested)` (or ask the user) |
 
 - New KB pages get `verified` from the original's `metadata.modified`, else its modification date read **before** you change it; `evidence` = the SCHEMA's inferred value unless the content shows it was tested or documented. Add an index line for each new page (its sub-index or `projects/<p>/index.md`).
-- Steps for always-on, more outcomes (progress only, redirect stub, `⚠` lines in `MEMORY.md`), which `MEMORY.md` lines to rewrite, marker edge cases, large harvests: reference.md.
-- Copy-and-verify (`cp -p` + `cmp`) before every outcome that changes an auto-memory file. No `MEMORY.md` line → none added. A `cmp` difference → stop, file untouched, report.
+- Always-on steps, more outcomes (progress only, redirect stub, `⚠` lines in `MEMORY.md`), which `MEMORY.md` lines to rewrite, marker edge cases, large harvests: reference.md.
+- Copy-and-verify before every outcome that changes an auto-memory file (one call per batch; prints each verified `_retired/harvested/…` path; a file without one → stop, file untouched, report):
+  ```bash
+  OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' bash "${CLAUDE_PLUGIN_ROOT}/scripts/harvest-copy.sh" '<auto-memory dir>/<file>' …
+  ```
+- No `MEMORY.md` line → none added.
 
 Unclear split → list the files, ask. After **every** `MEMORY.md` write, re-check the marker line; restore it if lost or changed.
 
 ## 3. Modes (only on explicit request)
 
-Steps for each mode: reference.md.
-- **migrate this project**: a full harvest. If `projects/<p>/` already exists, stop: this is **attach <p>**, never overwrite its index. Otherwise create `projects/<p>/index.md`, add its line under `## Projects` in `index.md` only if absent, write the marker line, harvest, end with the first `harvest` log entry.
-- **attach <p>**: the user names an existing `projects/<p>/`. Write the marker if missing (an invalid one: replace after the user confirms), full harvest, `harvest` log entry.
-- **make X a global rule / change X / drop X** (always-on): reference.md.
-- **close this project** (project ended, repo archived or deleted). Precondition: not migrated → migrate this project first; migrated → run a full harvest first. Keep the marker and the `## Projects` entry; then reference.md (promote to `global/`, pages readable without the repo, `Closed: YYYY-MM-DD`, log `distill`).
+Steps for each mode: modes.md.
+- **migrate this project**: a full harvest into a new `projects/<p>/` (`## Projects` line, marker, first `harvest` log entry). If `projects/<p>/` already exists, stop: this is **attach <p>**.
+- **attach <p>**: an existing `projects/<p>/`: marker, full harvest.
+- **make X a global rule / change X / drop X** (always-on).
+- **close this project** (project ended, repo archived or deleted). Precondition: not migrated → migrate this project first; migrated → run a full harvest first.
 
 ## 4. Log, commit, remind, report
 
