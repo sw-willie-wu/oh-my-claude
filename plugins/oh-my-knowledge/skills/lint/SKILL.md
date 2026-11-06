@@ -41,7 +41,7 @@ Checks and who handles them (F = fix directly, P = propose a diff, A = ask the u
 
 ## 2. Judgement stage
 
-For each entry in `batches`, dispatch one subagent (Agent tool, `subagent_type: general-purpose`, `model: sonnet`), in parallel. A group named in more than one batch was split: note "lower recall" for it in the report. Prompt each one with the batch's page paths (`<knowledge_dir>/<rel>`) and:
+For each entry in `batches`, dispatch one subagent (Agent tool, `subagent_type: general-purpose`, `model: sonnet`) in waves: at most 20 running at once (the session limit); start the next batch as one returns, or, with foreground calls, send the next wave after the current one returns. `Concurrent subagent limit reached` → wait, resend that batch; never drop one (a batch that never returns: "not judged" in the report). A group named in more than one batch was split: note "lower recall" for it in the report. Prompt each one with the batch's page paths (`<knowledge_dir>/<rel>`) and:
 
 > Read these pages. Find contradictions, pages that should be merged, missing cross-links, and leftovers of stacked corrections ("correction to the above", "this entry is void"). Read only; change nothing; run no commands. Return only a JSON array of `{"type": "contradiction|merge|missing_link|stacked_correction", "pages": [...], "detail": "..."}`.
 
@@ -78,12 +78,7 @@ Show each proposal as a diff; apply only after the user agrees (description out 
 
 ## 6. Retire (only after the user agrees)
 
-Never retire `projects/*/always-on.md` (other machines' stubs and pointer lines link to it).
-
-1. Move the file to `_retired/YYYY-MM-DD/<same relative path>` (`mv`).
-2. Append one line per file to `_retired/YYYY-MM-DD/REPORT.md`: path and reason.
-3. Still referenced (inside the KB, or by `[[g:…]]` / `[[k:…]]` in auto memory or `CLAUDE.md`)? Leave a stub at the old path: `> Moved: [[k:<replacement>]]` (or the retired copy).
-4. Log `## [YYYY-MM-DD] retire | <slug>` and commit with both the old and the new path:
+Never retire `projects/*/always-on.md`. Steps (move to `_retired/YYYY-MM-DD/`, `REPORT.md`, stub rule, log): [reference.md](reference.md). Then commit both the old and the new path:
 
 ```bash
 OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' bash "${CLAUDE_PLUGIN_ROOT}/scripts/commit.sh" 'retire: <slug>' global/<slug>.md _retired/YYYY-MM-DD/global/<slug>.md _retired/YYYY-MM-DD/REPORT.md log.md

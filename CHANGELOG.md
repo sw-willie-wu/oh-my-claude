@@ -10,6 +10,10 @@
   across sessions and loaded the whole machine. The setup upgrade prompt that
   offered to add `refreshInterval` to an existing statusLine is removed, and an
   existing `refreshInterval` value is never touched.
+- oh-my-knowledge: lint dispatches its judgement batches in waves of at most
+  20 subagents (the session limit) and resends a refused batch; before, runs
+  with more than 20 batches lost the rest. The retire steps moved to
+  `skills/lint/reference.md`.
 
 ## 2.0.0 (2026-11-04)
 

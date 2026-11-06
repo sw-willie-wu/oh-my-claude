@@ -274,6 +274,15 @@ need "$f" 'missing_path' lint
 need "$f" 'absolute native path' lint
 need "$f" 'batches' lint
 need "$f" 'lower recall' lint
+need "$f" 'Concurrent subagent limit reached' lint
+need "$f" 'at most 20' lint
+need "$f" 'foreground' lint
+grep -F 'batches' "$f" | grep -qF 'in parallel' && fail "lint: batches must go in waves, not 'in parallel'"
+lr="$SKILLS/lint/reference.md"
+[ -f "$lr" ] || fail "lint/reference.md missing"
+need "$lr" 'REPORT.md' lint/reference.md; need "$lr" '(`mv`)' lint/reference.md
+need "$f" '[reference.md](reference.md)' lint
+sz="$(wc -c < "$lr" 2>/dev/null | tr -d ' ')"; [ "${sz:-0}" -le 8192 ] || fail "lint/reference.md is $sz bytes (> 8192)"
 grep -F '`missing_path`' "$f" | grep -qF 'report only' || fail "lint: missing_path row must be report only"
 grep -F '`broken_link`' "$f" | grep -qF 'backticks or a fence' || fail "lint: broken_link row must mention backticks or a fence"
 awk '/^## 3\. Mechanical fixes/{m=NR} /^## 4\. Report/{r=NR} END{exit !(m && r && m < r)}' "$f" || fail "lint: report must come after the mechanical fixes"
@@ -375,5 +384,14 @@ same "$h" "handoff between the blocks" 'between the blocks' 'byte-identical'
 need "$h" 'No done block yet' handoff
 grep -qF 'status-section boundary' "$h" && fail "handoff: 'status-section boundary' still present"
 same "$S" "SCHEMA status sentence" '## ⚡' 'distill reference'
+end_test
+
+start_test "supporting skill files carry no placeholders (substituted only in SKILL.md)"
+for f in "$SKILLS"/*/reference.md "$SKILLS"/*/modes.md; do
+  [ -f "$f" ] || continue
+  grep -qF '${CLAUDE_PLUGIN_ROOT}' "$f" && fail "${f#"$SKILLS"/} has \${CLAUDE_PLUGIN_ROOT}"
+  grep -qF '${user_config.' "$f" && fail "${f#"$SKILLS"/} has \${user_config."
+done
+grep -F 'retire:' "$SKILLS/lint/SKILL.md" | grep -qF 'scripts/commit.sh' || fail "lint: the retire commit command must stay in SKILL.md"
 end_test
 print_summary
