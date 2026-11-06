@@ -2,9 +2,13 @@
 # Render-equivalence oracle: the current oh-my-status statusline must produce
 # byte-identical stdout to the 23d7874 baseline run with WORKERS_ENABLED=false
 # (the "zero workers" baseline), for a matrix of layouts / repo states / inputs.
+# Deliberate output differences (spec 1a):
+#   - D10 (P7): the 7d reset hint (shown above 80%) is " (MM/DD HH:MM)" instead of
+#     " (MM/DD)". The OLD output of every case is transformed before the compare:
+#     the literal " (<old 7d hint for $R7>)" becomes " (<new hint>)" (see
+#     transform_old_d10). Cases with 7d <= 80% or without a 7d window contain no
+#     such text and are compared byte-for-byte as before; the 5h hint is untouched.
 #
-# Deliberate output differences (spec 1a) are handled here when they land:
-#   - none yet in P1.
 # Subset runs: OMC_EQUIV_ONLY='<glob>' runs only the cases whose name matches.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -98,6 +102,14 @@ P_A=$(payload x 42 "" 23 "$R5" 90 "$R7")
 P_B=$(payload x 8 "" "" "" "" "")
 P_C=$(payload x 61 1000000 "" "" 90 "$R7")
 
+
+# D10: rewrite the old 7d hint " (MM/DD)" of the fixed R7 epoch into the new " (MM/DD HH:MM)".
+OLD7=$("$REAL_DATE" -d "@$R7" '+%m/%d'); NEW7=$("$REAL_DATE" -d "@$R7" '+%m/%d %H:%M')
+transform_old_d10() {  # $1=file
+  local s; s=$(cat "$1"; printf X); s=${s%X}
+  s=${s//" ($OLD7)"/" ($NEW7)"}
+  printf '%s' "$s" > "$1"
+}
 # --- runner ------------------------------------------------------------------
 # run_case <name> <impl> <dir> <payload> <conf-lines> <account-file> <cols> <reps>
 run_case() {
@@ -122,6 +134,7 @@ case_eq() {
   start_test "equiv: $name"
   run_case "$name" old "$2" "$3" "$4" "$5" "$6" "${7:-1}"
   run_case "$name" new "$2" "$3" "$4" "$5" "$6" "${7:-1}"
+  transform_old_d10 "$T/out-old-$name"
   if ! cmp -s "$T/out-old-$name" "$T/out-new-$name"; then
     printf '    FAIL: %s: stdout differs\n    --- old ---\n' "$name" >&2
     od -c "$T/out-old-$name" | head -40 >&2

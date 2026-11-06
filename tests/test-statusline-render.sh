@@ -387,7 +387,7 @@ end_test
 # run_render cannot steer the git cwd (it hardcodes current_dir:/tmp but git
 # runs against $PWD) nor isolate the cache. This helper cd's into the target
 # repo and passes OMC_STATE_DIR (and optional GIT_CACHE_TTL) into the render.
-run_workers_in() {
+run_render_in() {
   # $1=dir(cd → git cwd + cache key)  $2=sid  $3=OMC_STATE_DIR
   # $4=GIT_CACHE_TTL(optional)  $5=cols(default 200)
   local d="$1" sid="$2" sd="$3" ttl="${4:-}" cols="${5:-200}"
@@ -403,7 +403,7 @@ run_workers_in() {
 start_test "render: git repo output shows the branch AND a gitcache file is written"
 ST=$(mktemp -d); WD=$(mktemp -d)
 gi_mkrepo "$WD" omcbranch
-OUT=$(run_workers_in "$WD" "render-gc-1" "$ST" | strip_ansi)
+OUT=$(run_render_in "$WD" "render-gc-1" "$ST" | strip_ansi)
 echo "$OUT" | grep -qF 'omcbranch' \
   || { printf '    FAIL: branch not in render output\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 ls "$ST"/gitcache-* >/dev/null 2>&1 \
@@ -414,15 +414,15 @@ end_test
 start_test "render: second render within TTL serves STALE working-tree counts (cache wired in)"
 ST=$(mktemp -d); WD=$(mktemp -d)
 gi_mkrepo "$WD" stalebr
-OUT1=$(run_workers_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)  # arg4=GIT_CACHE_TTL (300=large so 2nd render HITs)
+OUT1=$(run_render_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)  # arg4=GIT_CACHE_TTL (300=large so 2nd render HITs)
 echo more >> "$WD/f.txt"                                           # working-tree edit: no .git write
-OUT=$(run_workers_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)
+OUT=$(run_render_in "$WD" "render-gc-2" "$ST" 300 | strip_ansi)
 echo "$OUT1" | grep -qF '~1' && { printf '    FAIL: clean repo already shows ~1\n' >&2; TEST_FAILED=1; }
 echo "$OUT" | grep -qF 'stalebr' \
   || { printf '    FAIL: branch missing from render\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 echo "$OUT" | grep -qF '~1' \
   && { printf '    FAIL: render showed fresh edit (cache not consulted)\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
-OUT=$(run_workers_in "$WD" "render-gc-2" "$ST" 0 | strip_ansi)      # TTL=0 proves the edit is visible to git
+OUT=$(run_render_in "$WD" "render-gc-2" "$ST" 0 | strip_ansi)      # TTL=0 proves the edit is visible to git
 echo "$OUT" | grep -qF '~1' \
   || { printf '    FAIL: edit not visible with TTL=0\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 rm -rf "$ST" "$WD"
@@ -430,10 +430,10 @@ end_test
 
 start_test "render: a cache line whose epoch is '09' (invalid octal) is a miss and the render still completes"
 ST=$(mktemp -d); WD=$(mktemp -d); gi_mkrepo "$WD" zerobr
-run_workers_in "$WD" "render-gc-z" "$ST" 300 >/dev/null
+run_render_in "$WD" "render-gc-z" "$ST" 300 >/dev/null
 CF=$(ls "$ST"/gitcache-* | grep -v '\.stamp$' | head -1)
 printf '09\tmain\t0\t0\t0\t0\t0\n' > "$CF"
-OUT=$(run_workers_in "$WD" "render-gc-z" "$ST" 300 | strip_ansi)
+OUT=$(run_render_in "$WD" "render-gc-z" "$ST" 300 | strip_ansi)
 printf '%s\n' "$OUT" | head -1 | grep -qF 'X' \
   || { printf '    FAIL: render aborted / no model on line 1\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 echo "$OUT" | grep -qF 'zerobr' || { printf '    FAIL: branch missing (miss not recomputed)\n' >&2; TEST_FAILED=1; }
@@ -443,9 +443,9 @@ end_test
 start_test "render: GIT_CACHE_TTL=0 serves fresh git state and writes no cache file"
 ST=$(mktemp -d); WD=$(mktemp -d)
 gi_mkrepo "$WD" freshbefore
-run_workers_in "$WD" "render-gc-3" "$ST" 0 >/dev/null  # arg4=GIT_CACHE_TTL=0 (cache disabled)
+run_render_in "$WD" "render-gc-3" "$ST" 0 >/dev/null  # arg4=GIT_CACHE_TTL=0 (cache disabled)
 ( cd "$WD" && git branch -m freshafter )
-OUT=$(run_workers_in "$WD" "render-gc-3" "$ST" 0 | strip_ansi)  # arg4=GIT_CACHE_TTL=0
+OUT=$(run_render_in "$WD" "render-gc-3" "$ST" 0 | strip_ansi)  # arg4=GIT_CACHE_TTL=0
 echo "$OUT" | grep -qF 'freshafter' \
   || { printf '    FAIL: TTL=0 must show fresh state\n      got: %q\n' "$OUT" >&2; TEST_FAILED=1; }
 ls "$ST"/gitcache-* >/dev/null 2>&1 \
@@ -1302,7 +1302,7 @@ for l in $RLL; do
   rl_check "$l" g '{"seven_day":{"used_percentage":90,"resets_at":1738857600}}' 2
   rl_has "$l" g '*8%*90%'
   case "$l" in
-    default|fancy|mygo) printf '%s' "$RL_LINE" | grep -Eq '\([0-9]{2}/[0-9]{2}\)' || { printf '    FAIL: %s no (MM/DD) [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1; };;
+    default|fancy|mygo) printf '%s' "$RL_LINE" | grep -Eq '\(([0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2})\)' || { printf '    FAIL: %s no (MM/DD HH:MM) [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1; };;
     *) case "$RL_LINE" in *"("*) printf '    FAIL: %s has ( [%s]\n' "$l" "$RL_LINE" >&2; TEST_FAILED=1;; esac;;
   esac
 done
@@ -1447,5 +1447,30 @@ done
 end_test
 rm -rf "$P3"
 
+
+# --- P7 / spec D10: the 7d reset hint (shown above 80%) is "(MM/DD HH:MM)" ---
+d10_line() {  # $1=seven_day pct $2=resets_at JSON literal $3=five_hour pct (optional) ; prints the stripped default-layout line 2
+  local rl="\"seven_day\":{\"used_percentage\":$1,\"resets_at\":$2}"
+  [ -n "${3:-}" ] && rl="\"five_hour\":{\"used_percentage\":$3,\"resets_at\":1738425600},$rl"
+  render_layout default '' strip "{\"session_id\":\"d10\",\"model\":{\"display_name\":\"M\"},\"workspace\":{\"current_dir\":\"/tmp/d\"},\"context_window\":{\"used_percentage\":8},\"rate_limits\":{$rl}}" | grep -F '8%' | head -1
+}
+start_test "D10: 7d reset hint shows date and time above 80%, nothing at 80%"
+E7=1738857600
+printf -v WANT '%(%m/%d %H:%M)T' "$E7"
+assert_eq " ($WANT)" "$(d10_line 85 $E7 | grep -o ' ([^)]*)$')" "7d 85% suffix is ' (MM/DD HH:MM)'"
+case "$(d10_line 80 $E7)" in *"("*) printf '    FAIL: 7d at 80%% must show no suffix\n' >&2; TEST_FAILED=1 ;; esac
+printf -v WANT5 '%(%H:%M)T' 1738425600
+OUT=$(d10_line 85 $E7 90)
+case "$OUT" in *" ($WANT5)"*) ;; *) printf '    FAIL: 5h suffix (%s) missing/changed [%s]\n' "$WANT5" "$OUT" >&2; TEST_FAILED=1 ;; esac
+case "$OUT" in *" ($WANT)"*) ;; *) printf '    FAIL: 7d suffix (%s) missing [%s]\n' "$WANT" "$OUT" >&2; TEST_FAILED=1 ;; esac
+end_test
+
+start_test "D10: non-integer 7d resets_at keeps the old date-chain behaviour with the new format"
+for ra in abc 1.5 0123; do
+  case $ra in abc|0123) jr="\"$ra\"" ;; *) jr=$ra ;; esac
+  want=$(date -d "@$ra" '+%m/%d %H:%M' 2>/dev/null || date -r "$ra" '+%m/%d %H:%M' 2>/dev/null)
+  assert_eq " ($want)" "$(d10_line 90 "$jr" | grep -o ' ([^)]*)$')" "7d suffix for resets_at=$ra"
+done
+end_test
 rm -rf "$T4D"
 print_summary

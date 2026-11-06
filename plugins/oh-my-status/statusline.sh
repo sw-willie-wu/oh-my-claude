@@ -426,7 +426,7 @@ if [ "${RATE5_PCT:-0}" -gt 80 ] && [ -n "$RATE5_RESET" ]; then
 fi
 RATE7_SUFFIX=""
 if [ "${RATE7_PCT:-0}" -gt 80 ] && [ -n "$RATE7_RESET" ]; then
-  _omc_strftime '%m/%d' "$RATE7_RESET"; RATE7_DATE=$REPLY
+  _omc_strftime '%m/%d %H:%M' "$RATE7_RESET"; RATE7_DATE=$REPLY
   RATE7_SUFFIX=" (${RATE7_DATE})"
 fi
 
