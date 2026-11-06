@@ -193,6 +193,7 @@ END {
     src = lsrc[i]; t = ltgt[i]
     r = resolve(dirname(src), t)
     if (r == "") { k = (t ~ /^k:/) ? substr(t, 3) ".md" : (t ~ /^g:/) ? "global/" substr(t, 3) ".md" : "global/" t ".md"; lkey[i] = k; bad[k]++; badi[i] = 1; continue }
+    if (r ~ /^_retired\//) add("link_into_retired", "yellow", src, lln[i], "[[" t "]] points into _retired/ (retired content must not be depended on)")
     if (r == src) continue
     inb[r]++
     if (pidx[src]) idxd[r] = 1

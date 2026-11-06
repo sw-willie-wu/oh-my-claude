@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+- oh-my-knowledge: `metadata.no_promote: <projects>` records a "keep in this
+  project" decision; lint stops listing the page as `promote_candidate` until
+  a project outside the list links it.
+- oh-my-knowledge: lint check `suspect_link_rewrite` (yellow): ``x`` spans and
+  unclosed `[[` that look like a damaged link rewrite.
+- oh-my-knowledge: lint check `link_into_retired` (yellow): a page in
+  `rules/`, `global/`, `projects/` or `index.md` links into `_retired/`.
+- oh-my-knowledge: `scripts/harvest-copy.sh` copies and verifies harvest
+  backups (replaces the hand-typed `cp -p` + `cmp`).
+
 ### Changed
 - `statusLine.refreshInterval` is now opt-in. `/oh-my-status:setup` no longer
   adds `"refreshInterval": 3` by default; it asks whether to enable timer
@@ -10,6 +21,29 @@
   across sessions and loaded the whole machine. The setup upgrade prompt that
   offered to add `refreshInterval` to an existing statusLine is removed, and an
   existing `refreshInterval` value is never touched.
+- oh-my-knowledge: lint dispatches its judgement batches in waves of at most
+  20 subagents (the session limit) and resends a refused batch; before, runs
+  with more than 20 batches lost the rest. The retire steps moved to
+  `skills/lint/reference.md`.
+- oh-my-knowledge: lint's retire step no longer leaves stubs pointing at the
+  retired copy.
+- oh-my-knowledge: distill's migrate / attach / close steps and the always-on
+  requests moved to `skills/distill/modes.md`.
+- oh-my-knowledge: distill checks that no knowledge-base page links an
+  auto-memory file before retiring it as obsolete.
+
+### Fixed
+- oh-my-knowledge: harvest backups use
+  `_retired/harvested/YYYY-MM-DD/<backup dir>/`; an auto-memory folder name
+  over 60 characters becomes its last 51 characters plus a hash, so `git add`
+  stays under the Windows 260-character limit. Existing backup folders are not
+  renamed; projects with long folder names get a second, short backup folder
+  from now on. A same-day re-harvest of a changed file keeps both backups
+  (`<name>.2.md`).
+- oh-my-knowledge: distill rewrites links only outside inline code and fences,
+  and `scripts/check-move.sh` makes it re-read any code span or fenced line
+  holding `[[` that is missing from the knowledge-base page after a move (a
+  2026-11-02 migration had stripped or truncated them in 10 pages).
 
 ## 2.0.0 (2026-11-04)
 

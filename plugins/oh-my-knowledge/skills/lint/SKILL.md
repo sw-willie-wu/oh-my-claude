@@ -31,17 +31,19 @@ Checks and who handles them (F = fix directly, P = propose a diff, A = ask the u
 | `stale`, `unverified_overdue` | A: re-verify (run `oh-my-knowledge:lookup` write-backs) |
 | `progress_leak` | A: where the progress belongs (the project auto memory) |
 | `stub_unreferenced` | A: retire candidate, except `projects/*/always-on.md`: never offer it for retirement |
-| `promote_candidate` | A: promote to `global/` (see distill promote timing) |
+| `promote_candidate` | A: promote to `global/` (see distill promote timing); "no" → F: add the detail's projects to `metadata.no_promote: a, b` |
 | `ext_link_missing`, `auto_memory_link_broken` | P only (they are outside the KB) |
 | `project_marker_invalid`, `project_marker_misplaced`, `project_marker_missing` | P only: propose the exact marker line `- Knowledge base project: [[k:projects/<p>/index]] (omk-project)` and its place (after the status section, within the first 200 lines). `project_marker_missing` means `(omk-harvested)` lines or `> Moved: [[k:projects/<p>/…]]` stubs exist without a valid marker. |
 | `unharvested_auto_memory` | report as the migration progress table; suggest distill ("migrate this project" / harvest) |
 | `slug_shadows_global` | blue hint only |
+| `link_into_retired` | A: bring the needed fact into a current page (or un-retire it), else drop the link |
+| `suspect_link_rewrite` | P: restore from the `_retired/harvested/` original if one exists; else A |
 | (no script check) always-on counts | informational, not a finding: in the report, list per project the number of `- ` lines in `projects/<p>/always-on.md` outside frontmatter, fenced and `<!-- -->` blocks (read the files; skip projects without one); note a page whose directive lines exceed 4000 bytes (the session-start injection stops there) |
 | `missing_path` (blue: a `~/…` path in the text does not exist on this machine) | report only, no question (paths on other machines are normal) |
 
 ## 2. Judgement stage
 
-For each entry in `batches`, dispatch one subagent (Agent tool, `subagent_type: general-purpose`, `model: sonnet`), in parallel. A group named in more than one batch was split: note "lower recall" for it in the report. Prompt each one with the batch's page paths (`<knowledge_dir>/<rel>`) and:
+For each entry in `batches`, dispatch one subagent (Agent tool, `subagent_type: general-purpose`, `model: sonnet`) in waves: at most 20 running at once (the session limit); start the next batch as one returns, or, with foreground calls, send the next wave after the current one returns. `Concurrent subagent limit reached` → wait, resend that batch; never drop one (a batch that never returns: "not judged" in the report). A group named in more than one batch was split: note "lower recall" for it in the report. Prompt each one with the batch's page paths (`<knowledge_dir>/<rel>`) and:
 
 > Read these pages. Find contradictions, pages that should be merged, missing cross-links, and leftovers of stacked corrections ("correction to the above", "this entry is void"). Read only; change nothing; run no commands. Return only a JSON array of `{"type": "contradiction|merge|missing_link|stacked_correction", "pages": [...], "detail": "..."}`.
 
@@ -78,12 +80,7 @@ Show each proposal as a diff; apply only after the user agrees (description out 
 
 ## 6. Retire (only after the user agrees)
 
-Never retire `projects/*/always-on.md` (other machines' stubs and pointer lines link to it).
-
-1. Move the file to `_retired/YYYY-MM-DD/<same relative path>` (`mv`).
-2. Append one line per file to `_retired/YYYY-MM-DD/REPORT.md`: path and reason.
-3. Still referenced (inside the KB, or by `[[g:…]]` / `[[k:…]]` in auto memory or `CLAUDE.md`)? Leave a stub at the old path: `> Moved: [[k:<replacement>]]` (or the retired copy).
-4. Log `## [YYYY-MM-DD] retire | <slug>` and commit with both the old and the new path:
+Never retire `projects/*/always-on.md`. Steps (move to `_retired/YYYY-MM-DD/`, `REPORT.md`, stub rule, log): [reference.md](reference.md). Then commit both the old and the new path:
 
 ```bash
 OMK_KNOWLEDGE_DIR='${user_config.knowledge_dir}' bash "${CLAUDE_PLUGIN_ROOT}/scripts/commit.sh" 'retire: <slug>' global/<slug>.md _retired/YYYY-MM-DD/global/<slug>.md _retired/YYYY-MM-DD/REPORT.md log.md
