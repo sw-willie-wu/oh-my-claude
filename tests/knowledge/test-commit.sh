@@ -115,7 +115,7 @@ before="$(nlog)"
 : > "$KB/.git/index.lock"
 run 'locked' global/l.md
 assert_eq "4" "$RC" "index.lock exit"
-hint="$(grep -F 'if no git process is running, remove it (README: Troubleshooting)' "$T/out")"
+hint="$(grep -F 'if no git process is running, remove it (docs/knowledge.md: Troubleshooting)' "$T/out")"
 [ -n "$hint" ] || { printf '    FAIL: exit-4 hint line missing\n' >&2; TEST_FAILED=1; }
 case "$hint" in *index.lock*) ;; *) printf '    FAIL: hint does not name the lock path: %s\n' "$hint" >&2; TEST_FAILED=1 ;; esac
 assert_eq "1" "$(grep -cF 'if no git process is running' "$T/out")" "exactly one hint line"

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.1 (2026-11-07)
+
+### Changed
+- The README is now a short bilingual landing page (`README.md` in English,
+  `README.zh-TW.md` in Traditional Chinese) with a logo, statusline images
+  and install steps. Every detail moved into `docs/` (`statusline.md`,
+  `install.md`, `upgrading.md`, `knowledge.md`); the oh-my-knowledge README
+  now points to `docs/knowledge.md`.
+- oh-my-knowledge: the lock-error hint of `scripts/commit.sh` points to
+  `docs/knowledge.md` (Troubleshooting) instead of the README.
+
+### Added
+- `LICENSE` (MIT). The plugins were already declared MIT.
+
 ## 2.1.0 (2026-11-06)
 
 ### Removed (breaking)
@@ -116,7 +130,7 @@ heading is the tag name without the `v`.
   hook, an automatic handoff hook (needs `oh-my-status`, which now writes
   `ctx-<sid>`), and scripts for init, commit, search and lint. Requires bash,
   gawk, GNU find (BSD date is fine), and jq. See
-  `plugins/oh-my-knowledge/README.md`.
+  `docs/knowledge.md`.
   The automatic handoff fires at the threshold and again once usage has grown
   by `auto_handoff_repeat` points (default 20, range 10-60) past the usage
   recorded in `handoff-<sid>` at the last handoff; `/compact` and `/clear`

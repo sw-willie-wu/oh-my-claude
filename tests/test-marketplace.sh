@@ -43,9 +43,9 @@ start_test "marketplace renames oh-my-claude -> oh-my-status"
 assert_eq "oh-my-status" "$(jq -r '.renames["oh-my-claude"]' "$MKT" 2>/dev/null | tr -d '\r')" "renames"
 end_test
 
-start_test "no old command prefix in commands, setup.sh, install.sh, README.md"
+start_test "no old command prefix in commands, setup.sh, install.sh, README*.md, docs"
 old='/oh-my-claude'; old+=':'   # built at runtime so this file never matches itself
-for p in "$STATUS_DIR/commands" "$STATUS_DIR/setup.sh" "$REPO_ROOT/install.sh" "$REPO_ROOT/README.md"; do
+for p in "$STATUS_DIR/commands" "$STATUS_DIR/setup.sh" "$REPO_ROOT/install.sh" "$REPO_ROOT/README.md" "$REPO_ROOT/README.zh-TW.md" "$REPO_ROOT/docs"; do
   if [ ! -e "$p" ]; then
     printf '    FAIL: path missing: %s\n' "$p" >&2; TEST_FAILED=1
   elif [ -n "$(grep -rnF -- "$old" "$p" 2>/dev/null)" ]; then
@@ -182,16 +182,16 @@ case "$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$HJ" 2>/dev/null | tr -
 esac
 end_test
 
-start_test "knowledge README documents settings, state files, markers, requirements, moving"
-KR="$REPO_ROOT/plugins/oh-my-knowledge/README.md"
+start_test "knowledge doc documents settings, state files, markers, requirements, moving"
+KR="$REPO_ROOT/docs/knowledge.md"
 if [ ! -f "$KR" ]; then
   printf '    FAIL: missing %s\n' "$KR" >&2; TEST_FAILED=1
 else
   for k in $(jq -r '.userConfig | keys[]' "$REPO_ROOT/plugins/oh-my-knowledge/.claude-plugin/plugin.json" | tr -d '\r'); do
-    grep -qF -- "\`$k\`" "$KR" || { printf '    FAIL: README lacks setting %s\n' "$k" >&2; TEST_FAILED=1; }
+    grep -qF -- "\`$k\`" "$KR" || { printf '    FAIL: knowledge doc lacks setting %s\n' "$k" >&2; TEST_FAILED=1; }
   done
   for s in 'ctx-<' 'handoff-<' '(omk-harvested)' '(omk-project)' 'always-on.md' 'OMK_AUTO_MEMORY_GLOB' 'Moving to another machine'; do
-    grep -qF -- "$s" "$KR" || { printf '    FAIL: README lacks %s\n' "$s" >&2; TEST_FAILED=1; }
+    grep -qF -- "$s" "$KR" || { printf '    FAIL: knowledge doc lacks %s\n' "$s" >&2; TEST_FAILED=1; }
   done
   req=$(awk '/^## Requirements/{f=1;next} /^## /{f=0} f' "$KR")
   for s in jq gawk; do
@@ -201,10 +201,10 @@ fi
 end_test
 
 start_test "upgrade notes tell disabled users to uninstall, reinstall and disable"
-grep -qF -- '/plugin uninstall oh-my-claude@oh-my-claude' "$REPO_ROOT/README.md" \
-  || { printf '    FAIL: root README lacks uninstall note\n' >&2; TEST_FAILED=1; }
-grep -qF -- '/plugin disable oh-my-status@oh-my-claude' "$REPO_ROOT/README.md" \
-  || { printf '    FAIL: root README lacks disable note\n' >&2; TEST_FAILED=1; }
+grep -qF -- '/plugin uninstall oh-my-claude@oh-my-claude' "$REPO_ROOT/docs/upgrading.md" \
+  || { printf '    FAIL: upgrading doc lacks uninstall note\n' >&2; TEST_FAILED=1; }
+grep -qF -- '/plugin disable oh-my-status@oh-my-claude' "$REPO_ROOT/docs/upgrading.md" \
+  || { printf '    FAIL: upgrading doc lacks disable note\n' >&2; TEST_FAILED=1; }
 grep -qF -- '/plugin disable oh-my-status@oh-my-claude' "$REPO_ROOT/CHANGELOG.md" \
   || { printf '    FAIL: CHANGELOG lacks disable note\n' >&2; TEST_FAILED=1; }
 grep -qF -- 'always-on.md' "$REPO_ROOT/CHANGELOG.md" \
