@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### Removed
+### Removed (breaking)
 - The Workers section (background-shell rows) and everything behind it: the
   PreToolUse/PostToolUse hooks (`hooks/track-workers.sh`), `lib/state-lock.sh`,
   the per-session `state-<sid>.tsv` files and the `WORKERS_*` conf keys. A
@@ -33,12 +33,15 @@
 - Layouts no longer start subshells for icons and bars. A typical render now
   starts 2 processes (jq) instead of about 35; on Windows this makes renders
   sub-second instead of several seconds.
+- The 7-day rate-limit reset hint (shown above 80 %) now includes the time:
+  `(11/08 15:30)` instead of `(11/08)`.
+- `preview.sh` no longer prints `emit_workers: command not found` to stderr.
 
-### Migration (3.0.0)
-- Restart every Claude Code session after updating. Until then an old 2.x
+### Migration (2.1.0)
+- Restart every Claude Code session after updating. Until then an old 2.0
   session can run its SessionStart again on resume, `/clear` or `/compact`
-  and copy the 2.x statusline back; the next 3.0 SessionStart replaces it.
-- The first 3.0 SessionStart deletes the 2.x leftovers: `state-*.tsv`,
+  and copy the 2.0 statusline back; the next 2.1 SessionStart replaces it.
+- The first 2.1 SessionStart deletes the 2.0 leftovers: `state-*.tsv`,
   `state.lock`, `track-workers.log` under `~/.claude/oh-my-claude/state/`, and
   `hooks/track-workers.sh`, `lib/state-lock.sh`, `lib/conf-keys.sh` under
   `~/.claude/oh-my-claude/` (the two folders are removed only when empty).

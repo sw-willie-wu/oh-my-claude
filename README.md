@@ -32,7 +32,7 @@ This marketplace (`oh-my-claude`) ships two plugins: **oh-my-status** (a themeab
 ## Notes
 
 - The statusline needs `jq` 1.7 or newer.
-- Timer refresh is opt-in. By default the statusline re-renders only on Claude Code events, so rate-limit and git info can go stale while the main agent is idle. To keep them current, add `"refreshInterval": 10` to your `statusLine` settings (`/oh-my-status:setup` asks about this; it is never added by default). Avoid values below 10: on Windows a render can take several seconds, so a short timer stacks overlapping statusline processes across sessions and burns CPU.
+- Timer refresh is opt-in. By default the statusline re-renders only on Claude Code events, so rate-limit and git info can go stale while the main agent is idle. To keep them current, add `"refreshInterval": 10` to your `statusLine` settings (`/oh-my-status:setup` asks about this; it is never added by default). Avoid values below 10: a render now starts only about two processes, but process-creation stalls on Windows can still make one slow, and a short timer would stack overlapping statusline processes across sessions and burn CPU.
 - `GIT_CACHE_TTL` (conf key, default 10): git runs at most once per this many seconds. A branch switch, commit or stage shows at the next render anyway, because the cache is dropped as soon as `.git` (HEAD, index, the branch ref) changes; edits to working-tree files show within `GIT_CACHE_TTL` seconds. Directories that are not git repositories never run git. Set `GIT_CACHE_TTL=0` to disable the cache and always run git.
 
 ## Account
@@ -120,7 +120,7 @@ If a project-level `.claude/settings.json` enables `oh-my-claude@oh-my-claude`, 
 
 ### Upgrading
 
-If you installed oh-my-claude before 1.1.0, re-run `/oh-my-status:setup` to pick up newer conf options. Timer refresh (`refreshInterval`) is opt-in and no longer prompted for on upgrade; see Limitations above. Existing themes/layouts are unaffected.
+If you installed oh-my-claude before 1.1.0, re-run `/oh-my-status:setup` to pick up newer conf options. Timer refresh (`refreshInterval`) is opt-in and no longer prompted for on upgrade; see Notes above. Existing themes/layouts are unaffected.
 
 ## Usage
 
