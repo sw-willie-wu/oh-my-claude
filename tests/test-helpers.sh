@@ -14,6 +14,11 @@ export OMC_STATE_DIR="${OMC_STATE_DIR:-$(mktemp -d -t omc-test-XXXXXX)}"
 # [ -f /dev/null ] is false, so conf defaults apply. Tests override as needed.
 export OMC_CONF="${OMC_CONF:-/dev/null}"
 export OMC_ACCOUNT_FILE="${OMC_ACCOUNT_FILE:-$OMC_STATE_DIR/no-such.json}"
+# Same for the credentials file: no test may read a real token.
+export OMC_CREDENTIALS_FILE="${OMC_CREDENTIALS_FILE:-$OMC_STATE_DIR/no-such-credentials.json}"
+# A developer shell with any of these set would silently turn the account
+# lookup tests into skip cases.
+unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX
 
 # Never start the real background orphan sweep from tests; the sweep tests
 # enable it explicitly.
@@ -71,6 +76,31 @@ make_jq_shim() {
     fi
   } > "$dir/jq"
   chmod +x "$dir/jq"
+}
+
+# make_curl_shim <dir> <log>: write an executable <dir>/curl that logs one
+# 'CALL <%q argv>' line per invocation, appends its whole stdin to <log>.stdin,
+# then behaves per env read at run time:
+#   CURL_SHIM_SLEEP=<s>   sleep first
+#   CURL_SHIM_TOUCH=<f>   touch that file (current time)
+#   CURL_SHIM_EXIT=<n>    non-zero: print nothing, exit n
+#   CURL_SHIM_BODY=<f>    print that file, exit 0; unset: print nothing, exit 22
+make_curl_shim() {
+  local dir="$1" log="$2"
+  mkdir -p "$dir"
+  {
+    printf '#!/bin/bash\n'
+    printf '{ printf CALL; printf " %%q" "$@"; printf "\\n"; } >> %q\n' "$log"
+    printf 'cat >> %q\n' "$log.stdin"
+    cat <<'SHIM'
+[ -n "${CURL_SHIM_SLEEP:-}" ] && sleep "$CURL_SHIM_SLEEP"
+[ -n "${CURL_SHIM_TOUCH:-}" ] && touch "$CURL_SHIM_TOUCH"
+if [ "${CURL_SHIM_EXIT:-0}" != 0 ]; then exit "$CURL_SHIM_EXIT"; fi
+if [ -n "${CURL_SHIM_BODY:-}" ]; then cat "$CURL_SHIM_BODY"; exit 0; fi
+exit 22
+SHIM
+  } > "$dir/curl"
+  chmod +x "$dir/curl"
 }
 
 # shim_count <log> [fixed-string]: number of logged calls (or of calls whose

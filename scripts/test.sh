@@ -16,6 +16,9 @@ if [ -f "$REPO_ROOT/tests/test-render-equivalence.sh" ]; then
   echo "=== render equivalence tests ==="
   bash "$REPO_ROOT/tests/test-render-equivalence.sh" || FAIL=1
 fi
+echo
+echo "=== account source tests ==="
+bash "$REPO_ROOT/tests/test-account-source.sh" || FAIL=1
 if [ -f "$REPO_ROOT/tests/test-conf-backfill.sh" ]; then
   echo
   echo "=== conf-backfill tests ==="

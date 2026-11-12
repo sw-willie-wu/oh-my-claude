@@ -37,6 +37,11 @@ if [ -r "$SCRIPT_DIR/lib/conf-keys.sh" ]; then
     keys_csv="$(printf '%s' "$missing" | paste -sd, -)"
     printf '%s\n' "[oh-my-status] Context for the assistant: ${n} new config option(s) (${keys_csv}) exist in the bundled template but are not in the user's ~/.claude/oh-my-claude.conf. At a natural moment, mention to the user once (not repeatedly within this session) that running /oh-my-status:setup will add the new options with safe defaults while preserving existing values."
   fi
+  # ACCOUNT_SOURCE is shipped commented out (opt-in), so it never shows up as a
+  # missing key; tell Claude to mention it until the user has chosen a value.
+  if [ -s "$OMC_CONF" ] && [ -r "$OMC_CONF_TEMPLATE" ] && ! omc_conf_has_key "$OMC_CONF" ACCOUNT_SOURCE; then
+    printf '%s\n' "[oh-my-status] Context for the assistant: the config option ACCOUNT_SOURCE is not set in the user's ~/.claude/oh-my-claude.conf. It decides whether the account segment looks up the account that this session's login token belongs to (off until chosen). At a natural moment, mention to the user once (not repeatedly within this session) that running /oh-my-status:setup will ask whether to turn it on."
+  fi
 fi
 
 # One-time cleanup of 2.x Workers leftovers (named files only).
@@ -71,12 +76,13 @@ if [ -d "$OMC_STATE_DIR" ]; then
 fi
 
 # Windows only: when Claude Code cancels an in-flight statusline render, a
-# git.exe / jq.exe child it was starting can be left behind never resumed: one
+# git.exe / jq.exe / curl.exe child it was starting can be left behind never
+# resumed (curl is the account lookup's profile request): one
 # suspended thread, no CPU time used, parent gone. Sweep those at session
 # start, in the background so startup is never delayed. A process is killed
-# (by PID, never by name) only if it is git/jq, older than
+# (by PID, never by name) only if it is git/jq/curl, older than
 # OMC_ORPHAN_SWEEP_MIN_AGE seconds (default 60), its command line looks like a
-# statusline git/jq call, its parent is gone (or the parent PID was reused by
+# statusline git/jq/curl call, its parent is gone (or the parent PID was reused by
 # a newer process), and it has exactly one thread, suspended, with zero CPU
 # time. Any error in these checks skips the process.
 # The PowerShell has two parts: ConvertTo-OrphanRecord turns raw process facts
@@ -105,6 +111,7 @@ $dry = $env:OMC_ORPHAN_SWEEP_DRYRUN -eq '1'
 $minAge = 60; if ($env:OMC_ORPHAN_SWEEP_MIN_AGE -match '^\d+$') { $minAge = [int]$env:OMC_ORPHAN_SWEEP_MIN_AGE }
 $git = '(?i)\bgit(\.exe)?"?\s+((status --porcelain( -b)? -uall( --no-ahead-behind)?|diff HEAD --numstat|rev-parse --show-toplevel|branch --show-current)"?\s*$|submodule(--helper)? foreach --quiet )'
 $jq = '(?i)\bjq(\.exe)?"?\s+(--raw-output0|-j)\s'
+$curl = '(?i)\bcurl(\.exe)?"?\s+-sf -m 10 -K -\s*$'
 
 # Raw facts -> plain record. $p: Name, CommandLine, CreationDate. $par: the
 # process now holding the parent PID (or $null). $threads: ThreadState and
@@ -125,8 +132,8 @@ function ConvertTo-OrphanRecord($p, $par, $threads, $cpuTicks, $startTime, $now)
 
 # Decision from a record alone; one check per line (each line ends in -and).
 function Test-Orphan($r) {
-  return ($r.Name -in 'git.exe', 'jq.exe' -and
-    ($r.CommandLine -match $git -or $r.CommandLine -match $jq) -and
+  return ($r.Name -in 'git.exe', 'jq.exe', 'curl.exe' -and
+    ($r.CommandLine -match $git -or $r.CommandLine -match $jq -or $r.CommandLine -match $curl) -and
     $r.AgeSeconds -ge $minAge -and
     -not $r.ParentAlive -and
     $r.ThreadCount -eq 1 -and
@@ -147,7 +154,7 @@ $all = @{}; Get-CimInstance Win32_Process | ForEach-Object { $all[[int]$_.Proces
 $seen = 0; $killed = 0
 foreach ($p in $all.Values) {
   try {
-    if ($p.Name -notin 'git.exe', 'jq.exe') { continue }
+    if ($p.Name -notin 'git.exe', 'jq.exe', 'curl.exe') { continue }
     $gp = Get-Process -Id $p.ProcessId
     $r = ConvertTo-OrphanRecord -p $p -par $all[[int]$p.ParentProcessId] -threads $gp.Threads -cpuTicks $gp.TotalProcessorTime.Ticks -startTime $gp.StartTime -now (Get-Date)
     if (-not (Test-Orphan $r)) { continue }
