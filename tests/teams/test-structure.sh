@@ -291,4 +291,43 @@ start_test "config: agents carry no user_config"
 for r in $ROLES; do has "$AG/$r.md" '${user_config.' && fail "$r: carries user_config"; done
 end_test
 
+start_test "scenarios: S1–S13 present, each with Setup/Prompt/Expected/Fails if"
+SC="$REPO_ROOT/tests/teams/scenarios.md"
+if [ ! -f "$SC" ]; then fail "missing $SC"; else
+  for n in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
+    blk=$(awk -v h="## S$n:" 'index($0,h)==1{on=1; next} /^## /{on=0} on' "$SC")
+    [ -n "$blk" ] || { fail "scenarios: S$n missing"; continue; }
+    for k in 'Setup:' 'Prompt:' 'Expected:' 'Fails if:'; do
+      printf '%s\n' "$blk" | grep -qF -- "$k" || fail "scenarios: S$n lacks $k"
+    done
+  done
+  c=$(grep -c '^## S[0-9]*:' "$SC"); assert_eq "13" "$c" "scenario count"
+fi
+end_test
+
+start_test "scenarios: not in the automated runner"
+grep -qF 'scenarios.md' "$REPO_ROOT/scripts/test.sh" && fail "scripts/test.sh mentions scenarios.md"
+end_test
+
+start_test "docs: teams doc lists every userConfig key and the four levels"
+TD="$REPO_ROOT/docs/teams.md"
+if [ ! -f "$TD" ]; then fail "missing $TD"; else
+  for k in $(jq -r '.userConfig | keys[]' "$PJ" | tr -d '\r'); do need "$TD" "\`$k\`" "teams doc"; done
+  for h in Install 'How it works' 'Review levels' Roles Settings 'Knowledge base' Commits Limitations License; do
+    grep -qxF "## $h" "$TD" || fail "teams doc: missing heading $h"
+  done
+  rows=$(grep -cE '^\| [0-3] ' "$TD"); assert_eq "4" "$rows" "teams doc level rows"
+fi
+[ -f "$PLUGIN/README.md" ] && has "$PLUGIN/README.md" 'docs/teams.md' || fail "plugin README missing or lacks link"
+end_test
+
+start_test "docs: READMEs and CHANGELOG mention oh-my-teams"
+for r in README.md README.zh-TW.md; do
+  need "$REPO_ROOT/$r" '## oh-my-teams' "$r"
+  need "$REPO_ROOT/$r" 'docs/teams.md' "$r"
+done
+unrel=$(awk '/^## /{on = ($0 == "## Unreleased"); next} on' "$REPO_ROOT/CHANGELOG.md")
+printf '%s\n' "$unrel" | grep -qF 'oh-my-teams' || fail "CHANGELOG: no oh-my-teams under Unreleased"
+end_test
+
 print_summary

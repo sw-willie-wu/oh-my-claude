@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- oh-my-teams: a new plugin with four role agents (spec, implementer,
+  reviewer, QA) and a lead skill that runs a feature from spec to
+  implementation at a chosen review level (0 none to 3 strict), with a
+  converging review loop, a knowledge lookup before each role starts, and
+  one commit per task on a feature branch. See `docs/teams.md`.
 - oh-my-status: `ACCOUNT_SOURCE=auto` (opt-in, default `config`) makes the
   account segment name the account whose login token the session actually
   uses, instead of the shared `~/.claude.json` display cache that another
