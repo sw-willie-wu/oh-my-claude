@@ -6,5 +6,54 @@
   },
   "repository": "https://github.com/sw-willie-wu/oh-my-claude",
   "license": "MIT",
-  "keywords": ["agents", "review", "workflow", "subagents"]
+  "keywords": [
+    "agents",
+    "review",
+    "workflow",
+    "subagents"
+  ],
+  "userConfig": {
+    "default_level": {
+      "type": "string",
+      "title": "Default review level",
+      "description": "0, 1, 2 or 3. When set, the lead uses this level without asking. Leave empty to be asked once per feature.",
+      "default": ""
+    },
+    "spec_model": {
+      "type": "string",
+      "title": "Spec agent model",
+      "description": "sonnet, opus, haiku or fable. Leave empty to use the agent's default (opus).",
+      "default": ""
+    },
+    "implementer_model": {
+      "type": "string",
+      "title": "Implementer model",
+      "description": "sonnet, opus, haiku or fable. Leave empty to use the agent's default (sonnet).",
+      "default": ""
+    },
+    "reviewer_model": {
+      "type": "string",
+      "title": "Reviewer model",
+      "description": "sonnet, opus, haiku or fable. Leave empty to use the agent's default (opus).",
+      "default": ""
+    },
+    "qa_model": {
+      "type": "string",
+      "title": "QA model",
+      "description": "sonnet, opus, haiku or fable. Leave empty to use the agent's default (sonnet).",
+      "default": ""
+    },
+    "spec_dir": {
+      "type": "string",
+      "title": "Spec folder",
+      "description": "Folder where a spec is written when the discussion workflow names no path.",
+      "default": "docs/specs"
+    },
+    "plan_dir": {
+      "type": "string",
+      "title": "Plan folder",
+      "description": "Folder where a plan is written when the discussion workflow names no path.",
+      "default": "docs/plans"
+    }
+  }
 }
