@@ -158,13 +158,46 @@ start_test "setup.sh is silent when the conf has all template keys"
 sbox="$OMC_STATE_DIR/sbox-detect-full"
 mkdir -p "$sbox/home"
 uc="$sbox/oh-my-claude.conf"
-cp "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" "$uc"   # conf == template → nothing missing
+cp "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" "$uc"   # conf == template + a chosen ACCOUNT_SOURCE → nothing to say
+printf 'ACCOUNT_SOURCE=config\n' >> "$uc"
 out="$(HOME="$sbox/home" \
   OMC_DIR="$sbox/omc" \
   OMC_CONF="$uc" \
   OMC_CONF_TEMPLATE="$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" \
   bash "$SETUP_SH" 2>/dev/null)"
 assert_eq "" "$out" "no notice when conf is complete"
+end_test
+
+start_test "setup.sh asks Claude to mention ACCOUNT_SOURCE when it is not set"
+sbox="$OMC_STATE_DIR/sbox-detect-acct"
+mkdir -p "$sbox/home"
+uc="$sbox/oh-my-claude.conf"
+cp "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" "$uc"
+before="$(cat "$uc")"
+out="$(HOME="$sbox/home" \
+  OMC_DIR="$sbox/omc" \
+  OMC_CONF="$uc" \
+  OMC_CONF_TEMPLATE="$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" \
+  bash "$SETUP_SH" 2>/dev/null)"
+case "$out" in *ACCOUNT_SOURCE*"will ask"*) ;; *) printf '    FAIL: notice missing; got: %s\n' "$out" >&2; TEST_FAILED=1 ;; esac
+case "$out" in *"new config option(s)"*) printf '    FAIL: counted as a missing key: %s\n' "$out" >&2; TEST_FAILED=1 ;; esac
+assert_eq "$before" "$(cat "$uc")" "notice must not write the conf"
+end_test
+
+start_test "setup on a missing conf: template plus the chosen value survives setup.sh"
+sbox="$OMC_STATE_DIR/sbox-detect-chosen"
+mkdir -p "$sbox/home"
+uc="$sbox/oh-my-claude.conf"
+cp "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" "$uc"
+printf '# --- added by /oh-my-status:setup (%s) ---\nACCOUNT_SOURCE=auto\n' "$(date +%F)" >> "$uc"
+cp "$uc" "$sbox/snapshot"
+out="$(HOME="$sbox/home" \
+  OMC_DIR="$sbox/omc" \
+  OMC_CONF="$uc" \
+  OMC_CONF_TEMPLATE="$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf" \
+  bash "$SETUP_SH" 2>/dev/null)"
+assert_eq "" "$out" "no notice"
+cmp -s "$sbox/snapshot" "$uc" || { printf '    FAIL: conf bytes changed\n' >&2; TEST_FAILED=1; }
 end_test
 
 start_test "setup.sh exits 0 and is silent on an unreadable template"
@@ -204,6 +237,33 @@ out=$(env -u MODEL_CTX_TAG bash -c '. "$1"; printf "%s" "${MODEL_CTX_TAG-unset}"
 assert_eq "true" "$out" "MODEL_CTX_TAG default in template"
 rm_hits=$(grep -c 'WORKERS_' "$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf")
 assert_eq "0" "$rm_hits" "no WORKERS_ keys in template"
+end_test
+
+start_test "template ships ACCOUNT_SOURCE only commented out"
+TPL="$REPO_ROOT/plugins/oh-my-status/oh-my-claude.conf"
+out=$(env -u ACCOUNT_SOURCE bash -c '. "$1"; printf "%s" "${ACCOUNT_SOURCE-unset}"' _ "$TPL")
+assert_eq "unset" "$out" "ACCOUNT_SOURCE must not be assigned by the template"
+assert_eq "1" "$(grep -c '^# ACCOUNT_SOURCE=config$' "$TPL")" "commented example line"
+end_test
+
+start_test "backfill never adds ACCOUNT_SOURCE"
+: > "$OMC_STATE_DIR/empty.conf"
+case "$(omc_missing_conf_keys "$TPL" "$OMC_STATE_DIR/empty.conf")" in
+  *ACCOUNT_SOURCE*) printf '    FAIL: ACCOUNT_SOURCE listed as missing\n' >&2; TEST_FAILED=1 ;;
+esac
+end_test
+
+start_test "omc_conf_has_key: uncommented assignment only"
+hk="$OMC_STATE_DIR/has-key.conf"
+printf 'ACCOUNT_SOURCE=auto\n' > "$hk"
+omc_conf_has_key "$hk" ACCOUNT_SOURCE; assert_eq "0" "$?" "plain assignment"
+printf 'export ACCOUNT_SOURCE = config\n' > "$hk"
+omc_conf_has_key "$hk" ACCOUNT_SOURCE; assert_eq "0" "$?" "export with spaces"
+printf '# ACCOUNT_SOURCE=config\n' > "$hk"
+omc_conf_has_key "$hk" ACCOUNT_SOURCE; assert_eq "1" "$?" "commented only"
+printf 'ACCOUNT_SOURCE_X=1\n' > "$hk"
+omc_conf_has_key "$hk" ACCOUNT_SOURCE; assert_eq "1" "$?" "longer key name"
+omc_conf_has_key "$OMC_STATE_DIR/no-such.conf" ACCOUNT_SOURCE; assert_eq "1" "$?" "missing file"
 end_test
 
 start_test "empty user conf: missing lists account keys, not icons"

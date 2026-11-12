@@ -77,6 +77,12 @@ printf 'main change\n' >> "$R/submod/a.txt"
 mkdir -p "$R/nonrepo"
 printf '{"oauthAccount":{"displayName":"alice"}}' > "$T/acct.json"
 NONE="$T/none.json"
+# Credentials file with a fake token and a curl shim: every case also proves the
+# default (ACCOUNT_SOURCE unset) renders as before when credentials exist.
+make_curl_shim "$T/shim" "$T/curl.log"
+printf '{"claudeAiOauth":{"accessToken":"tok-equiv-0123456789"}}' > "$T/cred.json"
+touch -d "@$(( $(date +%s) - 20 ))" "$T/cred.json"
+export OMC_CREDENTIALS_FILE="$T/cred.json"
 
 # --- fixture sanity: fail loudly rather than pass vacuously -------------------
 fixture_fail=0
@@ -172,6 +178,14 @@ case_eq "S-resets-abc" "$R/clean" "$(payload x 8 "" 90 abc "" "")" "$C" "$T/acct
 case_eq "S-five-80" "$R/clean" "$(payload x 8 "" 80 "$R5" "" "")" "$C" "$T/acct.json" 120
 case_eq "S-five-81" "$R/clean" "$(payload x 8 "" 81 "$R5" "" "")" "$C" "$T/acct.json" 120
 case_eq "S-workers-conf" "$R/clean" "$P_A" "$(printf 'LAYOUT=default\nWORKERS_ENABLED=true\nWORKERS_MAX=0')" "$T/acct.json" 120
+case_eq "S-source-config" "$R/clean" "$P_A" "$(printf 'LAYOUT=default\nACCOUNT_SOURCE=config')" "$T/acct.json" 120
+case_eq "S-source-auto-show-off" "$R/clean" "$P_A" "$(printf 'LAYOUT=default\nACCOUNT_SOURCE=auto\nACCOUNT_SHOW=false')" "$T/acct.json" 120
+case_eq "S-source-auto-oauth-env" "$R/clean" "$P_A" "$(printf 'LAYOUT=default\nACCOUNT_SOURCE=auto\nexport CLAUDE_CODE_OAUTH_TOKEN=x')" "$T/acct.json" 120
+case_eq "S-source-auto-api-key" "$R/clean" "$P_A" "$(printf 'LAYOUT=default\nACCOUNT_SOURCE=auto\nexport ANTHROPIC_API_KEY=x')" "$T/acct.json" 120
+
+start_test "no case invoked curl"
+assert_eq "0" "$(shim_count "$T/curl.log")" "curl calls"
+end_test
 
 # The oracle must have rendered a real statusline, not the jq-missing notice.
 if [ -f "$T/out-old-L-default-a" ]; then

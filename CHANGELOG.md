@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+- oh-my-status: `ACCOUNT_SOURCE=auto` (opt-in, default `config`) makes the
+  account segment name the account whose login token the session actually
+  uses, instead of the shared `~/.claude.json` display cache that another
+  Claude client on the same machine can overwrite. When the credentials file
+  changes, one background request to the profile endpoint fetches the name,
+  which is then cached, so normal renders cost nothing extra. `/oh-my-status:setup`
+  asks which source to use; see `docs/statusline.md`.
+
 ### Fixed
 - oh-my-status: on Windows, SessionStart now stops `git.exe` / `jq.exe`
   processes that look like statusline calls but were left behind by a

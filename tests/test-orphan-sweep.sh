@@ -97,6 +97,10 @@ if [ "$WIN" = 1 ]; then
   mk thread-other-wait    no  "$GITQ" '.threads=[{ThreadState:"Wait",WaitReason:"Executive"}]'
   mk cpu-used             no  "$GITQ" '.cpu=100'
   mk start-mismatch       no  "$GITQ" '.start="2026-01-01T00:00:10Z"'
+  mk curl-fetch           yes '"C:\Program Files\Git\mingw64\bin\curl.exe" -sf -m 10 -K -' '.p.Name="curl.exe"'
+  mk curl-bare            yes 'curl.exe -sf -m 10 -K -' '.p.Name="curl.exe"'
+  mk curl-other-args      no  'curl.exe -s https://example.com' '.p.Name="curl.exe"'
+  mk curl-extra-arg       no  'curl.exe -sf -m 10 -K - --foo' '.p.Name="curl.exe"'
   jq -s -c . "$T/cases" > "$T/records.json"
 
   start_test "decision: orphan record is accepted, each single flipped check is rejected"

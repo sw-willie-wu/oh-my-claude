@@ -23,6 +23,9 @@ LAYOUT="default"
 # Account segment. ACCOUNT_ICON is dash form: explicit "" disables it.
 : "${ACCOUNT_SHOW:=true}"
 : "${ACCOUNT_FORMAT:=name}"
+# Where the name comes from: config (default) = ~/.claude.json only; auto = the
+# account that owns this session's token (see _omc_profile_account).
+: "${ACCOUNT_SOURCE:=config}"
 # Model context tag: append " [NM]" to MODEL when context size >= 1M.
 : "${MODEL_CTX_TAG:=true}"
 ACCOUNT_ICON="${ACCOUNT_ICON-$'\xef\x80\x87'}"
@@ -334,17 +337,107 @@ apply_model_ctx_tag() {
   fi
 }
 
+# jq fragments shared by the .oauthAccount filter and the profile lookup: turn
+# four fields into display-safe strings (control characters stripped, trimmed,
+# backslashes doubled so `echo -e` cannot reinterpret them). _OMC_ACC_CLEAN maps
+# an array; _OMC_ACC_SANITIZE additionally joins it with US (\x1f).
+_OMC_ACC_CLEAN='map((. // "") | tostring | gsub("[\u0000-\u001f\u007f-\u009f]"; "")
+          | gsub("^[[:space:]]+|[[:space:]]+$"; "") | gsub("\\\\"; "\\\\"))'
+_OMC_ACC_SANITIZE="$_OMC_ACC_CLEAN"' | join("\u001f")'
+
+# Stale profile cache: start at most one background lookup per lease. The lease
+# is the epoch in <cache>.stamp; it is open when the stamp is missing, older
+# than the credentials file, not a plain epoch, in the future, or more than 300
+# seconds old, so a lookup that never finished (killed, offline, revoked token)
+# is retried instead of blocking forever. The stamp is written before the fork;
+# if that write fails nothing is launched, so an unwritable state dir cannot
+# fork on every render. Always returns 1 (this render uses .oauthAccount).
+_omc_profile_lease() {
+  local stamp="$_OMC_PCACHE.stamp" line="" now
+  if [ -f "$stamp" ] && ! [ "$_OMC_CRED" -nt "$stamp" ]; then
+    IFS= read -r line < "$stamp" || :
+    if [[ $line =~ ^(0|[1-9][0-9]{0,17})$ ]]; then
+      _omc_now; now=$REPLY
+      if [ "$line" -le "$now" ] && [ $((now - line)) -le 300 ]; then return 1; fi
+    fi
+  fi
+  _omc_now; now=$REPLY
+  [ -d "$OMC_STATE_DIR" ] || mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+  { printf '%s\n' "$now" > "$stamp"; } 2>/dev/null || return 1
+  if [ -n "${OMC_PROFILE_FETCH_SYNC-}" ]; then
+    ( _omc_profile_fetch "$_OMC_CRED" "$_OMC_PCACHE" )
+  else
+    { _omc_profile_fetch "$_OMC_CRED" "$_OMC_PCACHE" </dev/null >/dev/null 2>&1 & } 2>/dev/null
+    disown 2>/dev/null || :
+  fi
+  return 1
+}
+
+# Look up the account that owns the token in <cred> and write the four display
+# fields to <cache> (atomically), or write nothing. Runs in a subshell; never
+# prints. The token goes jq -> curl's config on stdin and nowhere else (not
+# argv, env, a variable or a file), and only tokens made of plain token
+# characters are used, so the config needs no quoting; the trailing-newline test
+# is separate because jq's `$` also matches before a final newline. `tr -d '\r'`
+# strips the CRs that a Windows jq adds to every newline it prints. The
+# temp-file marker, created with a plain touch when the lookup starts, decides
+# "credentials changed meanwhile" (the shared stamp may be rewritten by another
+# session); a result for a token that has since been replaced is discarded and
+# the next render relaunches.
+_omc_profile_fetch() {
+  local cred=$1 cache=$2 tmp mark line
+  local tok='.claudeAiOauth.accessToken | strings | select(test("^[A-Za-z0-9._~+/=-]+$") and (endswith("\n") | not))'
+  local cfg='"url = \"https://api.anthropic.com/api/oauth/profile\"\nheader = \"Authorization: Bearer \(.)\"\nheader = \"anthropic-beta: oauth-2025-04-20\"\n"'
+  local parse='select(type == "object" and (.account | type) == "object")
+    | [.account.display_name, .account.full_name, .account.email, ((.organization? | objects | .name) // "")]
+    | '"$_OMC_ACC_CLEAN"' | select(any(.[]; length > 0)) | join("\u001f")'
+  tmp="$cache.tmp.$BASHPID"; mark="$tmp.m"
+  touch "$mark" 2>/dev/null || return 0
+  if jq -e "$tok" "$cred" >/dev/null 2>&1; then
+    line=$(jq -j "$tok | $cfg" "$cred" 2>/dev/null | tr -d '\r' \
+      | curl -sf -m 10 -K - 2>/dev/null | jq -j "$parse" 2>/dev/null)
+    if [ -n "$line" ] && { printf '%s\n' "$line" > "$tmp"; } 2>/dev/null; then
+      if [ -e "$mark" ] && ! [ "$cred" -nt "$mark" ]; then mv -f "$tmp" "$cache" 2>/dev/null; fi
+    fi
+  fi
+  rm -f "$tmp" "$mark" 2>/dev/null
+  return 0
+}
+
+# Source 1 of the account segment: the account that owns this session's OAuth
+# token. ~/.claude.json (.oauthAccount) is only a display cache shared by every
+# Claude client on the machine, so it can name a different account than the one
+# whose credentials this session bills; the credentials file is the truth.
+# Sets ACC_* and returns 0 on a fresh profile cache; returns 1 otherwise and the
+# caller falls through to .oauthAccount. Builtins only; a stale cache may start a
+# background lookup (see _omc_profile_lease).
+_omc_profile_account() {
+  [ "${ACCOUNT_SOURCE-}" = auto ] || return 1
+  # The session bills one of these instead of the credentials file.
+  [ -z "${CLAUDE_CODE_OAUTH_TOKEN-}" ] && [ -z "${ANTHROPIC_API_KEY-}" ] \
+    && [ -z "${ANTHROPIC_AUTH_TOKEN-}" ] && [ -z "${CLAUDE_CODE_USE_BEDROCK-}" ] \
+    && [ -z "${CLAUDE_CODE_USE_VERTEX-}" ] || return 1
+  _OMC_CRED="${OMC_CREDENTIALS_FILE:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json}"
+  [ -f "$_OMC_CRED" ] || return 1
+  _OMC_PCACHE="$OMC_STATE_DIR/account-profile-${_OMC_CRED//[^A-Za-z0-9]/-}"
+  if [ -f "$_OMC_PCACHE" ] && ! [ "$_OMC_CRED" -nt "$_OMC_PCACHE" ]; then
+    IFS=$'\x1f' read -r ACC_NAME ACC_FULL ACC_EMAIL ACC_ORG < "$_OMC_PCACHE"
+    [ -n "$ACC_NAME$ACC_FULL$ACC_EMAIL$ACC_ORG" ] && return 0
+    ACC_NAME=""; ACC_FULL=""; ACC_EMAIL=""; ACC_ORG=""
+  fi
+  _omc_profile_lease
+}
+
 # Account segment. Sets ACC_NAME/ACC_FULL/ACC_EMAIL/ACC_ORG,
 # already sanitized and backslash-doubled (safe for `echo -e`). MUST be called
 # directly, never inside $( ), so the globals survive and a hit forks nothing.
 cached_account_fields() {
   ACC_NAME=""; ACC_FULL=""; ACC_EMAIL=""; ACC_ORG=""
   [ "$ACCOUNT_SHOW" = true ] || return 0
+  _omc_profile_account && return 0
   local src cache raw rc
   local _accfilter='(.oauthAccount? | objects) // {} | [.displayName, .fullName, .emailAddress, .organizationName]
-    | map((. // "") | tostring | gsub("[\u0000-\u001f\u007f-\u009f]"; "")
-          | gsub("^[[:space:]]+|[[:space:]]+$"; "") | gsub("\\\\"; "\\\\"))
-    | join("\u001f")'
+    | '"$_OMC_ACC_SANITIZE"
   src="${OMC_ACCOUNT_FILE:-${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json}"
   [ -f "$src" ] || return 0
   cache="$OMC_STATE_DIR/account-${src//[^A-Za-z0-9]/-}"
