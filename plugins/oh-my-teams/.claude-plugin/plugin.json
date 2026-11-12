@@ -1,0 +1,10 @@
+{
+  "name": "oh-my-teams",
+  "description": "Role agents (spec, implementer, reviewer, QA) and a lead skill that run a feature from spec to implementation with a chosen review level, a converging review loop and a knowledge lookup before each role starts.",
+  "author": {
+    "name": "SW.Willie.Wu"
+  },
+  "repository": "https://github.com/sw-willie-wu/oh-my-claude",
+  "license": "MIT",
+  "keywords": ["agents", "review", "workflow", "subagents"]
+}

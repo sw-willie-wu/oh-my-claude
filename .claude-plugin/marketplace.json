@@ -5,7 +5,7 @@
     "email": "ab30722@gmail.com"
   },
   "metadata": {
-    "description": "Claude Code plugins: a themeable statusline (oh-my-status) and a knowledge-base plugin (oh-my-knowledge)"
+    "description": "Claude Code plugins: a themeable statusline (oh-my-status), a knowledge-base plugin (oh-my-knowledge) and a team of role agents (oh-my-teams)"
   },
   "renames": {
     "oh-my-claude": "oh-my-status"
@@ -20,6 +20,11 @@
       "name": "oh-my-knowledge",
       "source": "./plugins/oh-my-knowledge",
       "description": "A local, git-versioned knowledge base for Claude Code: look up, distill, lint and hand off durable knowledge."
+    },
+    {
+      "name": "oh-my-teams",
+      "source": "./plugins/oh-my-teams",
+      "description": "Role agents (spec, implementer, reviewer, QA) and a lead skill: run a feature with a chosen review level, a converging review loop and a knowledge lookup per role."
     }
   ]
 }
