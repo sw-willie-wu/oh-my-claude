@@ -39,7 +39,7 @@ if [ -r "$SCRIPT_DIR/lib/conf-keys.sh" ]; then
   fi
 fi
 
-# One-time cleanup of 2.x Workers leftovers (named files only; see spec 2.2).
+# One-time cleanup of 2.x Workers leftovers (named files only).
 # Nothing here recurses into user-overridable dirs: hooks/ and lib/ are only
 # rmdir'd (which fails harmlessly when a user file is still inside). Every
 # loop ends in `|| :` because `set -e` would otherwise take a false trailing
