@@ -347,14 +347,15 @@ _OMC_ACC_SANITIZE="$_OMC_ACC_CLEAN"' | join("\u001f")'
 
 # Stale profile cache: start at most one background lookup per lease. The lease
 # is the epoch in <cache>.stamp; it is open when the stamp is missing, older
-# than the credentials file, not a plain epoch, in the future, or more than 300
-# seconds old, so a lookup that never finished (killed, offline, revoked token)
+# than or as old as the credentials file, not a plain epoch, in the future, or
+# more than 300 seconds old, so a lookup that never finished (killed, offline,
+# revoked token)
 # is retried instead of blocking forever. The stamp is written before the fork;
 # if that write fails nothing is launched, so an unwritable state dir cannot
 # fork on every render. Always returns 1 (this render uses .oauthAccount).
 _omc_profile_lease() {
   local stamp="$_OMC_PCACHE.stamp" line="" now
-  if [ -f "$stamp" ] && ! [ "$_OMC_CRED" -nt "$stamp" ]; then
+  if [ -f "$stamp" ] && [ "$_OMC_CRED" -ot "$stamp" ]; then
     IFS= read -r line < "$stamp" || :
     if [[ $line =~ ^(0|[1-9][0-9]{0,17})$ ]]; then
       _omc_now; now=$REPLY
@@ -383,7 +384,10 @@ _omc_profile_lease() {
 # temp-file marker, created with a plain touch when the lookup starts, decides
 # "credentials changed meanwhile" (the shared stamp may be rewritten by another
 # session); a result for a token that has since been replaced is discarded and
-# the next render relaunches.
+# the next render relaunches. The result is kept only when the credentials file
+# is strictly older than the marker: file times can be coarse (several ms on
+# Linux), and a rewrite that lands in the same tick as the marker must count as
+# a change, not as "unchanged".
 _omc_profile_fetch() {
   local cred=$1 cache=$2 tmp mark line
   local tok='.claudeAiOauth.accessToken | strings | select(test("^[A-Za-z0-9._~+/=-]+$") and (endswith("\n") | not))'
@@ -397,7 +401,7 @@ _omc_profile_fetch() {
     line=$(jq -j "$tok | $cfg" "$cred" 2>/dev/null | tr -d '\r' \
       | curl -sf -m 10 -K - 2>/dev/null | jq -j "$parse" 2>/dev/null)
     if [ -n "$line" ] && { printf '%s\n' "$line" > "$tmp"; } 2>/dev/null; then
-      if [ -e "$mark" ] && ! [ "$cred" -nt "$mark" ]; then mv -f "$tmp" "$cache" 2>/dev/null; fi
+      if [ -e "$mark" ] && [ "$cred" -ot "$mark" ]; then mv -f "$tmp" "$cache" 2>/dev/null; fi
     fi
   fi
   rm -f "$tmp" "$mark" 2>/dev/null
@@ -420,7 +424,7 @@ _omc_profile_account() {
   _OMC_CRED="${OMC_CREDENTIALS_FILE:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json}"
   [ -f "$_OMC_CRED" ] || return 1
   _OMC_PCACHE="$OMC_STATE_DIR/account-profile-${_OMC_CRED//[^A-Za-z0-9]/-}"
-  if [ -f "$_OMC_PCACHE" ] && ! [ "$_OMC_CRED" -nt "$_OMC_PCACHE" ]; then
+  if [ -f "$_OMC_PCACHE" ] && [ "$_OMC_CRED" -ot "$_OMC_PCACHE" ]; then
     IFS=$'\x1f' read -r ACC_NAME ACC_FULL ACC_EMAIL ACC_ORG < "$_OMC_PCACHE"
     [ -n "$ACC_NAME$ACC_FULL$ACC_EMAIL$ACC_ORG" ] && return 0
     ACC_NAME=""; ACC_FULL=""; ACC_EMAIL=""; ACC_ORG=""

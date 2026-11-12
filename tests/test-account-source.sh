@@ -141,6 +141,7 @@ defaults
 REPO="$AT/repo"; mkdir -p "$REPO"; git init -q -b main "$REPO"
 printf 'x\n' > "$REPO/a.txt"; git -C "$REPO" add a.txt
 git -C "$REPO" -c user.name=t -c user.email=t@t commit -q -m init
+fs_tick   # the first render's git cache stamp must be newer than the commit
 printf '%s' "{\"session_id\":\"acsrc\",\"model\":{\"display_name\":\"M\"},\"workspace\":{\"current_dir\":\"$REPO\"}}" > "$AT/payload.json"
 SAVED_SD=$OMC_STATE_DIR
 for variant in off auto; do
@@ -315,6 +316,7 @@ start_test "credentials rewritten during the fetch: result discarded"
 defaults
 export CURL_SHIM_BODY="$AT/body.json"
 CURL_SHIM_TOUCH="$AT/cred.json" render >/dev/null
+fs_tick   # the rewrite must not share a clock tick with the next render's stamp and marker
 no_profile_cache || { printf '    FAIL: cache written\n' >&2; TEST_FAILED=1; }
 assert_eq "bob" "$(render)" "render 2"
 assert_eq "2" "$(shim_count "$CLOG")" "relaunched"
