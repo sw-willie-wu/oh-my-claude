@@ -63,4 +63,7 @@ bash "$REPO_ROOT/tests/knowledge/test-check-move.sh" || FAIL=1
 echo
 echo "=== knowledge skills tests ==="
 bash "$REPO_ROOT/tests/knowledge/test-skills.sh" || FAIL=1
+echo
+echo "=== teams structure tests ==="
+bash "$REPO_ROOT/tests/teams/test-structure.sh" || FAIL=1
 exit "$FAIL"

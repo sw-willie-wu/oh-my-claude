@@ -18,7 +18,7 @@
 
 <p align="center">English | <a href="README.zh-TW.md">繁體中文</a></p>
 
-This marketplace ships two plugins for [Claude Code](https://claude.com/claude-code): **oh-my-status** and **oh-my-knowledge**. They update together on each release.
+This marketplace ships three plugins for [Claude Code](https://claude.com/claude-code): **oh-my-status**, **oh-my-knowledge** and **oh-my-teams**. They update together on each release.
 
 ## oh-my-status
 
@@ -59,12 +59,30 @@ A local, git-versioned knowledge base. Durable knowledge (decisions and their re
 
 Restart the session after setup.
 
+## oh-my-teams
+
+Role agents and a lead skill that run a feature from spec to implementation with a review level you choose.
+
+- **Four levels**: from "just build it" (0) to spec, reviewed plan, review until clean and QA per task (3).
+- **Four roles**: spec writer, implementer, reviewer and QA tester, each with a fixed job.
+- **Converging review loop**: fresh reviewer each round, and it stops and asks you when fixes stop reducing the findings.
+- **Knowledge first**: with oh-my-knowledge installed, each role searches it before starting.
+
+```
+/plugin marketplace add sw-willie-wu/oh-my-claude
+/plugin install oh-my-teams@oh-my-claude
+/reload-plugins
+```
+
+No setup step. Start with `/oh-my-teams:lead <what to build>`, optionally naming a level (for example `level 2`). The lead skill also starts on its own when work is about to be delegated to subagents, and asks which level to use unless you gave one.
+
 ## Documentation
 
 - [Statusline: themes, layouts, usage, customizing](docs/statusline.md)
 - [Installing oh-my-status](docs/install.md)
 - [Upgrading](docs/upgrading.md)
 - [oh-my-knowledge](docs/knowledge.md)
+- [oh-my-teams](docs/teams.md)
 - [Changelog](CHANGELOG.md)
 
 ## License

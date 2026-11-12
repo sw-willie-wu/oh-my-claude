@@ -11,13 +11,13 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 MKT="$REPO_ROOT/.claude-plugin/marketplace.json"
 STATUS_DIR="$REPO_ROOT/plugins/oh-my-status"
 
-start_test "marketplace lists exactly oh-my-knowledge and oh-my-status"
-assert_eq "oh-my-knowledge,oh-my-status" \
+start_test "marketplace lists exactly oh-my-knowledge, oh-my-status and oh-my-teams"
+assert_eq "oh-my-knowledge,oh-my-status,oh-my-teams" \
   "$(jq -r '[.plugins[].name] | sort | join(",")' "$MKT" 2>/dev/null | tr -d '\r')" "plugin names"
 end_test
 
 start_test "each plugin source dir exists and plugin.json name matches"
-for n in oh-my-knowledge oh-my-status; do
+for n in oh-my-knowledge oh-my-status oh-my-teams; do
   src=$(jq -r --arg n "$n" '.plugins[] | select(.name==$n) | .source' "$MKT" 2>/dev/null | tr -d '\r')
   assert_eq "./plugins/$n" "$src" "source of $n"
   pj="$REPO_ROOT/${src#./}/.claude-plugin/plugin.json"

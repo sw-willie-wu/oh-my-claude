@@ -18,7 +18,7 @@
 
 <p align="center"><a href="README.md">English</a> | 繁體中文</p>
 
-這個 marketplace 為 [Claude Code](https://claude.com/claude-code) 提供兩個外掛：**oh-my-status** 與 **oh-my-knowledge**，每次發版一起更新。
+這個 marketplace 為 [Claude Code](https://claude.com/claude-code) 提供三個外掛：**oh-my-status**、**oh-my-knowledge** 與 **oh-my-teams**，每次發版一起更新。
 
 ## oh-my-status
 
@@ -59,6 +59,23 @@ Claude Code 的可換主題 statusline。
 
 設定完成後請重開 session。
 
+## oh-my-teams
+
+角色 agent 加一個 lead skill，依你選的審查等級，把一個功能從規格帶到實作。
+
+- **四個等級**：從「直接做」（0）到規格、審過的計畫、審到沒問題為止、每個任務都跑 QA（3）。
+- **四個角色**：規格撰寫、實作、審查、QA 測試，各有固定的工作。
+- **會收斂的審查迴圈**：每輪換新的 reviewer；修了還是沒有變少時會停下來問你。
+- **先查知識庫**：裝了 oh-my-knowledge 時，每個角色開工前先搜尋。
+
+```
+/plugin marketplace add sw-willie-wu/oh-my-claude
+/plugin install oh-my-teams@oh-my-claude
+/reload-plugins
+```
+
+不需要設定步驟。用 `/oh-my-teams:lead <要做什麼>` 開始，可以順便指定等級（例如 `level 2`）。在要把工作派給 subagent 時，lead skill 也會自動啟動；沒指定等級的話會問你。
+
 ## 文件
 
 文件為英文。
@@ -67,6 +84,7 @@ Claude Code 的可換主題 statusline。
 - [安裝 oh-my-status](docs/install.md)
 - [升級](docs/upgrading.md)
 - [oh-my-knowledge](docs/knowledge.md)
+- [oh-my-teams](docs/teams.md)
 - [Changelog](CHANGELOG.md)
 
 ## 授權
