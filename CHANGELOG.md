@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- oh-my-status: on Windows, SessionStart now stops `git.exe` / `jq.exe`
+  processes that look like statusline calls but were left behind by a
+  cancelled render (never resumed: one suspended thread, no CPU time, parent
+  gone, older than 60s). It runs in the background and logs a one-line
+  summary to `orphan-sweep.last` in the state dir; set `OMC_ORPHAN_SWEEP=0`
+  to disable.
+
 ## 2.1.1 (2026-11-07)
 
 ### Changed

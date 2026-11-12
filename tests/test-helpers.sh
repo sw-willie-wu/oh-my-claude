@@ -15,6 +15,10 @@ export OMC_STATE_DIR="${OMC_STATE_DIR:-$(mktemp -d -t omc-test-XXXXXX)}"
 export OMC_CONF="${OMC_CONF:-/dev/null}"
 export OMC_ACCOUNT_FILE="${OMC_ACCOUNT_FILE:-$OMC_STATE_DIR/no-such.json}"
 
+# Never start the real background orphan sweep from tests; the sweep tests
+# enable it explicitly.
+export OMC_ORPHAN_SWEEP="${OMC_ORPHAN_SWEEP:-0}"
+
 # Real jq, resolved before any test prepends a shim dir to PATH.
 REAL_JQ="$(command -v jq 2>/dev/null || true)"
 REAL_PATH="$PATH"
