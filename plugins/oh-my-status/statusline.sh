@@ -20,10 +20,10 @@ LAYOUT="default"
 # git every tick. 0 = disable caching (always
 # recompute = exact legacy behavior). Non-numeric/negative → 10.
 : "${GIT_CACHE_TTL:=10}"
-# Account segment (spec §3.1). ACCOUNT_ICON is dash form: explicit "" disables it.
+# Account segment. ACCOUNT_ICON is dash form: explicit "" disables it.
 : "${ACCOUNT_SHOW:=true}"
 : "${ACCOUNT_FORMAT:=name}"
-# Model context tag (spec §8): append " [NM]" to MODEL when context size >= 1M.
+# Model context tag: append " [NM]" to MODEL when context size >= 1M.
 : "${MODEL_CTX_TAG:=true}"
 ACCOUNT_ICON="${ACCOUNT_ICON-$'\xef\x80\x87'}"
 
@@ -94,7 +94,7 @@ _omc_sweep_stale_tmp() {
 # same predicates the old grep/awk used. If `git status` fails (dubious
 # ownership, corrupt index, bare repo, cwd inside .git, git without
 # --no-ahead-behind) the old command sequence runs, so every error edge keeps
-# its old answer. §8.1 submodule guard: submodules are scanned only when
+# its old answer. Submodule guard: submodules are scanned only when
 # .gitmodules exists at the toplevel.
 git_info() {
   local branch="" add=0 mod=0 del=0 ladd=0 ldel=0 toplevel
@@ -282,12 +282,12 @@ _omc_read_status_fields() {
 
 # Parse the statusLine JSON into globals: from $1 when given (tests), else from the
 # inherited stdin (render path). Pure (no render side
-# effects) so the lib loader can test it. §8.3 Task B: ONE `jq --raw-output0`
-# pass replaces ~30 `echo|grep -o` forks (spec §4.1–§4.4). jq is a render-side
+# effects) so the lib loader can test it. ONE `jq --raw-output0`
+# pass replaces ~30 `echo|grep -o` forks. jq is a render-side
 # hard dep (already a hook-side one); on jq absent/too-old/malformed input the
-# 9 reads leave SESSION_ID empty and the render gate emits the §4.6 notice.
+# 9 reads leave SESSION_ID empty and the render gate emits a notice.
 # SANITIZED_SID is a fork-free var assignment (no I/O); the gate's
-# empty-SESSION_ID guard exits before anything is written (spec §4.6).
+# empty-SESSION_ID guard exits before anything is written.
 parse_status_json() {
   local _jqfilter='
     .session_id // "",
@@ -303,7 +303,7 @@ parse_status_json() {
   RATE5_PCT=""; RATE5_RESET=""; RATE7_PCT=""; RATE7_RESET=""; CTX_SIZE=""
   # --raw-output0: raw scalars (backslashes stay SINGLE — no @tsv re-doubling)
   # NUL-delimited (no \n, so winget jq's CRLF line-xlate never runs). Not
-  # chained with ||/&& (spec §4.7): a normal "rate_limits absent" payload
+  # chained with ||/&&: a normal "rate_limits absent" payload
   # must not abort the render.
   if [ $# -gt 0 ]; then
     _omc_read_status_fields < <(jq --raw-output0 "$_jqfilter" <<<"$1")
@@ -323,7 +323,7 @@ parse_status_json() {
   fi
 }
 
-# Model context tag (spec §8.2). Pure, builtin-only, `set -u` safe. The regex
+# Model context tag. Pure, builtin-only, `set -u` safe. The regex
 # check precedes any arithmetic so CTX_SIZE is never evaluated unchecked.
 apply_model_ctx_tag() {
   [ "${MODEL_CTX_TAG-}" = true ] || return 0
@@ -334,7 +334,7 @@ apply_model_ctx_tag() {
   fi
 }
 
-# Account segment (spec §3.2/§3.3). Sets ACC_NAME/ACC_FULL/ACC_EMAIL/ACC_ORG,
+# Account segment. Sets ACC_NAME/ACC_FULL/ACC_EMAIL/ACC_ORG,
 # already sanitized and backslash-doubled (safe for `echo -e`). MUST be called
 # directly, never inside $( ), so the globals survive and a hit forks nothing.
 cached_account_fields() {
@@ -377,12 +377,12 @@ resolve_account() {
   esac
 }
 
-# Split cached_git_info's 6 TAB fields into globals. §8.3 Task C: zero-fork
+# Split cached_git_info's 6 TAB fields into globals. Zero-fork
 # (was 6× `cut`). Translate TAB→US (\x1f) then `IFS=$'\x1f' read`: \x1f is
 # NOT IFS-whitespace so an empty leading BRANCH (non-repo / detached HEAD,
 # locked d85481a) is preserved — a naive `IFS=$'\t' read` would drop it.
 # git refnames forbid control chars ⇒ cached_git_info output can never
-# contain \x1f ⇒ collision-free (spec §4.5). Byte-identical to the old cut.
+# contain \x1f ⇒ collision-free. Byte-identical to the old cut.
 split_gi_line() {
   local GI_LINE="$1" _gi
   _gi="${GI_LINE//$'\t'/$'\x1f'}"
@@ -398,7 +398,7 @@ if [ -z "${OMC_TEST_LIB_ONLY:-}" ]; then
 
 # Read JSON input from stdin
 parse_status_json
-# jq-failure / empty-session guard (spec §4.6). `.session_id` is documented
+# jq-failure / empty-session guard. `.session_id` is documented
 # always-present, so an empty SESSION_ID unambiguously means jq is absent,
 # too old (`--raw-output0` unknown), or `$input` was malformed. One cheap
 # test, no extra fork — and it runs BEFORE cached_git_info/render so no

@@ -54,7 +54,7 @@ for p in "$STATUS_DIR/commands" "$STATUS_DIR/setup.sh" "$REPO_ROOT/install.sh" "
 done
 end_test
 
-# --- setup.sh: sweep relocation + Workers-leftover cleanup (spec 2.2) ----------
+# --- setup.sh: sweep relocation + Workers-leftover cleanup ----------
 run_setup() {  # $1=sandbox ; runs setup.sh fully sandboxed, returns its rc
   mkdir -p "$1/home"
   HOME="$1/home" OMC_DIR="$1/omc" OMC_CONF="$1/c.conf" OMC_STATE_DIR="$1/state" \
