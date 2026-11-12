@@ -22,6 +22,9 @@ if [ -f "$REPO_ROOT/tests/test-conf-backfill.sh" ]; then
   bash "$REPO_ROOT/tests/test-conf-backfill.sh" || FAIL=1
 fi
 echo
+echo "=== orphan-sweep tests ==="
+bash "$REPO_ROOT/tests/test-orphan-sweep.sh" || FAIL=1
+echo
 echo "=== marketplace tests ==="
 bash "$REPO_ROOT/tests/test-marketplace.sh" || FAIL=1
 echo

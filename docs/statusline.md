@@ -101,7 +101,8 @@ LAYOUT="powerline"
 ## How it works
 
 - **Plugin install** registers slash commands (`setup`, `set-theme`, `list-themes`)
-- **SessionStart hook** syncs themes/layouts from the plugin to `~/.claude/oh-my-claude/` (auto-updates when plugin updates) and sweeps stale state files
+- **SessionStart hook** syncs themes/layouts from the plugin to `~/.claude/oh-my-claude/` (auto-updates when plugin updates), sweeps stale state files, and (Windows) kills orphaned suspended `git.exe`/`jq.exe` left by cancelled renders in the background (`OMC_ORPHAN_SWEEP=0` disables)
+  - Known limitations: some git calls made by git's own submodule shell wrapper are not matched, and there is a tiny race between looking a process up and killing it.
 - **`/oh-my-status:setup`** adds the `statusLine` config to your `~/.claude/settings.json` (asks before overwriting existing config)
 - **Config file** (`~/.claude/oh-my-claude.conf`) stores your theme/layout choice and is preserved across updates
 
