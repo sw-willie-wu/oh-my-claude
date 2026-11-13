@@ -174,6 +174,12 @@ Two cases for auto-memory location:
 - Inside a git submodule the auto-memory directory is derived wrongly from the working directory. distill and lookup pass the session's own auto-memory path as `OMK_AUTO_MEMORY_DIR` whenever it is visible in the session (handoff uses that directory directly).
 - If you set Claude Code's `autoMemoryDirectory`, set `OMK_AUTO_MEMORY_GLOB` to match, for example in the `env` block of `settings.json` so the Bash tool inherits it.
 
+### Running the tests
+
+`bash scripts/test.sh` runs every test group; pass names to run only some, e.g. `bash scripts/test.sh account render`. `-j N` (or `OMC_TEST_JOBS=N`) sets how many groups run at once; the default is 1 on Windows shells and 6 elsewhere, because creating processes is slow on Windows and running groups side by side there only makes timing-sensitive tests flaky.
+
+Day-to-day runs are fastest on Linux or WSL, where process creation is native: the whole suite takes seconds there and tens of minutes on Windows. A few cases (the PowerShell orphan sweep, path conversion, CRLF handling) only run on Windows, so run the suite on Windows before a release or when you touch that code.
+
 ## License
 
 [MIT](../LICENSE)

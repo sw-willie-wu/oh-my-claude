@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.2.0 (2026-11-13)
+
+### Added
+- oh-my-status: `ACCOUNT_SOURCE=auto` (opt-in, default `config`) makes the
+  account segment name the account whose login token the session actually
+  uses, instead of the shared `~/.claude.json` display cache that another
+  Claude client on the same machine can overwrite. When the credentials file
+  changes, one background request to the profile endpoint fetches the name,
+  which is then cached, so normal renders cost nothing extra. `/oh-my-status:setup`
+  asks which source to use; see `docs/statusline.md`.
+
+### Fixed
+- oh-my-status: on Windows, SessionStart now stops `git.exe` / `jq.exe`
+  processes that look like statusline calls but were left behind by a
+  cancelled render (never resumed: one suspended thread, no CPU time, parent
+  gone, older than 60s). It runs in the background and logs a one-line
+  summary to `orphan-sweep.last` in the state dir; set `OMC_ORPHAN_SWEEP=0`
+  to disable.
+- oh-my-status: several tests that depend on file-time ordering no longer
+  fail on Linux, where files written back to back can share a timestamp.
+
+### Changed
+- `scripts/test.sh` runs test groups as a job pool: `-j N` (or
+  `OMC_TEST_JOBS`), group-name filters, and output per group as it finishes.
+  The suite takes seconds on Linux or WSL and tens of minutes on Windows; see
+  "Running the tests" in `docs/knowledge.md`.
+
 ## 2.1.1 (2026-11-07)
 
 ### Changed

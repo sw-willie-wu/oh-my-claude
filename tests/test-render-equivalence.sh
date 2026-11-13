@@ -2,11 +2,11 @@
 # Render-equivalence oracle: the current oh-my-status statusline must produce
 # byte-identical stdout to the 23d7874 baseline run with WORKERS_ENABLED=false
 # (the "zero workers" baseline), for a matrix of layouts / repo states / inputs.
-# Deliberate output differences (spec 1a):
-#   - D10 (P7): the 7d reset hint (shown above 80%) is " (MM/DD HH:MM)" instead of
+# Deliberate output difference:
+#   - the 7d reset hint (shown above 80%) is " (MM/DD HH:MM)" instead of
 #     " (MM/DD)". The OLD output of every case is transformed before the compare:
 #     the literal " (<old 7d hint for $R7>)" becomes " (<new hint>)" (see
-#     transform_old_d10). Cases with 7d <= 80% or without a 7d window contain no
+#     transform_old_7d_hint). Cases with 7d <= 80% or without a 7d window contain no
 #     such text and are compared byte-for-byte as before; the 5h hint is untouched.
 #
 # Subset runs: OMC_EQUIV_ONLY='<glob>' runs only the cases whose name matches.
@@ -75,8 +75,14 @@ git -C "$R/submod" -c user.name=t -c user.email=t@t commit -q -m addsub >/dev/nu
 printf 'dirty in sub\n' >> "$R/submod/sub/a.txt"
 printf 'main change\n' >> "$R/submod/a.txt"
 mkdir -p "$R/nonrepo"
-printf '{"oauthAccount":{"displayName":"willie"}}' > "$T/acct.json"
+printf '{"oauthAccount":{"displayName":"alice"}}' > "$T/acct.json"
 NONE="$T/none.json"
+# Credentials file with a fake token and a curl shim: every case also proves the
+# default (ACCOUNT_SOURCE unset) renders as before when credentials exist.
+make_curl_shim "$T/shim" "$T/curl.log"
+printf '{"claudeAiOauth":{"accessToken":"tok-equiv-0123456789"}}' > "$T/cred.json"
+touch -d "@$(( $(date +%s) - 20 ))" "$T/cred.json"
+export OMC_CREDENTIALS_FILE="$T/cred.json"
 
 # --- fixture sanity: fail loudly rather than pass vacuously -------------------
 fixture_fail=0
@@ -103,9 +109,9 @@ P_B=$(payload x 8 "" "" "" "" "")
 P_C=$(payload x 61 1000000 "" "" 90 "$R7")
 
 
-# D10: rewrite the old 7d hint " (MM/DD)" of the fixed R7 epoch into the new " (MM/DD HH:MM)".
+# Rewrite the old 7d hint " (MM/DD)" of the fixed R7 epoch into the new " (MM/DD HH:MM)".
 OLD7=$("$REAL_DATE" -d "@$R7" '+%m/%d'); NEW7=$("$REAL_DATE" -d "@$R7" '+%m/%d %H:%M')
-transform_old_d10() {  # $1=file
+transform_old_7d_hint() {  # $1=file
   local s; s=$(cat "$1"; printf X); s=${s%X}
   s=${s//" ($OLD7)"/" ($NEW7)"}
   printf '%s' "$s" > "$1"
@@ -134,7 +140,7 @@ case_eq() {
   start_test "equiv: $name"
   run_case "$name" old "$2" "$3" "$4" "$5" "$6" "${7:-1}"
   run_case "$name" new "$2" "$3" "$4" "$5" "$6" "${7:-1}"
-  transform_old_d10 "$T/out-old-$name"
+  transform_old_7d_hint "$T/out-old-$name"
   if ! cmp -s "$T/out-old-$name" "$T/out-new-$name"; then
     printf '    FAIL: %s: stdout differs\n    --- old ---\n' "$name" >&2
     od -c "$T/out-old-$name" | head -40 >&2
@@ -172,6 +178,14 @@ case_eq "S-resets-abc" "$R/clean" "$(payload x 8 "" 90 abc "" "")" "$C" "$T/acct
 case_eq "S-five-80" "$R/clean" "$(payload x 8 "" 80 "$R5" "" "")" "$C" "$T/acct.json" 120
 case_eq "S-five-81" "$R/clean" "$(payload x 8 "" 81 "$R5" "" "")" "$C" "$T/acct.json" 120
 case_eq "S-workers-conf" "$R/clean" "$P_A" "$(printf 'LAYOUT=default\nWORKERS_ENABLED=true\nWORKERS_MAX=0')" "$T/acct.json" 120
+case_eq "S-source-config" "$R/clean" "$P_A" "$(printf 'LAYOUT=default\nACCOUNT_SOURCE=config')" "$T/acct.json" 120
+case_eq "S-source-auto-show-off" "$R/clean" "$P_A" "$(printf 'LAYOUT=default\nACCOUNT_SOURCE=auto\nACCOUNT_SHOW=false')" "$T/acct.json" 120
+case_eq "S-source-auto-oauth-env" "$R/clean" "$P_A" "$(printf 'LAYOUT=default\nACCOUNT_SOURCE=auto\nexport CLAUDE_CODE_OAUTH_TOKEN=x')" "$T/acct.json" 120
+case_eq "S-source-auto-api-key" "$R/clean" "$P_A" "$(printf 'LAYOUT=default\nACCOUNT_SOURCE=auto\nexport ANTHROPIC_API_KEY=x')" "$T/acct.json" 120
+
+start_test "no case invoked curl"
+assert_eq "0" "$(shim_count "$T/curl.log")" "curl calls"
+end_test
 
 # The oracle must have rendered a real statusline, not the jq-missing notice.
 if [ -f "$T/out-old-L-default-a" ]; then

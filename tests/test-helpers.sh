@@ -14,11 +14,42 @@ export OMC_STATE_DIR="${OMC_STATE_DIR:-$(mktemp -d -t omc-test-XXXXXX)}"
 # [ -f /dev/null ] is false, so conf defaults apply. Tests override as needed.
 export OMC_CONF="${OMC_CONF:-/dev/null}"
 export OMC_ACCOUNT_FILE="${OMC_ACCOUNT_FILE:-$OMC_STATE_DIR/no-such.json}"
+# Same for the credentials file: no test may read a real token.
+export OMC_CREDENTIALS_FILE="${OMC_CREDENTIALS_FILE:-$OMC_STATE_DIR/no-such-credentials.json}"
+# A developer shell with any of these set would silently turn the account
+# lookup tests into skip cases.
+unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX
+
+# Never start the real background orphan sweep from tests; the sweep tests
+# enable it explicitly.
+export OMC_ORPHAN_SWEEP="${OMC_ORPHAN_SWEEP:-0}"
 
 # Real jq, resolved before any test prepends a shim dir to PATH.
 REAL_JQ="$(command -v jq 2>/dev/null || true)"
 REAL_PATH="$PATH"
 BASH_BIN="$(command -v bash)"
+
+# fs_tick: return once the filesystem clock has moved past every file written so
+# far. File times come from a coarse clock on Linux (several ms per step), so two
+# files written back to back can carry the same mtime. The git-info cache and the
+# account profile cache only trust a stamp that is strictly newer than the files
+# they depend on, so an equal time reads as changed: safe, but a test that
+# expects a cache hit (or a cleanly ordered write) right after a file write must
+# let the clock advance first. Returns at once where times are fine-grained;
+# gives up with an error after about 3 s.
+fs_tick() {
+  local a b n=0
+  a=$(mktemp) || return 0
+  while b=$(mktemp) && ! [ "$b" -nt "$a" ]; do
+    rm -f "$b"
+    n=$((n + 1))
+    if [ "$n" -ge 300 ]; then
+      rm -f "$a"; echo "fs_tick: filesystem clock did not advance" >&2; TEST_FAILED=1; return 1
+    fi
+    sleep 0.01
+  done
+  rm -f "$a" "$b"
+}
 
 # count_spawns <outdir> <stdin-file> <script> [args...]
 # Runs `bash -x <script>` with PATH=<outdir>/shim only. Sets SPAWNS, SPAWN_FORKS,
@@ -67,6 +98,31 @@ make_jq_shim() {
     fi
   } > "$dir/jq"
   chmod +x "$dir/jq"
+}
+
+# make_curl_shim <dir> <log>: write an executable <dir>/curl that logs one
+# 'CALL <%q argv>' line per invocation, appends its whole stdin to <log>.stdin,
+# then behaves per env read at run time:
+#   CURL_SHIM_SLEEP=<s>   sleep first
+#   CURL_SHIM_TOUCH=<f>   touch that file (current time)
+#   CURL_SHIM_EXIT=<n>    non-zero: print nothing, exit n
+#   CURL_SHIM_BODY=<f>    print that file, exit 0; unset: print nothing, exit 22
+make_curl_shim() {
+  local dir="$1" log="$2"
+  mkdir -p "$dir"
+  {
+    printf '#!/bin/bash\n'
+    printf '{ printf CALL; printf " %%q" "$@"; printf "\\n"; } >> %q\n' "$log"
+    printf 'cat >> %q\n' "$log.stdin"
+    cat <<'SHIM'
+[ -n "${CURL_SHIM_SLEEP:-}" ] && sleep "$CURL_SHIM_SLEEP"
+[ -n "${CURL_SHIM_TOUCH:-}" ] && touch "$CURL_SHIM_TOUCH"
+if [ "${CURL_SHIM_EXIT:-0}" != 0 ]; then exit "$CURL_SHIM_EXIT"; fi
+if [ -n "${CURL_SHIM_BODY:-}" ]; then cat "$CURL_SHIM_BODY"; exit 0; fi
+exit 22
+SHIM
+  } > "$dir/curl"
+  chmod +x "$dir/curl"
 }
 
 # shim_count <log> [fixed-string]: number of logged calls (or of calls whose

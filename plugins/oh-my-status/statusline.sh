@@ -20,10 +20,13 @@ LAYOUT="default"
 # git every tick. 0 = disable caching (always
 # recompute = exact legacy behavior). Non-numeric/negative → 10.
 : "${GIT_CACHE_TTL:=10}"
-# Account segment (spec §3.1). ACCOUNT_ICON is dash form: explicit "" disables it.
+# Account segment. ACCOUNT_ICON is dash form: explicit "" disables it.
 : "${ACCOUNT_SHOW:=true}"
 : "${ACCOUNT_FORMAT:=name}"
-# Model context tag (spec §8): append " [NM]" to MODEL when context size >= 1M.
+# Where the name comes from: config (default) = ~/.claude.json only; auto = the
+# account that owns this session's token (see _omc_profile_account).
+: "${ACCOUNT_SOURCE:=config}"
+# Model context tag: append " [NM]" to MODEL when context size >= 1M.
 : "${MODEL_CTX_TAG:=true}"
 ACCOUNT_ICON="${ACCOUNT_ICON-$'\xef\x80\x87'}"
 
@@ -94,7 +97,7 @@ _omc_sweep_stale_tmp() {
 # same predicates the old grep/awk used. If `git status` fails (dubious
 # ownership, corrupt index, bare repo, cwd inside .git, git without
 # --no-ahead-behind) the old command sequence runs, so every error edge keeps
-# its old answer. §8.1 submodule guard: submodules are scanned only when
+# its old answer. Submodule guard: submodules are scanned only when
 # .gitmodules exists at the toplevel.
 git_info() {
   local branch="" add=0 mod=0 del=0 ladd=0 ldel=0 toplevel
@@ -282,12 +285,12 @@ _omc_read_status_fields() {
 
 # Parse the statusLine JSON into globals: from $1 when given (tests), else from the
 # inherited stdin (render path). Pure (no render side
-# effects) so the lib loader can test it. §8.3 Task B: ONE `jq --raw-output0`
-# pass replaces ~30 `echo|grep -o` forks (spec §4.1–§4.4). jq is a render-side
+# effects) so the lib loader can test it. ONE `jq --raw-output0`
+# pass replaces ~30 `echo|grep -o` forks. jq is a render-side
 # hard dep (already a hook-side one); on jq absent/too-old/malformed input the
-# 9 reads leave SESSION_ID empty and the render gate emits the §4.6 notice.
+# 9 reads leave SESSION_ID empty and the render gate emits a notice.
 # SANITIZED_SID is a fork-free var assignment (no I/O); the gate's
-# empty-SESSION_ID guard exits before anything is written (spec §4.6).
+# empty-SESSION_ID guard exits before anything is written.
 parse_status_json() {
   local _jqfilter='
     .session_id // "",
@@ -303,7 +306,7 @@ parse_status_json() {
   RATE5_PCT=""; RATE5_RESET=""; RATE7_PCT=""; RATE7_RESET=""; CTX_SIZE=""
   # --raw-output0: raw scalars (backslashes stay SINGLE — no @tsv re-doubling)
   # NUL-delimited (no \n, so winget jq's CRLF line-xlate never runs). Not
-  # chained with ||/&& (spec §4.7): a normal "rate_limits absent" payload
+  # chained with ||/&&: a normal "rate_limits absent" payload
   # must not abort the render.
   if [ $# -gt 0 ]; then
     _omc_read_status_fields < <(jq --raw-output0 "$_jqfilter" <<<"$1")
@@ -323,7 +326,7 @@ parse_status_json() {
   fi
 }
 
-# Model context tag (spec §8.2). Pure, builtin-only, `set -u` safe. The regex
+# Model context tag. Pure, builtin-only, `set -u` safe. The regex
 # check precedes any arithmetic so CTX_SIZE is never evaluated unchecked.
 apply_model_ctx_tag() {
   [ "${MODEL_CTX_TAG-}" = true ] || return 0
@@ -334,17 +337,111 @@ apply_model_ctx_tag() {
   fi
 }
 
-# Account segment (spec §3.2/§3.3). Sets ACC_NAME/ACC_FULL/ACC_EMAIL/ACC_ORG,
+# jq fragments shared by the .oauthAccount filter and the profile lookup: turn
+# four fields into display-safe strings (control characters stripped, trimmed,
+# backslashes doubled so `echo -e` cannot reinterpret them). _OMC_ACC_CLEAN maps
+# an array; _OMC_ACC_SANITIZE additionally joins it with US (\x1f).
+_OMC_ACC_CLEAN='map((. // "") | tostring | gsub("[\u0000-\u001f\u007f-\u009f]"; "")
+          | gsub("^[[:space:]]+|[[:space:]]+$"; "") | gsub("\\\\"; "\\\\"))'
+_OMC_ACC_SANITIZE="$_OMC_ACC_CLEAN"' | join("\u001f")'
+
+# Stale profile cache: start at most one background lookup per lease. The lease
+# is the epoch in <cache>.stamp; it is open when the stamp is missing, older
+# than or as old as the credentials file, not a plain epoch, in the future, or
+# more than 300 seconds old, so a lookup that never finished (killed, offline,
+# revoked token)
+# is retried instead of blocking forever. The stamp is written before the fork;
+# if that write fails nothing is launched, so an unwritable state dir cannot
+# fork on every render. Always returns 1 (this render uses .oauthAccount).
+_omc_profile_lease() {
+  local stamp="$_OMC_PCACHE.stamp" line="" now
+  if [ -f "$stamp" ] && [ "$_OMC_CRED" -ot "$stamp" ]; then
+    IFS= read -r line < "$stamp" || :
+    if [[ $line =~ ^(0|[1-9][0-9]{0,17})$ ]]; then
+      _omc_now; now=$REPLY
+      if [ "$line" -le "$now" ] && [ $((now - line)) -le 300 ]; then return 1; fi
+    fi
+  fi
+  _omc_now; now=$REPLY
+  [ -d "$OMC_STATE_DIR" ] || mkdir -p "$OMC_STATE_DIR" 2>/dev/null
+  { printf '%s\n' "$now" > "$stamp"; } 2>/dev/null || return 1
+  if [ -n "${OMC_PROFILE_FETCH_SYNC-}" ]; then
+    ( _omc_profile_fetch "$_OMC_CRED" "$_OMC_PCACHE" )
+  else
+    { _omc_profile_fetch "$_OMC_CRED" "$_OMC_PCACHE" </dev/null >/dev/null 2>&1 & } 2>/dev/null
+    disown 2>/dev/null || :
+  fi
+  return 1
+}
+
+# Look up the account that owns the token in <cred> and write the four display
+# fields to <cache> (atomically), or write nothing. Runs in a subshell; never
+# prints. The token goes jq -> curl's config on stdin and nowhere else (not
+# argv, env, a variable or a file), and only tokens made of plain token
+# characters are used, so the config needs no quoting; the trailing-newline test
+# is separate because jq's `$` also matches before a final newline. `tr -d '\r'`
+# strips the CRs that a Windows jq adds to every newline it prints. The
+# temp-file marker, created with a plain touch when the lookup starts, decides
+# "credentials changed meanwhile" (the shared stamp may be rewritten by another
+# session); a result for a token that has since been replaced is discarded and
+# the next render relaunches. The result is kept only when the credentials file
+# is strictly older than the marker: file times can be coarse (several ms on
+# Linux), and a rewrite that lands in the same tick as the marker must count as
+# a change, not as "unchanged".
+_omc_profile_fetch() {
+  local cred=$1 cache=$2 tmp mark line
+  local tok='.claudeAiOauth.accessToken | strings | select(test("^[A-Za-z0-9._~+/=-]+$") and (endswith("\n") | not))'
+  local cfg='"url = \"https://api.anthropic.com/api/oauth/profile\"\nheader = \"Authorization: Bearer \(.)\"\nheader = \"anthropic-beta: oauth-2025-04-20\"\n"'
+  local parse='select(type == "object" and (.account | type) == "object")
+    | [.account.display_name, .account.full_name, .account.email, ((.organization? | objects | .name) // "")]
+    | '"$_OMC_ACC_CLEAN"' | select(any(.[]; length > 0)) | join("\u001f")'
+  tmp="$cache.tmp.$BASHPID"; mark="$tmp.m"
+  touch "$mark" 2>/dev/null || return 0
+  if jq -e "$tok" "$cred" >/dev/null 2>&1; then
+    line=$(jq -j "$tok | $cfg" "$cred" 2>/dev/null | tr -d '\r' \
+      | curl -sf -m 10 -K - 2>/dev/null | jq -j "$parse" 2>/dev/null)
+    if [ -n "$line" ] && { printf '%s\n' "$line" > "$tmp"; } 2>/dev/null; then
+      if [ -e "$mark" ] && [ "$cred" -ot "$mark" ]; then mv -f "$tmp" "$cache" 2>/dev/null; fi
+    fi
+  fi
+  rm -f "$tmp" "$mark" 2>/dev/null
+  return 0
+}
+
+# Source 1 of the account segment: the account that owns this session's OAuth
+# token. ~/.claude.json (.oauthAccount) is only a display cache shared by every
+# Claude client on the machine, so it can name a different account than the one
+# whose credentials this session bills; the credentials file is the truth.
+# Sets ACC_* and returns 0 on a fresh profile cache; returns 1 otherwise and the
+# caller falls through to .oauthAccount. Builtins only; a stale cache may start a
+# background lookup (see _omc_profile_lease).
+_omc_profile_account() {
+  [ "${ACCOUNT_SOURCE-}" = auto ] || return 1
+  # The session bills one of these instead of the credentials file.
+  [ -z "${CLAUDE_CODE_OAUTH_TOKEN-}" ] && [ -z "${ANTHROPIC_API_KEY-}" ] \
+    && [ -z "${ANTHROPIC_AUTH_TOKEN-}" ] && [ -z "${CLAUDE_CODE_USE_BEDROCK-}" ] \
+    && [ -z "${CLAUDE_CODE_USE_VERTEX-}" ] || return 1
+  _OMC_CRED="${OMC_CREDENTIALS_FILE:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json}"
+  [ -f "$_OMC_CRED" ] || return 1
+  _OMC_PCACHE="$OMC_STATE_DIR/account-profile-${_OMC_CRED//[^A-Za-z0-9]/-}"
+  if [ -f "$_OMC_PCACHE" ] && [ "$_OMC_CRED" -ot "$_OMC_PCACHE" ]; then
+    IFS=$'\x1f' read -r ACC_NAME ACC_FULL ACC_EMAIL ACC_ORG < "$_OMC_PCACHE"
+    [ -n "$ACC_NAME$ACC_FULL$ACC_EMAIL$ACC_ORG" ] && return 0
+    ACC_NAME=""; ACC_FULL=""; ACC_EMAIL=""; ACC_ORG=""
+  fi
+  _omc_profile_lease
+}
+
+# Account segment. Sets ACC_NAME/ACC_FULL/ACC_EMAIL/ACC_ORG,
 # already sanitized and backslash-doubled (safe for `echo -e`). MUST be called
 # directly, never inside $( ), so the globals survive and a hit forks nothing.
 cached_account_fields() {
   ACC_NAME=""; ACC_FULL=""; ACC_EMAIL=""; ACC_ORG=""
   [ "$ACCOUNT_SHOW" = true ] || return 0
+  _omc_profile_account && return 0
   local src cache raw rc
   local _accfilter='(.oauthAccount? | objects) // {} | [.displayName, .fullName, .emailAddress, .organizationName]
-    | map((. // "") | tostring | gsub("[\u0000-\u001f\u007f-\u009f]"; "")
-          | gsub("^[[:space:]]+|[[:space:]]+$"; "") | gsub("\\\\"; "\\\\"))
-    | join("\u001f")'
+    | '"$_OMC_ACC_SANITIZE"
   src="${OMC_ACCOUNT_FILE:-${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json}"
   [ -f "$src" ] || return 0
   cache="$OMC_STATE_DIR/account-${src//[^A-Za-z0-9]/-}"
@@ -377,12 +474,12 @@ resolve_account() {
   esac
 }
 
-# Split cached_git_info's 6 TAB fields into globals. §8.3 Task C: zero-fork
+# Split cached_git_info's 6 TAB fields into globals. Zero-fork
 # (was 6× `cut`). Translate TAB→US (\x1f) then `IFS=$'\x1f' read`: \x1f is
 # NOT IFS-whitespace so an empty leading BRANCH (non-repo / detached HEAD,
 # locked d85481a) is preserved — a naive `IFS=$'\t' read` would drop it.
 # git refnames forbid control chars ⇒ cached_git_info output can never
-# contain \x1f ⇒ collision-free (spec §4.5). Byte-identical to the old cut.
+# contain \x1f ⇒ collision-free. Byte-identical to the old cut.
 split_gi_line() {
   local GI_LINE="$1" _gi
   _gi="${GI_LINE//$'\t'/$'\x1f'}"
@@ -398,7 +495,7 @@ if [ -z "${OMC_TEST_LIB_ONLY:-}" ]; then
 
 # Read JSON input from stdin
 parse_status_json
-# jq-failure / empty-session guard (spec §4.6). `.session_id` is documented
+# jq-failure / empty-session guard. `.session_id` is documented
 # always-present, so an empty SESSION_ID unambiguously means jq is absent,
 # too old (`--raw-output0` unknown), or `$input` was malformed. One cheap
 # test, no extra fork — and it runs BEFORE cached_git_info/render so no

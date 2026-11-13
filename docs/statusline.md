@@ -42,6 +42,7 @@ It is **on by default**. Set `ACCOUNT_SHOW=false` when screen sharing.
 ```bash
 ACCOUNT_SHOW=true                 # show the account segment
 ACCOUNT_FORMAT=name               # name | fullname | email | org
+# ACCOUNT_SOURCE=config           # config | auto (see "Account source" below)
 # ACCOUNT_ICON=$'\xef\x80\x87'    # optional override (default nf-fa-user); "" hides the icon
 ```
 
@@ -53,6 +54,27 @@ The minimal, pure and mygo layouts never show an icon. If the chosen field is em
 | `fullname`       | fullName → displayName → email       |
 | `email`          | email                                |
 | `org`            | organizationName → email             |
+
+### Account source
+
+`~/.claude.json` is only a display cache shared by every Claude client on the machine. If another client (for example the desktop app logged into a different account) rewrites it, the segment can name a different account than the one this session uses and bills. `ACCOUNT_SOURCE` decides where the name comes from:
+
+```bash
+# ACCOUNT_SOURCE=config            # config | auto (unset = config)
+```
+
+- `config` (default): the name from `~/.claude.json`. No token is read and nothing goes over the network.
+- `auto`: when the credentials file changes (login, account switch, token refresh) the statusline reads this session's token and makes one background HTTPS request to `api.anthropic.com` (the profile endpoint Claude Code itself uses) for the real account name. The result is cached in the state directory, so normal renders cost nothing extra. The token is only piped from `jq` into `curl`; it is never in a command line, environment variable, log or cache file.
+
+`/oh-my-status:setup` asks which one you want and writes the choice to `~/.claude/oh-my-claude.conf`.
+
+Details of `auto`:
+
+- The first render after a login still shows the `~/.claude.json` name until the background lookup finishes (a second or so); the next render shows the real account.
+- It does nothing when `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK` or `CLAUDE_CODE_USE_VERTEX` is set (the session bills that credential, not the file), or when there is no credentials file (macOS Keychain, API key logins).
+- A failed lookup (offline, revoked token) leaves the `~/.claude.json` name in place and is retried in the background at most every 5 minutes.
+- Known limitations: an `apiKeyHelper` in your settings is not detected, and a revoked token whose credentials file never changes keeps being retried every 5 minutes until you log in again.
+- The lookup runs the system `curl`, which also reads your `~/.curlrc`; options there such as `trace` or `verbose` apply to this request too and would write its headers, including the authorization header, wherever that option points.
 
 An unknown `ACCOUNT_FORMAT` value is treated as `name`.
 
@@ -101,8 +123,9 @@ LAYOUT="powerline"
 ## How it works
 
 - **Plugin install** registers slash commands (`setup`, `set-theme`, `list-themes`)
-- **SessionStart hook** syncs themes/layouts from the plugin to `~/.claude/oh-my-claude/` (auto-updates when plugin updates) and sweeps stale state files
-- **`/oh-my-status:setup`** adds the `statusLine` config to your `~/.claude/settings.json` (asks before overwriting existing config)
+- **SessionStart hook** syncs themes/layouts from the plugin to `~/.claude/oh-my-claude/` (auto-updates when plugin updates), sweeps stale state files, and (Windows) kills orphaned suspended `git.exe`/`jq.exe`/`curl.exe` left by cancelled renders in the background (`OMC_ORPHAN_SWEEP=0` disables)
+  - Known limitations: some git calls made by git's own submodule shell wrapper are not matched, and there is a tiny race between looking a process up and killing it.
+- **`/oh-my-status:setup`** adds the `statusLine` config to your `~/.claude/settings.json` (asks before overwriting existing config); it also asks where the account name should come from (`ACCOUNT_SOURCE`)
 - **Config file** (`~/.claude/oh-my-claude.conf`) stores your theme/layout choice and is preserved across updates
 
 ## File locations

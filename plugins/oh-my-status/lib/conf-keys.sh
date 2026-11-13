@@ -2,7 +2,7 @@
 # Conf-key diff helper for oh-my-claude setup.
 #
 # Sourced by setup.sh (and by tests). Sourcing is INERT — this file's top
-# level contains ONLY this function definition; no command runs until the
+# level contains ONLY function definitions; no command runs until a
 # function is called, so `. lib/conf-keys.sh` always returns 0 under `set -e`.
 #
 # omc_missing_conf_keys <template_path> <user_conf_path>
@@ -27,12 +27,19 @@ omc_missing_conf_keys() {
     # KEY is [A-Za-z0-9_]+ (above) → regex-literal-safe, no escaping needed.
     # The mandatory `[[:space:]]*=` right-anchors the key so WORKERS_MAX does
     # not match a line `WORKERS_MAXIMUM=...`.
-    if [ -r "$user_conf" ] && grep -Eq -- \
-      "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$user_conf"; then
+    if omc_conf_has_key "$user_conf" "$key"; then
       continue
     fi
     printf '%s\n' "$key"
   done <<EOF
 $keys
 EOF
+}
+
+# omc_conf_has_key <user_conf_path> <KEY>
+#   Exit 0 iff the conf has an uncommented assignment of KEY (optional
+#   `export ` prefix, optional whitespace around `=`). KEY must be
+#   [A-Za-z0-9_]+. Exit 1 when absent or the conf is unreadable.
+omc_conf_has_key() {
+  [ -r "$1" ] && grep -Eq -- "^[[:space:]]*(export[[:space:]]+)?${2}[[:space:]]*=" "$1"
 }

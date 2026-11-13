@@ -45,6 +45,8 @@ Steps:
       - If AskUserQuestion is not available, ask in plain chat text instead.
       - Only update if the user confirms.
 
+   Steps 3 and 4 below run in every case (2a, 2b and 2c), whatever the user answered in step 2.
+
 3. Conf-key backfill — bring an existing `~/.claude/oh-my-claude.conf` up
       to date with options added to the bundled template, without overwriting
       any existing value:
@@ -85,7 +87,43 @@ Steps:
         - If no: leave `~/.claude/oh-my-claude.conf` unchanged, tell the
             user nothing was modified, and continue.
 
-4. After updating (or skipping), tell the user:
+4. Account source — decide where the statusline gets the account name
+      (`ACCOUNT_SOURCE` in `~/.claude/oh-my-claude.conf`):
+
+      - If `~/.claude/oh-my-claude.conf` does not exist or is empty, first copy
+        the bundled template `oh-my-claude.conf` (plugin/repo root) to it, the
+        same rule as the SessionStart script. A conf holding only
+        `ACCOUNT_SOURCE` would otherwise never receive the template.
+      - If the conf has an uncommented `ACCOUNT_SOURCE` line (same presence
+        rule as step 3; `# ACCOUNT_SOURCE=...` does not count): do not change
+        it. Tell the user the current value and that they can edit
+        `ACCOUNT_SOURCE=auto|config` in that file.
+      - Otherwise ask "Where should the statusline get the account name?"
+        (AskUserQuestion when available, plain chat text otherwise) with these
+        two options, in this order:
+        1. "Use the account name from Claude's settings (Recommended)" →
+           `config`. Off: no token is read and nothing goes over the network.
+           The name comes from `~/.claude.json`, which another Claude client on
+           this machine (e.g. the desktop app logged into a different account)
+           can overwrite, so the statusline may name a different account than
+           the one this session uses and bills.
+        2. "Look up the account this session actually uses" → `auto`. On: when
+           the credentials file changes (login, account switch, token refresh)
+           the statusline reads the session's token and makes one background
+           HTTPS request to api.anthropic.com (the profile endpoint Claude Code
+           itself uses) to get the real account name. The result is cached, so
+           normal renders cost nothing extra. No effect where there is no
+           credentials file (macOS Keychain, API key).
+      - Append `ACCOUNT_SOURCE=<chosen>` to the END of the conf, also when the
+        choice is `config`, so the question is not repeated. Use the step 3
+        append rules: ensure the file ends with exactly one newline, then add
+        the header comment line `# --- added by /oh-my-status:setup (YYYY-MM-DD) ---`
+        followed by the `ACCOUNT_SOURCE=<chosen>` line. If step 3 already
+        appended a header in this same run, put the line under that header:
+        one header per run. Do not touch any other line.
+      - Confirm to the user what was written.
+
+5. After updating (or skipping), tell the user:
    - Restart Claude Code to see the statusline
    - `/oh-my-status:list-themes` to preview themes and layouts
    - `/oh-my-status:set-theme <theme> <layout>` to switch
