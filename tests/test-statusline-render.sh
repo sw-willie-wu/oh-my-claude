@@ -92,6 +92,7 @@ gi_mkrepo() {  # $1=dir $2=initial branch name
   mkdir -p "$1"
   ( cd "$1" && git init -q . && git config user.email t@t.t && git config user.name t \
       && echo a > f.txt && git add f.txt && git commit -qm i && git branch -m "$2" )
+  fs_tick   # a render right after must see the repo files as older than its cache stamp
 }
 walk_in() {  # $1=dir ; extra env via prefix ; prints FOUND|ROOT|DIR|COMMON
   ( cd "$1" && OMC_CONF=/dev/null bash -c '
@@ -376,7 +377,7 @@ inflight() {
       git_info() { n=$(( $(cat "$CNT") + 1 )); echo $n > "$CNT"; [ "$n" = 1 ] && git add g.txt; printf "stub\t1\t2\t3\t4\t5"; }
       cached_git_info' )
 }
-inflight >/dev/null; inflight >/dev/null
+inflight >/dev/null; fs_tick; inflight >/dev/null
 assert_eq "2" "$(cat "$ST/.gitcnt")" "render after an in-flight git add must miss"
 inflight >/dev/null
 assert_eq "2" "$(cat "$ST/.gitcnt")" "and the one after that hits again"

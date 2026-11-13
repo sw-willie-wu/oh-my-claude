@@ -29,6 +29,28 @@ REAL_JQ="$(command -v jq 2>/dev/null || true)"
 REAL_PATH="$PATH"
 BASH_BIN="$(command -v bash)"
 
+# fs_tick: return once the filesystem clock has moved past every file written so
+# far. File times come from a coarse clock on Linux (several ms per step), so two
+# files written back to back can carry the same mtime. The git-info cache and the
+# account profile cache only trust a stamp that is strictly newer than the files
+# they depend on, so an equal time reads as changed: safe, but a test that
+# expects a cache hit (or a cleanly ordered write) right after a file write must
+# let the clock advance first. Returns at once where times are fine-grained;
+# gives up with an error after about 3 s.
+fs_tick() {
+  local a b n=0
+  a=$(mktemp) || return 0
+  while b=$(mktemp) && ! [ "$b" -nt "$a" ]; do
+    rm -f "$b"
+    n=$((n + 1))
+    if [ "$n" -ge 300 ]; then
+      rm -f "$a"; echo "fs_tick: filesystem clock did not advance" >&2; TEST_FAILED=1; return 1
+    fi
+    sleep 0.01
+  done
+  rm -f "$a" "$b"
+}
+
 # count_spawns <outdir> <stdin-file> <script> [args...]
 # Runs `bash -x <script>` with PATH=<outdir>/shim only. Sets SPAWNS, SPAWN_FORKS,
 # SPAWN_EXECS, SPAWN_MISSING (count of un-shimmed externals). stdout → <outdir>/stdout.
