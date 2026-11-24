@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- oh-my-status: the "jq required" notice no longer tells every OS to run
+  `winget install jqlang.jq`. It now shows an install hint for the current
+  platform (winget on Windows shells, brew on macOS, the available package
+  manager on Linux, otherwise a download link) and states the jq 1.7+ floor,
+  since older jq (e.g. 1.6 from Ubuntu 22.04 apt) lacks `--raw-output0`.
+
 ## 2.2.0 (2026-11-13)
 
 ### Added

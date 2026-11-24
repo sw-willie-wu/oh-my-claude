@@ -326,6 +326,27 @@ parse_status_json() {
   fi
 }
 
+# Install hint for the jq-required notice, matched to the platform the
+# statusline runs on. $1 overrides $OSTYPE (tests). Builtins only (`command
+# -v` probes PATH, no fork); only reached on the failure path anyway. 1.7+ is
+# the floor because parse_status_json relies on --raw-output0 (Ubuntu 22.04's
+# apt jq is 1.6, so the Linux hint names the version too).
+_omc_jq_install_hint() {
+  case "${1:-${OSTYPE:-}}" in
+    msys*|cygwin*|mingw*|win*) printf 'winget install jqlang.jq' ;;
+    darwin*) printf 'brew install jq' ;;
+    *)
+      if command -v apt-get >/dev/null 2>&1; then printf 'sudo apt install jq'
+      elif command -v dnf >/dev/null 2>&1; then printf 'sudo dnf install jq'
+      elif command -v pacman >/dev/null 2>&1; then printf 'sudo pacman -S jq'
+      elif command -v zypper >/dev/null 2>&1; then printf 'sudo zypper install jq'
+      elif command -v apk >/dev/null 2>&1; then printf 'sudo apk add jq'
+      elif command -v brew >/dev/null 2>&1; then printf 'brew install jq'
+      else printf 'see https://jqlang.org/download'
+      fi ;;
+  esac
+}
+
 # Model context tag. Pure, builtin-only, `set -u` safe. The regex
 # check precedes any arithmetic so CTX_SIZE is never evaluated unchecked.
 apply_model_ctx_tag() {
@@ -502,7 +523,7 @@ parse_status_json
 # git or cache work happens on the failure path. Same effective outcome as
 # the old grep code (empty session → no useful statusline), but loud.
 if [ -z "$SESSION_ID" ]; then
-  printf 'oh-my-claude: jq required (winget install jqlang.jq)\n'
+  printf 'oh-my-claude: jq 1.7+ required (%s)\n' "$(_omc_jq_install_hint)"
   exit 0
 fi
 # Usage file for oh-my-knowledge auto-handoff (builtins only).
