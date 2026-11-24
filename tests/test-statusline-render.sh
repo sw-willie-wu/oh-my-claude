@@ -843,11 +843,52 @@ err=$(bash -c 'OMC_TEST_LIB_ONLY=1; source "'"$STATUSLINE"'"; set -u; unset CTX_
 assert_eq "" "$err" "no unbound variable error"
 end_test
 
+# --- _omc_jq_install_hint: per-platform install command ---
+# $1 = OSTYPE override; $2 = PATH to use (lets a stub dir decide which Linux
+# package manager is "installed"). Unset $2 keeps the ambient PATH.
+call_jq_hint() {
+  bash -c 'OMC_TEST_LIB_ONLY=1; source "$0"; [ -n "${2+x}" ] && PATH="$2"; _omc_jq_install_hint "$1"' \
+    "$STATUSLINE" "${1:-}" ${2+"$2"}
+}
+# Stub dir holding only the named executables.
+pm_stub() {
+  local d; d=$(mktemp -d); local n
+  for n in "$@"; do printf '#!/bin/sh\n' > "$d/$n"; chmod +x "$d/$n"; done
+  printf '%s' "$d"
+}
+
+start_test "jq install hint: Windows shells → winget"
+assert_eq 'winget install jqlang.jq' "$(call_jq_hint msys)" "msys"
+assert_eq 'winget install jqlang.jq' "$(call_jq_hint cygwin)" "cygwin"
+assert_eq 'winget install jqlang.jq' "$(call_jq_hint mingw64)" "mingw"
+end_test
+
+start_test "jq install hint: macOS → brew"
+assert_eq 'brew install jq' "$(call_jq_hint darwin23)" "darwin"
+end_test
+
+start_test "jq install hint: Linux picks the installed package manager"
+D=$(pm_stub apt-get); assert_eq 'sudo apt install jq' "$(call_jq_hint linux-gnu "$D")" "apt"; rm -rf "$D"
+D=$(pm_stub dnf); assert_eq 'sudo dnf install jq' "$(call_jq_hint linux-gnu "$D")" "dnf"; rm -rf "$D"
+D=$(pm_stub pacman); assert_eq 'sudo pacman -S jq' "$(call_jq_hint linux-gnu "$D")" "pacman"; rm -rf "$D"
+D=$(pm_stub zypper); assert_eq 'sudo zypper install jq' "$(call_jq_hint linux-gnu "$D")" "zypper"; rm -rf "$D"
+D=$(pm_stub apk); assert_eq 'sudo apk add jq' "$(call_jq_hint linux-musl "$D")" "apk"; rm -rf "$D"
+D=$(pm_stub brew); assert_eq 'brew install jq' "$(call_jq_hint linux-gnu "$D")" "linuxbrew"; rm -rf "$D"
+D=$(pm_stub apt-get dnf); assert_eq 'sudo apt install jq' "$(call_jq_hint linux-gnu "$D")" "apt wins over dnf"; rm -rf "$D"
+D=$(pm_stub); assert_eq 'see https://jqlang.org/download' "$(call_jq_hint linux-gnu "$D")" "no package manager"; rm -rf "$D"
+end_test
+
+start_test "jq install hint: never suggests winget on Linux"
+case "$(call_jq_hint linux-gnu)" in
+  *winget*) printf '    FAIL: Linux hint mentions winget\n' >&2; TEST_FAILED=1 ;;
+esac
+end_test
+
 # Gate-level: jq failure (malformed input) and empty session_id both collapse
 # to an empty SESSION_ID → the render gate emits a single notice + exit 0,
 # BEFORE any git or cache work. Old grep code instead renders normally.
 start_test "render gate: malformed input → jq-required notice, exit 0, no state write"
-NOTICE='oh-my-claude: jq required (winget install jqlang.jq)'
+NOTICE="oh-my-claude: jq 1.7+ required ($(call_jq_hint))"
 OUT=$(printf 'not valid json at all' | bash "$STATUSLINE" 2>/dev/null); RC=$?
 assert_eq "$NOTICE" "$OUT" "malformed JSON → exactly the jq-required notice"
 assert_eq "0" "$RC" "notice path exits 0"
@@ -856,7 +897,7 @@ assert_eq "0" "$RC" "notice path exits 0"
 end_test
 
 start_test "render gate: empty session_id → jq-required notice, exit 0"
-NOTICE='oh-my-claude: jq required (winget install jqlang.jq)'
+NOTICE="oh-my-claude: jq 1.7+ required ($(call_jq_hint))"
 OUT=$(echo '{"session_id":"","model":{"display_name":"X"},"workspace":{"current_dir":"/x"}}' | bash "$STATUSLINE" 2>/dev/null); RC=$?
 assert_eq "$NOTICE" "$OUT" "empty session_id → notice (no broken statusline)"
 assert_eq "0" "$RC" "empty-session notice path exits 0"
